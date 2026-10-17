@@ -1,0 +1,43 @@
+# Checks every push and pull request: formatting, lints, and the tests on MySQL 8.4
+# (the panel's only production database; SQLite still runs until `db_test!` can skip it).
+# `Cargo.lock` is committed: CI builds exactly the versions you tested.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval 2s --health-timeout 3s --health-retries 60
+        ports:
+          - 3306:3306
+    env:
+      RUSTCMS_TEST_MYSQL: mysql://root:root@127.0.0.1:3306/mysql
+      RUSTCMS_TEST_REQUIRE: mysql
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: "rustfmt, clippy" }
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked

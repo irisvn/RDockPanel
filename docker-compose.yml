@@ -1,0 +1,29 @@
+# MySQL 8.4 for development and tests, with the same server flags as production
+# (install/ creates the `rust-panel-mysql` swarm service with these flags).
+#   docker compose up -d
+#   App:   DATABASE_URL=mysql://panel:panel@127.0.0.1:3306/panel
+#   Tests: RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_REQUIRE=mysql
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: panel
+      MYSQL_USER: panel
+      MYSQL_PASSWORD: panel
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_bin
+      - --default-time-zone=+00:00
+    ports:
+      - "127.0.0.1:${PANEL_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+volumes:
+  mysql-data:

@@ -1,0 +1,7 @@
+# Admin panel prefix; the session cookie is scoped to it.
+admin_path = "/admin"
+# Origins allowed to change state in the admin panel. Empty: the origin of APP_URL.
+admin_origins = []
+session_lifetime_minutes = 120
+password_min_length = 8
+revoke_tokens_on_password_change = true

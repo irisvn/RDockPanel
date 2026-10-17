@@ -1,0 +1,28 @@
+[package]
+name = "rust-panel"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata.rustcms]
+version = "0.3.2"
+
+[dependencies]
+rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.3.2" }
+sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "with-chrono", "with-uuid", "with-rust_decimal", "with-json"] }
+sea-orm-migration = { version = "=2.0.4", default-features = false }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bollard = "0.21"
+sysinfo = "0.39"
+futures-util = "0.3"
+rustix = { version = "1", features = ["fs"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.3.2" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+[workspace]

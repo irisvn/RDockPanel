@@ -1,0 +1,8 @@
+# Vietnamese labels of this app's admin panel: "English source" = "translation".
+# A table per resource overrides a label for that resource only:
+#
+#   [posts]
+#   "Title" = "Tiêu đề bài viết"
+#
+# `rustcms lang:missing vi` lists the labels still missing. The panel's own
+# text, and the labels of the framework's resources, come with rustcms.

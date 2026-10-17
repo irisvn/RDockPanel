@@ -1,0 +1,5 @@
+# Maximum request body (bytes) and timeout (seconds).
+body_limit = 1048576
+timeout_secs = 30
+# Proxies allowed to set X-Forwarded-For, e.g. ["10.0.0.0/8"].
+trusted_proxies = []
