@@ -8,8 +8,9 @@ publish = false
 version = "0.3.2"
 
 [dependencies]
-# Core v0.4 work lives only in the local checkout (not pushed or tagged yet).
-rustcms = { path = "../RustCMS/crates/rustcms" }
+# Core v0.4 is only committed in the local checkout (not pushed or tagged
+# yet): pin a commit there, so work in progress in that checkout never leaks in.
+rustcms = { git = "file:///Users/ducdo/Documents/Dev/irisvn/RustCMS", rev = "c203186" }
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "with-chrono", "with-uuid", "with-rust_decimal", "with-json"] }
 sea-orm-migration = { version = "=2.0.4", default-features = false }
 anyhow = "1"
@@ -25,6 +26,6 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-rustcms-testing = { path = "../RustCMS/crates/rustcms-testing" }
+rustcms-testing = { git = "file:///Users/ducdo/Documents/Dev/irisvn/RustCMS", rev = "c203186" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 [workspace]

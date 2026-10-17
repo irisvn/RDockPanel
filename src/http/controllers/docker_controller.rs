@@ -226,6 +226,26 @@ pub async fn remove_image(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// One entry of the actions log (a pull's progress and outcome).
+/// A user reads their own actions; all of them need `system.manage` (they
+/// may concern the panel's own objects and carry Docker's raw errors).
+pub async fn action(
+    State(app): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    use sea_orm::EntityTrait;
+    let row = action::Entity::find_by_id(id)
+        .one(app.db())
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let own = row.user_id.is_some() && row.user_id == auth.principal().id.parse().ok();
+    if !own && scope(&auth) != Scope::System {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(json!({ "action": row })))
+}
+
 /// Stopped containers and dangling images, never the panel's own.
 pub async fn prune(
     State(app): State<AppState>,

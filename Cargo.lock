@@ -2901,6 +2901,7 @@ dependencies = [
 [[package]]
 name = "rustcms"
 version = "0.3.2"
+source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=c203186#c20318660dc4120ff388463e7b5d9d2c1ae07685"
 dependencies = [
  "async-trait",
  "axum",
@@ -2916,6 +2917,7 @@ dependencies = [
 [[package]]
 name = "rustcms-admin"
 version = "0.3.2"
+source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=c203186#c20318660dc4120ff388463e7b5d9d2c1ae07685"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -2946,6 +2948,7 @@ dependencies = [
 [[package]]
 name = "rustcms-auth"
 version = "0.3.2"
+source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=c203186#c20318660dc4120ff388463e7b5d9d2c1ae07685"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2973,6 +2976,7 @@ dependencies = [
 [[package]]
 name = "rustcms-core"
 version = "0.3.2"
+source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=c203186#c20318660dc4120ff388463e7b5d9d2c1ae07685"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2985,6 +2989,7 @@ dependencies = [
  "dotenvy",
  "figment",
  "form_urlencoded",
+ "futures-util",
  "hex",
  "hmac",
  "http-body-util",
@@ -3011,6 +3016,7 @@ dependencies = [
 [[package]]
 name = "rustcms-migration"
 version = "0.3.2"
+source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=c203186#c20318660dc4120ff388463e7b5d9d2c1ae07685"
 dependencies = [
  "sea-orm-migration",
 ]
@@ -3018,6 +3024,7 @@ dependencies = [
 [[package]]
 name = "rustcms-testing"
 version = "0.3.2"
+source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=c203186#c20318660dc4120ff388463e7b5d9d2c1ae07685"
 dependencies = [
  "async-trait",
  "axum",
@@ -3959,6 +3966,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",

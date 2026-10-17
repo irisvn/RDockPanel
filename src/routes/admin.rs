@@ -33,6 +33,7 @@ pub fn routes() -> AdminRoutes {
                 .post("/images/pull", manage(), docker::pull_image)
                 .delete("/images/{id}", manage(), docker::remove_image)
                 .post("/prune", manage(), docker::prune)
+                .get("/actions/{id}", view(), docker::action)
                 .get("/volumes", view(), docker::volumes)
                 .post("/volumes", manage(), docker::create_volume)
                 .delete("/volumes/{name}", manage(), docker::remove_volume)

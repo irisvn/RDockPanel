@@ -53,6 +53,10 @@ db_test!(
                 read("/docker/volumes"),
                 read("/docker/networks"),
                 read("/server/info"),
+                Case::new(Method::GET, "/docker/actions/1")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::NOT_FOUND),
                 read("/server/samples"),
                 write(Method::DELETE, "/docker/containers/web", StatusCode::OK),
                 write(
@@ -216,6 +220,22 @@ db_test!(
         pulled
             .assert_status(StatusCode::ACCEPTED)
             .assert_json("/action/status", json!("queued"));
+        // Its action: readable by who asked, not by another operator.
+        let id = &pulled.json()["action"]["id"];
+        let action_url = url(&format!(
+            "/actions/{}",
+            id.as_str().map_or_else(|| id.to_string(), str::to_owned)
+        ));
+        operator
+            .get(&action_url)
+            .await
+            .assert_status(StatusCode::OK);
+        let other = support::user_with(&app, "other", OPERATOR).await;
+        app.acting_as(&other)
+            .await
+            .get(&action_url)
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
         operator
             .post_json(&url("/images/pull"), &json!({"image": "bad image"}))
             .await
@@ -270,5 +290,48 @@ db_test!(
         assert_eq!(status(stale_queued.id).await, action::FAILED);
         assert_eq!(status(fresh.id).await, action::RUNNING);
         assert_eq!(status(done.id).await, action::OK);
+    }
+);
+
+db_test!(
+    pages_open_by_permission_and_tell_what_to_offer,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let app = support::app_with_docker(db, FakeDocker::with_app_and_panel()).await;
+        let viewer = support::user_with(&app, "viewer", VIEWER).await;
+        let operator = support::user_with(&app, "operator", OPERATOR).await;
+        let server_only = support::user_with(&app, "watcher", &["server.view"]).await;
+        let viewer = app.acting_as(&viewer).await;
+        let operator = app.acting_as(&operator).await;
+        let server_only = app.acting_as(&server_only).await;
+        let page = |slug: &str| format!("/admin/api/pages/{slug}");
+
+        for slug in ["server", "containers", "images", "volumes", "networks"] {
+            viewer.get(&page(slug)).await.assert_status(StatusCode::OK);
+        }
+        server_only
+            .get(&page("server"))
+            .await
+            .assert_status(StatusCode::OK);
+        server_only
+            .get(&page("containers"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+
+        let offered = |response: rustcms_testing::TestResponse| response.json().to_string();
+        let as_viewer = offered(viewer.get(&page("containers")).await);
+        assert!(
+            as_viewer.contains(r#""docker.manage":false"#),
+            "{as_viewer}"
+        );
+        let as_operator = offered(operator.get(&page("containers")).await);
+        assert!(
+            as_operator.contains(r#""docker.manage":true"#),
+            "{as_operator}"
+        );
+        assert!(
+            as_operator.contains(r#""system.manage":false"#),
+            "{as_operator}"
+        );
     }
 );
