@@ -9,7 +9,7 @@ docker compose up -d     # MySQL 8.4 on 127.0.0.1:3306 (PANEL_MYSQL_PORT to chan
 rustcms migrate          # create tables (DATABASE_URL in .env)
 rustcms db:seed          # run src/database/seeders (DatabaseSeeder)
 rustcms serve            # http://localhost:8000/health, the admin panel at /admin
-RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_REQUIRE=mysql cargo test
+RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_BACKENDS=mysql cargo test   # PANEL_TEST_DOCKER=1 also runs against the real Docker engine
 ```
 
 ## Where things live

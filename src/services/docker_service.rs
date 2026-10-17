@@ -25,7 +25,17 @@ pub use self::bollard::BollardDocker;
 pub const SYSTEM_LABEL: &str = "rust-panel.system";
 
 /// Env names containing one of these have their value replaced in `inspect`.
-const SECRET_MARKERS: [&str; 5] = ["PASSWORD", "SECRET", "TOKEN", "KEY", "CREDENTIAL"];
+const SECRET_MARKERS: [&str; 9] = [
+    "PASSWORD",
+    "PASSWD",
+    "PASS",
+    "PWD",
+    "SECRET",
+    "TOKEN",
+    "KEY",
+    "CREDENTIAL",
+    "AUTH",
+];
 const REDACTED: &str = "******";
 
 #[derive(Debug, thiserror::Error)]
@@ -87,6 +97,8 @@ pub struct ContainerItem {
     pub id: String,
     pub name: String,
     pub image: String,
+    /// The image's id (`sha256:…`), whatever tag `image` shows.
+    pub image_id: String,
     /// `running`, `exited`, `paused`, …
     pub state: String,
     /// Human status (`Up 3 hours`).
@@ -245,10 +257,9 @@ impl Docker {
         Ok(visible(self.0.containers().await?, scope, |c| &c.labels))
     }
 
-    /// The inspect document with secret-looking env values replaced.
+    /// The inspect document with secrets in env values replaced.
     pub async fn inspect_container(&self, id: &str, scope: Scope) -> DockerResult<Value> {
-        let mut doc = self.0.inspect_container(id).await?;
-        guard(&labels_of(&doc), scope)?;
+        let (_, mut doc) = self.resolve_container(id, scope).await?;
         redact_env(&mut doc);
         Ok(doc)
     }
@@ -259,13 +270,13 @@ impl Docker {
         action: ContainerAction,
         scope: Scope,
     ) -> DockerResult<()> {
-        self.guard_container(id, scope).await?;
-        self.0.container_action(id, action).await
+        let (id, _) = self.resolve_container(id, scope).await?;
+        self.0.container_action(&id, action).await
     }
 
     pub async fn remove_container(&self, id: &str, force: bool, scope: Scope) -> DockerResult<()> {
-        self.guard_container(id, scope).await?;
-        self.0.remove_container(id, force).await
+        let (id, _) = self.resolve_container(id, scope).await?;
+        self.0.remove_container(&id, force).await
     }
 
     pub async fn logs(
@@ -274,8 +285,8 @@ impl Docker {
         query: LogQuery,
         scope: Scope,
     ) -> DockerResult<BoxStream<'static, DockerResult<LogLine>>> {
-        self.guard_container(id, scope).await?;
-        Ok(self.0.logs(id, query))
+        let (id, _) = self.resolve_container(id, scope).await?;
+        Ok(self.0.logs(&id, query))
     }
 
     pub async fn stats(
@@ -283,8 +294,8 @@ impl Docker {
         id: &str,
         scope: Scope,
     ) -> DockerResult<BoxStream<'static, DockerResult<ContainerStats>>> {
-        self.guard_container(id, scope).await?;
-        Ok(self.0.stats(id))
+        let (id, _) = self.resolve_container(id, scope).await?;
+        Ok(self.0.stats(&id))
     }
 
     pub async fn images(&self) -> DockerResult<Vec<ImageItem>> {
@@ -295,14 +306,46 @@ impl Docker {
         self.0.pull_image(image)
     }
 
-    /// Images carry no system label; an image a system container runs is
-    /// protected by Docker itself (in use) unless `force`, which only the
-    /// system scope may use.
-    pub async fn remove_image(&self, id: &str, force: bool, scope: Scope) -> DockerResult<()> {
-        if force && scope != Scope::System {
-            return Err(DockerError::Protected);
+    /// Removes the image `reference` (its id, or one of its tags exactly as
+    /// listed). Images carry no label: one a panel container runs is the
+    /// panel's, and `force` needs the system scope too.
+    pub async fn remove_image(
+        &self,
+        reference: &str,
+        force: bool,
+        scope: Scope,
+    ) -> DockerResult<()> {
+        let image = self
+            .0
+            .images()
+            .await?
+            .into_iter()
+            .find(|i| {
+                i.id == reference
+                    || short_id(&i.id) == reference
+                    || i.tags.iter().any(|t| t == reference)
+            })
+            .ok_or(DockerError::NotFound)?;
+        if scope == Scope::User {
+            if force {
+                return Err(DockerError::Protected);
+            }
+            let containers = self.0.containers().await?;
+            if containers
+                .iter()
+                .any(|c| is_system(&c.labels) && c.image_id == image.id)
+            {
+                return Err(DockerError::Protected);
+            }
         }
-        self.0.remove_image(id, force).await
+        // Docker's own string for it: never the caller's, which could carry
+        // path segments into the Engine API URL.
+        let target = if image.id == reference {
+            image.id.clone()
+        } else {
+            reference_from(&image, reference)
+        };
+        self.0.remove_image(&target, force).await
     }
 
     pub async fn prune(&self) -> DockerResult<PruneReport> {
@@ -313,11 +356,18 @@ impl Docker {
         Ok(visible(self.0.volumes().await?, scope, |v| &v.labels))
     }
 
+    /// Creates `name`; an existing volume is a conflict (Docker would hand it
+    /// back, panel's own included).
     pub async fn create_volume(&self, name: &str) -> DockerResult<VolumeItem> {
+        checked_name(name)?;
+        if self.0.volumes().await?.iter().any(|v| v.name == name) {
+            return Err(DockerError::Conflict(format!("volume {name} exists")));
+        }
         self.0.create_volume(name).await
     }
 
     pub async fn remove_volume(&self, name: &str, scope: Scope) -> DockerResult<()> {
+        checked_name(name)?;
         let volume = self
             .0
             .volumes()
@@ -326,7 +376,7 @@ impl Docker {
             .find(|v| v.name == name)
             .ok_or(DockerError::NotFound)?;
         guard(&volume.labels, scope)?;
-        self.0.remove_volume(name).await
+        self.0.remove_volume(&volume.name).await
     }
 
     pub async fn networks(&self, scope: Scope) -> DockerResult<Vec<NetworkItem>> {
@@ -334,28 +384,74 @@ impl Docker {
     }
 
     pub async fn create_network(&self, name: &str, driver: &str) -> DockerResult<NetworkItem> {
+        checked_name(name)?;
+        if self.0.networks().await?.iter().any(|n| n.name == name) {
+            return Err(DockerError::Conflict(format!("network {name} exists")));
+        }
         self.0.create_network(name, driver).await
     }
 
+    /// `id` is a network's full id, else its name (Docker's order); the one
+    /// found is checked and removed by its id.
     pub async fn remove_network(&self, id: &str, scope: Scope) -> DockerResult<()> {
-        let network = self
-            .0
-            .networks()
-            .await?
-            .into_iter()
-            .find(|n| n.id == id || n.name == id)
+        checked_name(id)?;
+        let networks = self.0.networks().await?;
+        let network = networks
+            .iter()
+            .find(|n| n.id == id)
+            .or_else(|| networks.iter().find(|n| n.name == id))
             .ok_or(DockerError::NotFound)?;
         guard(&network.labels, scope)?;
-        self.0.remove_network(id).await
+        self.0.remove_network(&network.id).await
     }
 
-    async fn guard_container(&self, id: &str, scope: Scope) -> DockerResult<()> {
-        if scope == Scope::System {
-            return Ok(());
-        }
+    /// The container `id` names (id, short id or name), checked against
+    /// `scope`: its full id, which every later call uses so a rename can't
+    /// swap the target, and its inspect document.
+    async fn resolve_container(&self, id: &str, scope: Scope) -> DockerResult<(String, Value)> {
+        checked_name(id)?;
         let doc = self.0.inspect_container(id).await?;
-        guard(&labels_of(&doc), scope)
+        guard(&labels_of(&doc), scope)?;
+        let full_id = doc
+            .get("Id")
+            .and_then(Value::as_str)
+            .ok_or(DockerError::NotFound)?
+            .to_owned();
+        checked_name(&full_id)?;
+        Ok((full_id, doc))
     }
+}
+
+/// Container, volume and network identifiers as Docker allows them; anything
+/// else (`/`, `..`, `%`) never reaches an Engine API URL.
+fn checked_name(name: &str) -> DockerResult<()> {
+    let mut chars = name.chars();
+    let valid = name.len() <= 255
+        && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    if valid {
+        Ok(())
+    } else {
+        Err(DockerError::NotFound)
+    }
+}
+
+/// `sha256:abcdef…` → `abcdef…` (the id Docker also accepts).
+fn short_id(id: &str) -> &str {
+    id.strip_prefix("sha256:").unwrap_or(id)
+}
+
+/// The listed string `reference` matched on `image`.
+fn reference_from(image: &ImageItem, reference: &str) -> String {
+    if short_id(&image.id) == reference {
+        return image.id.clone();
+    }
+    image
+        .tags
+        .iter()
+        .find(|t| *t == reference)
+        .cloned()
+        .unwrap_or_else(|| image.id.clone())
 }
 
 /// The engine when no client could be built.
@@ -461,21 +557,40 @@ fn labels_of(doc: &Value) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-/// Replaces the value of every `Config.Env` entry whose name looks secret.
+/// Replaces secrets in `Config.Env`: the whole value when the name looks
+/// secret, else the password of a URL's userinfo
+/// (`DATABASE_URL=mysql://user:******@host/db`).
 fn redact_env(doc: &mut Value) {
     let Some(Value::Array(env)) = doc.pointer_mut("/Config/Env") else {
         return;
     };
     for entry in env {
         let Some(text) = entry.as_str() else { continue };
-        let Some((name, _)) = text.split_once('=') else {
+        let Some((name, value)) = text.split_once('=') else {
             continue;
         };
         let upper = name.to_ascii_uppercase();
-        if SECRET_MARKERS.iter().any(|marker| upper.contains(marker)) {
-            *entry = Value::String(format!("{name}={REDACTED}"));
+        let redacted = if SECRET_MARKERS.iter().any(|marker| upper.contains(marker)) {
+            Some(REDACTED.to_owned())
+        } else {
+            redact_userinfo(value)
+        };
+        if let Some(value) = redacted {
+            *entry = Value::String(format!("{name}={value}"));
         }
     }
+}
+
+/// `scheme://user:pass@rest` → `scheme://user:******@rest`; `None` when the
+/// value carries no password.
+fn redact_userinfo(value: &str) -> Option<String> {
+    let (scheme, rest) = value.split_once("://")?;
+    let (userinfo, host) = rest.split_once('@')?;
+    if userinfo.contains('/') {
+        return None;
+    }
+    let user = userinfo.split_once(':').map_or(userinfo, |(user, _)| user);
+    Some(format!("{scheme}://{user}:{REDACTED}@{host}"))
 }
 
 #[cfg(test)]
@@ -486,7 +601,11 @@ mod tests {
 
     #[test]
     fn redacts_secret_looking_env() {
-        let mut doc = json!({"Config": {"Env": ["PATH=/bin", "DB_PASSWORD=hunter2", "api_key=x", "NOEQUALS"]}});
+        let mut doc = json!({"Config": {"Env": [
+            "PATH=/bin", "DB_PASSWORD=hunter2", "api_key=x", "NOEQUALS",
+            "DATABASE_URL=mysql://panel:hunter2@db:3306/panel", "REDIS_URL=redis://:pw@cache",
+            "HOME_URL=https://x.io/a@b"
+        ]}});
         redact_env(&mut doc);
         assert_eq!(
             doc["Config"]["Env"],
@@ -494,9 +613,22 @@ mod tests {
                 "PATH=/bin",
                 "DB_PASSWORD=******",
                 "api_key=******",
-                "NOEQUALS"
+                "NOEQUALS",
+                "DATABASE_URL=mysql://panel:******@db:3306/panel",
+                "REDIS_URL=redis://:******@cache",
+                "HOME_URL=https://x.io/a@b"
             ])
         );
+    }
+
+    #[test]
+    fn only_docker_identifiers_pass() {
+        for ok in ["web", "a1b2c3", "my_app.v2-1"] {
+            assert!(checked_name(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "../containers/panel", "a/b", ".hidden", "a%2Fb", "a b"] {
+            assert!(checked_name(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

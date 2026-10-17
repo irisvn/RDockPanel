@@ -68,6 +68,7 @@ fn container_item(c: ContainerSummary) -> ContainerItem {
         id: c.id.unwrap_or_default(),
         name: name.trim_start_matches('/').to_owned(),
         image: c.image.unwrap_or_default(),
+        image_id: c.image_id.unwrap_or_default(),
         state: c.state.map(|s| s.to_string()).unwrap_or_default(),
         status: c.status.unwrap_or_default(),
         created: c.created.unwrap_or_default(),

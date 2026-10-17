@@ -15,7 +15,18 @@ impl ServiceProvider for AppServiceProvider {
         // `rustcms db:seed` runs this one (it calls the others).
         app.seeder(crate::database::seeders::DatabaseSeeder);
         // rustcms:seeders
+        app.job::<crate::jobs::pull_image::PullImage>();
         // rustcms:jobs
         // rustcms:commands
+    }
+
+    async fn boot(&self, state: &AppState) -> anyhow::Result<()> {
+        // Before migrations ran (a fresh install's `migrate`) there is no table yet.
+        match crate::services::action_service::reap_stale(state.db()).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "marked abandoned actions failed"),
+            Err(err) => tracing::debug!(%err, "abandoned actions not checked"),
+        }
+        Ok(())
     }
 }

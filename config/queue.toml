@@ -1,0 +1,3 @@
+# Workers take jobs from these queues (the default is only "default"):
+# "docker" pulls images, "deploy" deploys services (Phase 2).
+queues = ["default", "docker", "deploy"]

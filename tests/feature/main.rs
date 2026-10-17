@@ -5,5 +5,6 @@
 mod support;
 
 mod docker;
+mod docker_routes;
 mod health;
 // rustcms:tests

@@ -758,8 +758,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -2855,6 +2857,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bollard",
+ "chrono",
  "futures-util",
  "rustcms",
  "rustcms-testing",
@@ -2898,7 +2901,6 @@ dependencies = [
 [[package]]
 name = "rustcms"
 version = "0.3.2"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.3.2#27f2607252461ea94d0b490ff441b00b6b1258cb"
 dependencies = [
  "async-trait",
  "axum",
@@ -2914,7 +2916,6 @@ dependencies = [
 [[package]]
 name = "rustcms-admin"
 version = "0.3.2"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.3.2#27f2607252461ea94d0b490ff441b00b6b1258cb"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -2945,7 +2946,6 @@ dependencies = [
 [[package]]
 name = "rustcms-auth"
 version = "0.3.2"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.3.2#27f2607252461ea94d0b490ff441b00b6b1258cb"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2973,7 +2973,6 @@ dependencies = [
 [[package]]
 name = "rustcms-core"
 version = "0.3.2"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.3.2#27f2607252461ea94d0b490ff441b00b6b1258cb"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3012,7 +3011,6 @@ dependencies = [
 [[package]]
 name = "rustcms-migration"
 version = "0.3.2"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.3.2#27f2607252461ea94d0b490ff441b00b6b1258cb"
 dependencies = [
  "sea-orm-migration",
 ]
@@ -3020,7 +3018,6 @@ dependencies = [
 [[package]]
 name = "rustcms-testing"
 version = "0.3.2"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.3.2#27f2607252461ea94d0b490ff441b00b6b1258cb"
 dependencies = [
  "async-trait",
  "axum",

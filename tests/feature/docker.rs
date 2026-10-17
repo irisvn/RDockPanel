@@ -107,7 +107,11 @@ async fn system_objects_cannot_be_touched_by_users() {
     docker.remove_volume("web-data", Scope::User).await.unwrap();
     assert_eq!(
         fake.calls(),
-        ["restart web", "restart panel", "remove-volume web-data"]
+        [
+            "restart id-web",
+            "restart id-panel",
+            "remove-volume web-data"
+        ]
     );
 }
 
@@ -137,6 +141,100 @@ async fn prune_skips_system_objects_and_inspect_hides_secrets() {
         doc["Config"]["Env"],
         serde_json::json!(["PATH=/bin", "DB_PASSWORD=******"])
     );
+}
+
+#[tokio::test]
+async fn identifiers_never_carry_paths_into_docker() {
+    let (docker, fake) = docker();
+    let not_found = |r: Result<(), DockerError>| matches!(r, Err(DockerError::NotFound));
+    assert!(not_found(
+        docker
+            .remove_image("../containers/panel", false, Scope::User)
+            .await
+    ));
+    assert!(not_found(
+        docker
+            .container_action("../containers/panel", ContainerAction::Stop, Scope::User)
+            .await
+    ));
+    assert!(not_found(
+        docker
+            .remove_volume("../volumes/panel-data", Scope::User)
+            .await
+    ));
+    assert!(not_found(docker.remove_network("a/b", Scope::User).await));
+    assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+}
+
+#[tokio::test]
+async fn mutations_use_the_checked_objects_id() {
+    let (docker, fake) = docker();
+    docker
+        .container_action("web", ContainerAction::Restart, Scope::User)
+        .await
+        .unwrap();
+    // A user network named like the panel network's id: Docker resolves the id first, so do we.
+    fake.networks
+        .lock()
+        .unwrap()
+        .push(rust_panel::services::docker_service::NetworkItem {
+            id: "netid-decoy".to_owned(),
+            name: "netid-panel".to_owned(),
+            driver: "bridge".to_owned(),
+            scope: "local".to_owned(),
+            labels: Default::default(),
+        });
+    assert!(matches!(
+        docker.remove_network("netid-panel", Scope::User).await,
+        Err(DockerError::Protected)
+    ));
+    docker.remove_network("web-net", Scope::User).await.unwrap();
+    assert_eq!(fake.calls(), ["restart id-web", "remove-network netid-web"]);
+}
+
+#[tokio::test]
+async fn images_of_the_panel_are_protected() {
+    let (docker, fake) = docker();
+    for reference in ["panel:old", "panel:latest", "sha256:img-panel", "img-panel"] {
+        let refused = docker.remove_image(reference, false, Scope::User).await;
+        assert!(
+            matches!(refused, Err(DockerError::Protected)),
+            "{reference}"
+        );
+    }
+    assert!(matches!(
+        docker.remove_image("web:latest", true, Scope::User).await,
+        Err(DockerError::Protected)
+    ));
+    docker
+        .remove_image("web:latest", false, Scope::User)
+        .await
+        .unwrap();
+    docker
+        .remove_image("panel:old", false, Scope::System)
+        .await
+        .unwrap();
+    assert!(matches!(
+        docker.remove_image("nope:1", false, Scope::User).await,
+        Err(DockerError::NotFound)
+    ));
+    assert_eq!(
+        fake.calls(),
+        [
+            "remove-image web:latest force=false",
+            "remove-image panel:old force=false"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn existing_volumes_are_not_handed_back() {
+    let (docker, _) = docker();
+    assert!(matches!(
+        docker.create_volume("panel-data").await,
+        Err(DockerError::Conflict(_))
+    ));
+    assert_eq!(docker.create_volume("fresh").await.unwrap().name, "fresh");
 }
 
 /// Runs a throwaway alpine container: logs, stats, actions, removal.

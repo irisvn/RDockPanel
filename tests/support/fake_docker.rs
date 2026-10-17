@@ -19,6 +19,7 @@ pub struct FakeDocker {
     pub containers: Arc<Mutex<Vec<ContainerItem>>>,
     pub volumes: Arc<Mutex<Vec<VolumeItem>>>,
     pub networks: Arc<Mutex<Vec<NetworkItem>>>,
+    pub images: Arc<Mutex<Vec<ImageItem>>>,
     /// `"restart web"`, `"remove web"`, `"prune rust-panel.system"`, …
     pub calls: Arc<Mutex<Vec<String>>>,
 }
@@ -33,19 +34,34 @@ pub fn labels(system: bool) -> HashMap<String, String> {
 
 impl FakeDocker {
     /// `web` (an app) and `panel` (the panel itself, system-labelled), each
-    /// with a volume and a network of the same kind.
+    /// with an image, a volume and a network of the same kind. Ids differ
+    /// from names as on a real engine: container `id-web`, image
+    /// `sha256:img-web` (tags `web:latest`; the panel's also `panel:old`).
     pub fn with_app_and_panel() -> Self {
         let fake = Self::default();
         for (name, system) in [("web", false), ("panel", true)] {
             fake.containers.lock().unwrap().push(ContainerItem {
-                id: name.to_owned(),
+                id: format!("id-{name}"),
                 name: name.to_owned(),
                 image: format!("{name}:latest"),
+                image_id: format!("sha256:img-{name}"),
                 state: "running".to_owned(),
                 status: "Up".to_owned(),
                 created: 0,
                 ports: vec![],
                 labels: labels(system),
+            });
+            let mut tags = vec![format!("{name}:latest")];
+            if system {
+                tags.push(format!("{name}:old"));
+            }
+            fake.images.lock().unwrap().push(ImageItem {
+                id: format!("sha256:img-{name}"),
+                tags,
+                size: 1,
+                created: 0,
+                containers: 1,
+                labels: HashMap::new(),
             });
             fake.volumes.lock().unwrap().push(VolumeItem {
                 name: format!("{name}-data"),
@@ -54,7 +70,7 @@ impl FakeDocker {
                 labels: labels(system),
             });
             fake.networks.lock().unwrap().push(NetworkItem {
-                id: format!("{name}-net"),
+                id: format!("netid-{name}"),
                 name: format!("{name}-net"),
                 driver: "overlay".to_owned(),
                 scope: "swarm".to_owned(),
@@ -72,7 +88,18 @@ impl FakeDocker {
         self.calls.lock().unwrap().push(call);
     }
 
+    /// By id or name, as Docker resolves them.
     fn container(&self, id: &str) -> DockerResult<ContainerItem> {
+        let containers = self.containers.lock().unwrap();
+        containers
+            .iter()
+            .find(|c| c.id == id || c.name == id)
+            .cloned()
+            .ok_or(DockerError::NotFound)
+    }
+
+    /// Only full ids reach mutations: the panel resolves names first.
+    fn by_id(&self, id: &str) -> DockerResult<ContainerItem> {
         self.containers
             .lock()
             .unwrap()
@@ -110,7 +137,7 @@ impl DockerApi for FakeDocker {
         )
     }
     async fn container_action(&self, id: &str, action: ContainerAction) -> DockerResult<()> {
-        self.container(id)?;
+        self.by_id(id)?;
         self.record(format!(
             "{} {id}",
             serde_json::to_value(action).unwrap().as_str().unwrap()
@@ -118,7 +145,7 @@ impl DockerApi for FakeDocker {
         Ok(())
     }
     async fn remove_container(&self, id: &str, _force: bool) -> DockerResult<()> {
-        self.container(id)?;
+        self.by_id(id)?;
         self.record(format!("remove {id}"));
         Ok(())
     }
@@ -143,7 +170,7 @@ impl DockerApi for FakeDocker {
         .boxed()
     }
     async fn images(&self) -> DockerResult<Vec<ImageItem>> {
-        Ok(vec![])
+        Ok(self.images.lock().unwrap().clone())
     }
     fn pull_image(&self, image: &str) -> BoxStream<'static, DockerResult<String>> {
         stream::iter([Ok(format!("Pulling {image}")), Ok("Done".to_owned())]).boxed()

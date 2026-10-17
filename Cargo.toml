@@ -8,7 +8,8 @@ publish = false
 version = "0.3.2"
 
 [dependencies]
-rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.3.2" }
+# Core v0.4 work lives only in the local checkout (not pushed or tagged yet).
+rustcms = { path = "../RustCMS/crates/rustcms" }
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "with-chrono", "with-uuid", "with-rust_decimal", "with-json"] }
 sea-orm-migration = { version = "=2.0.4", default-features = false }
 anyhow = "1"
@@ -21,8 +22,9 @@ rustix = { version = "1", features = ["fs"] }
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 thiserror = "2"
 tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.3.2" }
+rustcms-testing = { path = "../RustCMS/crates/rustcms-testing" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 [workspace]
