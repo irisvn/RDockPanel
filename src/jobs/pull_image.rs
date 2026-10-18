@@ -40,10 +40,13 @@ impl Job for PullImage {
             return Ok(());
         };
         let mut log = String::new();
+        let mut row = row;
         // Whatever happens, the row ends (a crash or timeout is caught by
         // `action_service::reap_stale`).
         let error = match ctx.state.service::<Docker>() {
-            Some(docker) => pull(&docker, &self.image, &mut log).await.err(),
+            Some(docker) => pull(db, &docker, &self.image, &mut log, &mut row)
+                .await
+                .err(),
             None => Some("Docker is not bound".to_owned()),
         };
         action_service::finish(db, row, error, Some(&log)).await?;
@@ -51,11 +54,28 @@ impl Job for PullImage {
     }
 }
 
+/// How often the progress so far is saved on the row (the page polls it).
+const PROGRESS_EVERY: Duration = Duration::from_secs(1);
+
 /// Pulls `image`, keeping the tail of Docker's progress in `log` (never more
-/// than twice what the row keeps).
-async fn pull(docker: &Docker, image: &str, log: &mut String) -> Result<(), String> {
+/// than twice what the row keeps) and saving it on `row` as it goes.
+async fn pull(
+    db: &sea_orm::DatabaseConnection,
+    docker: &Docker,
+    image: &str,
+    log: &mut String,
+    row: &mut action::Model,
+) -> Result<(), String> {
     let mut progress = docker.pull_image(image);
+    let mut saved = std::time::Instant::now();
     while let Some(line) = progress.next().await {
+        if saved.elapsed() >= PROGRESS_EVERY {
+            saved = std::time::Instant::now();
+            // Only shown progress: a failed save never stops the pull.
+            if let Ok(updated) = action_service::note(db, row.clone(), log).await {
+                *row = updated;
+            }
+        }
         let line = line.map_err(|err| err.to_string())?;
         log.push_str(action::tail(&line));
         log.push('\n');
