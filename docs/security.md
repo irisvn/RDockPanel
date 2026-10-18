@@ -31,8 +31,9 @@ who can replace a directory there with a symlink could point a later start elsew
 
 - Deploying needs `services.deploy`, destroying `services.destroy`; a deployment's log, error and
   image need `deployments.view` (also on the service page).
-- The configuration snapshot kept with each deployment has no secret values (environment variables
-  and registry credentials will be encrypted columns, RustCMS W8).
+- The configuration snapshot kept with each deployment holds no environment variables or registry
+  credentials (they will be encrypted columns, RustCMS W8). A secret written into a service's
+  command or health check is stored as typed: don't put secrets there.
 - Services run on their project's own overlay network: a project cannot call another project's
   services directly, nor the panel's MySQL. What a service makes public (a domain, a published
   port) stays reachable by anyone, other projects included. Traefik joins every project's network to
@@ -65,8 +66,8 @@ untouched, so injected HTML still cannot add styles. The policy itself is unchan
 
 ## Live data limits
 
-Log lines are cut to 16 KiB, a log request stops reading after about 2 MiB of text, live log events
-are paced (about 2 MB/s). The framework queues at most 1 MiB (64 events) per stream and closes one
+Log lines are cut to 16 KiB. A log request (the last lines) stops reading after about 2 MiB of text;
+following logs live has no total limit, but its events are paced (about 2 MB/s). The framework queues at most 1 MiB (64 events) per stream and closes one
 whose browser falls behind (`lagging`); a socket send that takes over 10 s ends it. It also limits
 streams and sockets per user and per instance.
 

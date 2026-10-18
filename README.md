@@ -26,8 +26,9 @@ feature is free: no project limits, no paid tiers.
 - **Volumes and networks**: create and remove (bridge or overlay).
 - **Safety**: the panel's own containers, volumes and networks (labelled `rdockpanel.system=true`) are
   hidden and untouchable without the `system.manage` permission; prune skips them.
-- **Accountability**: every change to Docker is recorded in an actions log and the audit log, with
-  who did it.
+- **Accountability**: every Docker management operation (containers, images, volumes, networks,
+  terminals) is recorded in an actions log and the audit log, with who did it; deployments keep their
+  own history (who asked, when, the log).
 - **Users and roles**: fine-grained permissions (`docker.view`, `docker.manage`, `docker.logs`,
   `docker.exec`, `server.view`, `system.manage`, plus one set per resource such as `services.deploy`),
   built on RustCMS's roles.
@@ -38,12 +39,12 @@ feature is free: no project limits, no paid tiers.
   memory limits, a health check, named volumes, published ports and a command. Each project has its
   own network: a project's services cannot call another project's services directly (what is public,
   through a domain or a published port, stays public).
-- **Deployments**: Deploy, Start, Stop, Restart, Destroy and Rollback from the service page, one at a
-  time per service, with a live log. Images are pinned to their digest. Updates are rolling
+- **Deployments**: Deploy, Start, Stop, Restart and Destroy from the service page, one at a time per
+  service, with a live log; Rollback from an earlier deployment ("Roll back to this"). Images are
+  pinned to their registry digest (a local-only image to its id, with a warning). Updates are rolling
   (start-first when zero downtime is on, the service has a health check and publishes no host-mode
-  port; stop-first otherwise) and Swarm rolls back a failed one. Every
-  deployment keeps its configuration, for history and rollback, and the page shows changes not
-  deployed yet.
+  port; stop-first otherwise) and Swarm rolls back a failed one. Every deployment keeps its
+  configuration, for history and rollback, and the page shows changes not deployed yet.
 - **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
   redirects its HTTP to HTTPS.
 

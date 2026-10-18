@@ -32,7 +32,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **An toàn:**
   - container, volume, network của chính panel (label `rdockpanel.system=true`) bị ẩn và không thao tác được nếu không có quyền `system.manage`;
   - lệnh dọn dẹp luôn bỏ qua chúng.
-- **Truy vết:** mọi thay đổi lên Docker được ghi vào nhật ký thao tác (Actions) và audit log, kèm người thực hiện.
+- **Truy vết:** mọi thao tác quản lý Docker (container, image, volume, network, terminal) được ghi vào nhật ký thao tác (Actions) và audit log, kèm người thực hiện; các lần deploy có lịch sử riêng (ai bấm, lúc nào, log).
 - **Người dùng và vai trò:** phân quyền chi tiết (`docker.view`, `docker.manage`, `docker.logs`, `docker.exec`, `server.view`, `system.manage`, và mỗi resource một bộ quyền như `services.deploy`), dựa trên hệ thống role của RustCMS.
 
 **Đã có (Phase 2, chạy từ mã nguồn)**
@@ -42,8 +42,9 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
   - có replicas, giới hạn CPU và RAM, healthcheck, volume, port và command;
   - mỗi project có network riêng: service của project này không gọi thẳng được service của project khác (những gì đã public qua domain hoặc port thì vẫn public).
 - **Deploy:**
-  - Deploy, Start, Stop, Restart, Destroy và Rollback ngay trên trang service, có log trực tiếp; mỗi service chỉ chạy một lần deploy tại một thời điểm;
-  - image được ghim theo digest;
+  - Deploy, Start, Stop, Restart và Destroy ngay trên trang service, có log trực tiếp; mỗi service chỉ chạy một lần deploy tại một thời điểm;
+  - Rollback từ một lần deploy trước ("Roll back to this" trong danh sách Deployments);
+  - image được ghim theo digest của registry (image chỉ có trên máy thì ghim theo id, kèm cảnh báo);
   - rolling update: task mới chạy trước khi bật zero downtime, có healthcheck và không publish port kiểu host (nếu không thì task cũ dừng trước); Swarm tự rollback khi update lỗi;
   - mỗi lần deploy lưu lại cấu hình để xem lịch sử và rollback;
   - trang service báo khi có thay đổi chưa deploy.

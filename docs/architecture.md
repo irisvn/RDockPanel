@@ -32,7 +32,7 @@ tests/              feature tests (MySQL), a FakeDocker, real-engine tests behin
 | `Docker` (`docker_service.rs`) | Wraps the Docker Engine API (`DockerApi`: Bollard in production, `FakeDocker` in tests). Applies the panel's rules: hides and protects objects labelled `rdockpanel.system=true` unless the caller has `system.manage`, resolves every name to Docker's full id before acting (no path segments reach the Engine API), redacts secrets in `inspect`, ends terminal shells. |
 | `SystemStats` (`system_stats_service.rs`) | Samples the host every 2 s and keeps 150 samples (5 min) in memory. Reads sysinfo, or the host's `/proc` mounted at `HOST_PROC` when the panel runs in a container. Nothing is stored in the database. |
 | `Live` (`live_service.rs`) | Shared producers for live data through the framework's hub: one Docker stats stream per container and one host-sample feed for every viewer. Shapes log lines into events under 64 KiB and paces them. |
-| `action_service` | The actions log: a row per Docker operation (`queued`, `running`, `ok`, `failed`), audited when a user asked. Stale rows (no update for 1 h) are marked failed at boot. |
+| `action_service` | The actions log: a row per Docker management operation (`queued`, `running`, `ok`, `failed`), audited when a user asked. Deployments are recorded in `deployments` instead. Stale rows (no update for 1 h) are marked failed at boot. |
 | `Traefik` (`traefik_service.rs`) | Where Traefik's route files go and which Swarm service Traefik is (`[panel] traefik_dir`, `traefik_service`). Writes and removes route files, attaches Traefik to project networks (see [Routes](#routes-traefik)). |
 | `deployment_service`, `deploy_service`, `deploy_rules_service` | Deployments: asking for one, running it, what a service becomes in Swarm and Traefik, the rules (see [Projects and services](#projects-and-services-phase-2-in-progress)). |
 
@@ -83,7 +83,8 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
 `services/deploy_service.rs` turns a service into what it becomes, as pure functions:
 
 - `Snapshot::of(...)` is the configuration one deployment applies (stored with it for history and
-  rollback; no secret values). `Snapshot::hash()` (SHA-256 of its JSON, lists sorted) tells whether the
+  rollback). It has no environment variables or registry credentials (they will be encrypted
+  columns); a secret written into a command or a health check is kept as typed. `Snapshot::hash()` (SHA-256 of its JSON, lists sorted) tells whether the
   configuration changed since the last deployment.
 - `pin_image` pins the configured image to what was just pulled: the digest the pull reported
   (`nginx:1.27@sha256:…`), else the repository's only registry digest (Docker Hub's names `nginx`,
@@ -114,10 +115,12 @@ generated spec on a real engine.
    job is dispatched (queue `deploy`, one attempt, 15 minutes). A rollback applies the earlier
    configuration and image under the service's names now.
 2. **Run** (the job): it goes on only while the service's lock is still its own and unexpired
-   (fencing by deployment id), renewing the lease before each change to Docker, while pulling and at
-   each look at Swarm. Destroy removes the service. Otherwise: the bind mounts are checked again,
+   (fencing by deployment id). It renews the lease, and stops if the lock is no longer its own, at the
+   start, before the network and Traefik are set up, while pulling, before each create, update or
+   removal of the service, and at each look at Swarm. Destroy removes the service. Otherwise: the bind mounts are checked again,
    the project network is ensured, the image is pulled and pinned (Deploy and Restart; Start and Stop
-   reuse the running image, Rollback the recorded one), the spec is created or updated (Restart bumps
+   reuse the image the service runs, if it exists: a Start of a service Docker does not have pulls,
+   a Stop of one leaves nothing to do; Rollback uses the recorded one), the spec is created or updated (Restart bumps
    `force_update`), and the job waits until Swarm converged: an update's status (a stale one from the
    previous update is ignored; paused is a failure, rollback completed is `rolled_back`, the service
    then running or stopped as the restored spec says), else the tasks: as many in Swarm's `running` state (which,
@@ -141,7 +144,7 @@ action buttons and the latest deployment, its log followed live over SSE.
 writes it whole (a hidden temporary file, then renamed) after each deployment, from the deployment
 that made the service what it is (its configuration hash): a new domain is routed once deployed, a
 failed deployment leaves the routes of what still runs, Stop and Destroy remove the file before the
-tasks go.
+tasks go (if that fails, the deployment goes on with a warning in its log).
 Whether the write worked is the deployment's `published`; the service's **Republish routes** action
 (a `deploy.publish` job) writes it again. At boot every file is written again from the database, and
 files of services that no longer exist are removed.

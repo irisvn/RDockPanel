@@ -533,6 +533,7 @@ async fn apply(
         attachable: true,
         internal: false,
     };
+    log.hold().await?;
     let network = docker.ensure_network(network).await.map_err(fail)?;
     // Traefik reaches the service on its project's network.
     if snapshot.running

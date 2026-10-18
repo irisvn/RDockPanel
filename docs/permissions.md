@@ -19,16 +19,17 @@ The Deploy group's resources use the panel's standard permissions, one set per r
 `service_domains.*`, `service_ports.*`, `service_mounts.*`, and `deployments.view_any` /
 `deployments.view` (deployments are written by the panel only). Besides:
 
-- `services.deploy` runs a service's Deploy, Start, Stop, Restart and Republish routes, and a
-  deployment's Rollback
-  (to a deployment that succeeded running a recorded image: not a Stop or a Destroy);
+- `services.deploy` runs a service's Deploy, Start, Stop, Restart and Republish routes; a
+  deployment's Rollback needs `services.deploy` and `deployments.view` (to a deployment that
+  succeeded running a recorded image: not a Stop or a Destroy);
 - `services.destroy` removes a service from Swarm (Destroy; its volumes are kept);
 - a service's deployments (their log, error and image), on its page too, need `deployments.view`;
 
 - a **host directory** (bind mount) needs `system.manage`, and a source under one of the
-  `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, the
-  Docker socket, `/proc`, `/sys`, `/dev`, Docker's and the panel's own files, and any directory above
-  them (`/run`, `/etc`, `/var`), are always refused;
+  `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, `/proc`,
+  `/sys`, `/dev`, `/boot`, `/var/lib/docker`, the Docker socket, `/etc/rdockpanel`, `/run/secrets`,
+  and any directory above them (`/run`, `/etc`, `/var`), are always refused (keep the panel's other
+  files, such as a checkout with its `.env`, out of the roots);
 - a service, once deployed (from its first deployment on, even a failed one) and until a successful
   Destroy, keeps its name and project and cannot be deleted; a project with services cannot be
   deleted, nor renamed while one of them is deployed;
