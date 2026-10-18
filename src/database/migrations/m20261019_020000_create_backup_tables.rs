@@ -217,6 +217,12 @@ impl MigrationTrait for Migration {
                         .not_null(),
                 )
                 .col(ColumnDef::new(BackupRuns::Volume).string_len(255).null())
+                .col(
+                    ColumnDef::new(BackupRuns::Elevated)
+                        .boolean()
+                        .not_null()
+                        .default(false),
+                )
                 .col(ColumnDef::new(BackupRuns::File).string_len(1024).null())
                 .col(ColumnDef::new(BackupRuns::Size).big_integer().null())
                 .col(ColumnDef::new(BackupRuns::Retention).integer().null())
@@ -332,6 +338,7 @@ enum BackupRuns {
     Status,
     DatabaseName,
     Volume,
+    Elevated,
     File,
     Size,
     Retention,

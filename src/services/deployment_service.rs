@@ -665,6 +665,11 @@ pub async fn redeploy_if_pending(state: &AppState, service_id: i64) -> AppResult
         .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
+    // Privileged since the push: its administrators deploy it.
+    if crate::admin::resources::service_resource::privileged(&row) {
+        txn.commit().await?;
+        return Ok(());
+    }
     let deployment = request(&txn, &row, Trigger::Deploy, None, None, state.keyring()).await?;
     rustcms::queue::dispatch(
         &txn,

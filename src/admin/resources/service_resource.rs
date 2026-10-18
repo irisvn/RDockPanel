@@ -243,19 +243,13 @@ impl Resource for ServiceResource {
     }
 }
 
-/// [`privileged`] of a record as the resources see it.
-fn privileged_data(record: &Data) -> bool {
-    ["cap_add", "sysctls", "groups"]
-        .iter()
-        .any(|f| text(record, f).is_some_and(|v| !v.trim().is_empty()))
-}
-
 /// Whether a service runs with added capabilities or sysctls.
 pub(crate) fn privileged(service: &service::Model) -> bool {
-    service
-        .cap_add
-        .as_deref()
-        .is_some_and(|c| !c.trim().is_empty())
+    service.kind == "compose"
+        || service
+            .cap_add
+            .as_deref()
+            .is_some_and(|c| !c.trim().is_empty())
         || service
             .sysctls
             .as_deref()
@@ -532,8 +526,8 @@ impl Policy for ServicePolicy {
         // A privileged service (added capabilities, sysctls or groups):
         // acted on by the panel's administrators only.
         if !matches!(ability, "view" | "view_any")
-            && record.is_some_and(privileged_data)
-            && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+            && let Some(id) = record.and_then(|r| int(r, "id"))
+            && !crate::admin::resources::guard::parent_ok(ctx, &ctx.conn(), id).await
         {
             return false;
         }

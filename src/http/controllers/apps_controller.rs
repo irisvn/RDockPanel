@@ -582,6 +582,7 @@ pub async fn deploy_key(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let row = service_of(&app, id).await?;
+    forbid_privileged(&auth, &row)?;
     let dir = std::env::temp_dir().join(format!(
         "rdp-key-{}",
         crate::services::database_service::random_string(16).to_lowercase()
@@ -751,6 +752,7 @@ pub async fn add_basic_auth(
 ) -> AppResult<Json<Value>> {
     use crate::models::service_basic_auth;
     let row = service_of(&app, id).await?;
+    forbid_privileged(&auth, &row)?;
     let username = body.username.trim().to_owned();
     let mut errors = ValidationErrors::new();
     if !crate::services::deploy_service::valid_auth_user(&username) {
@@ -803,6 +805,7 @@ pub async fn remove_basic_auth(
 ) -> AppResult<StatusCode> {
     use crate::models::service_basic_auth;
     let row = service_of(&app, id).await?;
+    forbid_privileged(&auth, &row)?;
     let txn = app.db().begin().await?;
     let removed = service_basic_auth::Entity::delete_many()
         .filter(service_basic_auth::Column::ServiceId.eq(row.id))

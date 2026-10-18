@@ -73,6 +73,12 @@ impl Resource for DatabaseBackupResource {
         ])
     }
 
+    fn policy() -> std::sync::Arc<dyn Policy> {
+        std::sync::Arc::new(crate::admin::resources::guard::ChildPolicy(
+            "database_backups",
+        ))
+    }
+
     fn table() -> Table {
         Table::new()
             .columns(vec![
@@ -89,6 +95,7 @@ impl Resource for DatabaseBackupResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
+        crate::admin::resources::guard::write(ctx, txn, &data, None).await?;
         check(ctx, txn, &data, None).await?;
         Ok(data)
     }
@@ -99,6 +106,7 @@ impl Resource for DatabaseBackupResource {
         record: &database_backup::Model,
         data: Data,
     ) -> AppResult<Data> {
+        crate::admin::resources::guard::write(ctx, txn, &data, Some(record.service_id)).await?;
         check(ctx, txn, &data, Some(record)).await?;
         Ok(data)
     }

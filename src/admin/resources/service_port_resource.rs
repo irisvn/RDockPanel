@@ -59,6 +59,10 @@ impl Resource for ServicePortResource {
         ])
     }
 
+    fn policy() -> std::sync::Arc<dyn Policy> {
+        std::sync::Arc::new(crate::admin::resources::guard::ChildPolicy("service_ports"))
+    }
+
     fn table() -> Table {
         Table::new()
             .columns(vec![
@@ -73,19 +77,21 @@ impl Resource for ServicePortResource {
 
     async fn mutate_before_create(
         ctx: &Ctx,
-        _txn: &DatabaseTransaction,
+        txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
+        crate::admin::resources::guard::write(ctx, txn, &data, None).await?;
         check(ctx, &data)?;
         Ok(data)
     }
 
     async fn mutate_before_update(
         ctx: &Ctx,
-        _txn: &DatabaseTransaction,
-        _record: &service_port::Model,
+        txn: &DatabaseTransaction,
+        record: &service_port::Model,
         data: Data,
     ) -> AppResult<Data> {
+        crate::admin::resources::guard::write(ctx, txn, &data, Some(record.service_id)).await?;
         check(ctx, &data)?;
         Ok(data)
     }

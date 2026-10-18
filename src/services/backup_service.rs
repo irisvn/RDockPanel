@@ -272,16 +272,30 @@ pub async fn request(
     Ok(run)
 }
 
+/// What a restore puts back, where, asked for by whom.
+pub struct Restore<'a> {
+    pub file: &'a str,
+    pub database: &'a str,
+    pub volume: Option<&'a str>,
+    pub user_id: Option<i64>,
+    /// Asked for by one of the panel's administrators.
+    pub elevated: bool,
+}
+
 /// Asks for a restore of `file` (from `provider`) into `database`.
 pub async fn request_restore(
     txn: &DatabaseTransaction,
     service: &service::Model,
     provider: &storage_provider::Model,
-    file: &str,
-    database: &str,
-    volume: Option<&str>,
-    user_id: Option<i64>,
+    what: Restore<'_>,
 ) -> AppResult<backup_run::Model> {
+    let Restore {
+        file,
+        database,
+        volume,
+        user_id,
+        elevated,
+    } = what;
     let now = Utc::now();
     let run = backup_run::ActiveModel {
         service_id: Set(service.id),
@@ -291,6 +305,7 @@ pub async fn request_restore(
         status: Set("queued".to_owned()),
         database_name: Set(database.to_owned()),
         volume: Set(volume.map(str::to_owned)),
+        elevated: Set(elevated),
         file: Set(Some(file.to_owned())),
         user_id: Set(user_id),
         created_at: Set(now),
@@ -740,6 +755,16 @@ async fn restore(
     log: &mut Log<'_>,
 ) -> Result<Done, String> {
     let (what, store, container, _) = target(state, run, log).await?;
+    // Privileged since it was asked for, by someone who could not have
+    // asked then: refused (a restore runs its file's commands).
+    let service = service::Entity::find_by_id(run.service_id)
+        .one(state.db())
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("the service is gone")?;
+    if crate::admin::resources::service_resource::privileged(&service) && !run.elevated {
+        return Err("the service became privileged: ask for the restore again".to_owned());
+    }
     let key = run.file.clone().unwrap_or_default();
     if !valid_key(&key) {
         return Err(format!("{key} is not a valid path"));

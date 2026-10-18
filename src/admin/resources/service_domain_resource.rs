@@ -63,6 +63,12 @@ impl Resource for ServiceDomainResource {
         ])
     }
 
+    fn policy() -> std::sync::Arc<dyn Policy> {
+        std::sync::Arc::new(crate::admin::resources::guard::ChildPolicy(
+            "service_domains",
+        ))
+    }
+
     fn table() -> Table {
         Table::new()
             .columns(vec![
@@ -80,6 +86,7 @@ impl Resource for ServiceDomainResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
+        crate::admin::resources::guard::write(ctx, txn, &data, None).await?;
         let data = check(ctx, data)?;
         check_container(ctx, txn, &data, None).await?;
         Ok(data)
@@ -91,6 +98,7 @@ impl Resource for ServiceDomainResource {
         record: &service_domain::Model,
         data: Data,
     ) -> AppResult<Data> {
+        crate::admin::resources::guard::write(ctx, txn, &data, Some(record.service_id)).await?;
         let data = check(ctx, data)?;
         check_container(ctx, txn, &data, Some(record)).await?;
         Ok(data)

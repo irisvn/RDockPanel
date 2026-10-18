@@ -75,7 +75,9 @@ impl Resource for ServiceMountResource {
     }
 
     fn policy() -> std::sync::Arc<dyn Policy> {
-        std::sync::Arc::new(MountPolicy)
+        std::sync::Arc::new(crate::admin::resources::guard::ChildPolicy(
+            "service_mounts",
+        ))
     }
 
     fn table() -> Table {
@@ -95,7 +97,7 @@ impl Resource for ServiceMountResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        privileged_parent(ctx, txn, crate::admin::int(&data, "service_id")).await?;
+        crate::admin::resources::guard::write(ctx, txn, &data, None).await?;
         check(ctx, data, None)
     }
 
@@ -105,13 +107,7 @@ impl Resource for ServiceMountResource {
         record: &service_mount::Model,
         data: Data,
     ) -> AppResult<Data> {
-        privileged_parent(ctx, txn, Some(record.service_id)).await?;
-        // Never moved to another service (whose own rules it would skip).
-        if crate::admin::int(&data, "service_id").is_some_and(|id| id != record.service_id) {
-            return Err(
-                rustcms::ValidationErrors::field("service_id", ctx.t("cannot change")).into(),
-            );
-        }
+        crate::admin::resources::guard::write(ctx, txn, &data, Some(record.service_id)).await?;
         check(ctx, data, Some(record))
     }
 }
@@ -206,62 +202,5 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
         Ok(data)
     } else {
         Err(errors.into())
-    }
-}
-
-/// The mounts of a service with added capabilities or sysctls: as the
-/// service itself, its administrators' only.
-async fn privileged_parent(
-    ctx: &Ctx,
-    txn: &DatabaseTransaction,
-    service_id: Option<i64>,
-) -> AppResult<()> {
-    use sea_orm::EntityTrait;
-    let Some(id) = service_id else {
-        return Ok(());
-    };
-    let privileged = crate::models::service::Entity::find_by_id(id)
-        .one(txn)
-        .await?
-        .is_some_and(|s| crate::admin::resources::service_resource::privileged(&s));
-    if privileged && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION) {
-        return Err(rustcms::AppError::Forbidden);
-    }
-    Ok(())
-}
-
-/// The permissions, and a privileged service's mounts deleted by its
-/// administrators only.
-struct MountPolicy;
-
-#[async_trait]
-impl Policy for MountPolicy {
-    async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
-        use sea_orm::EntityTrait;
-        if !ctx.can(&format!("service_mounts.{ability}")) {
-            return false;
-        }
-        if matches!(ability, "view" | "view_any")
-            || ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
-        {
-            return true;
-        }
-        let Some(id) = record.and_then(|r| crate::admin::int(r, "service_id")) else {
-            return true;
-        };
-        crate::models::service::Entity::find_by_id(id)
-            .one(&ctx.conn())
-            .await
-            .is_ok_and(|s| {
-                !s.is_some_and(|s| crate::admin::resources::service_resource::privileged(&s))
-            })
-    }
-
-    async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {
-        ctx.can(&format!("service_mounts.{ability}"))
-    }
-
-    fn view_depends_on_record(&self) -> bool {
-        false
     }
 }

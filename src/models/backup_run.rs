@@ -20,6 +20,8 @@ pub struct Model {
     pub database_name: String,
     /// A volume's path in the container (a volume backup or restore).
     pub volume: Option<String>,
+    /// Asked for by one of the panel's administrators (`system.manage`).
+    pub elevated: bool,
     /// The file in the provider (written, or restored from), named when the
     /// run is asked for.
     pub file: Option<String>,

@@ -50,6 +50,10 @@ pub async fn deploy(
     if !equal {
         return Err(AppError::NotFound);
     }
+    // A privileged service is deployed by its administrators only.
+    if crate::admin::resources::service_resource::privileged(&row) {
+        return Err(AppError::Forbidden);
+    }
     let deployment =
         deployment_service::request(&txn, &row, Trigger::Deploy, None, None, app.keyring()).await?;
     queue::dispatch(
@@ -127,6 +131,9 @@ pub async fn github(
         .unwrap_or_default();
     if !signed(&secret, &body, signature) {
         return Err(AppError::NotFound);
+    }
+    if crate::admin::resources::service_resource::privileged(&row) {
+        return Err(AppError::Forbidden);
     }
     let event = headers
         .get("x-github-event")

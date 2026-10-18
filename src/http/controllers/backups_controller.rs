@@ -138,6 +138,11 @@ pub async fn run(
         .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
+    let parent = service::Entity::find_by_id(config.service_id)
+        .one(app.db())
+        .await?
+        .ok_or(AppError::NotFound)?;
+    crate::http::controllers::apps_controller::forbid_privileged(&auth, &parent)?;
     let txn = rustcms::db::begin_write(app.db()).await?;
     let run = backup_service::request(&txn, &config, "manual", user_id(&auth)).await?;
     let entry = AuditEntry::new("backups.run", "database_backups")
@@ -223,10 +228,15 @@ pub async fn restore(
         &txn,
         &row,
         &provider,
-        file,
-        body.database.trim(),
-        volume,
-        user_id(&auth),
+        backup_service::Restore {
+            file,
+            database: body.database.trim(),
+            volume,
+            user_id: user_id(&auth),
+            elevated: auth
+                .principal()
+                .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION),
+        },
     )
     .await?;
     let entry = AuditEntry::new("backups.restore", "services")

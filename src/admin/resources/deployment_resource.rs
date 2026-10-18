@@ -168,6 +168,13 @@ impl Policy for ReadOnly {
                     // Back to added capabilities or sysctls: as setting them.
                     && (record.is_none_or(|r| !privileged(r))
                         || ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION))
+                    // Nor while the service is privileged now.
+                    && match record.and_then(|r| crate::admin::int(r, "service_id")) {
+                        Some(id) => {
+                            crate::admin::resources::guard::parent_ok(ctx, &ctx.conn(), id).await
+                        }
+                        None => true,
+                    }
             }
             _ => false,
         }
