@@ -163,6 +163,8 @@ async fn apply(
     if deploy && !principal.can("services.deploy") {
         return Err(AppError::Forbidden);
     }
+    let compose_allowed =
+        principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION);
     let txn = rustcms::db::begin_write(app.db()).await?;
     let project = project::Entity::find_by_id(project_id)
         .one(&txn)
@@ -179,6 +181,10 @@ async fn apply(
             "{} Create it without deploying, and protect it before deploying.",
             blocking.join("; ")
         )));
+    }
+    // A Compose file runs anything on the host: the panel's administrators only.
+    if services.iter().any(|s| s.kind == "compose") && !compose_allowed {
+        return Err(AppError::Forbidden);
     }
     // The related records each need their own resource's permission.
     for (wanted, permission) in [

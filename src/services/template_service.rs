@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::services::creation_service::{
-    DatabaseOptions, NewBuild, NewDomain, NewMount, NewPort, NewService,
+    DatabaseOptions, NewBuild, NewComposeGit, NewDomain, NewMount, NewPort, NewService,
 };
 use crate::services::database_service::Engine;
 use crate::services::placeholders::{self, Vars};
@@ -319,6 +319,72 @@ fn template_build(
     })
 }
 
+/// An EasyPanel Compose service: its file (inline, or of a Git repository),
+/// its environment, its domains (each naming its container).
+fn template_compose(
+    name: &str,
+    data: &Value,
+    project: &str,
+    host: Option<&str>,
+    plan: &mut Plan,
+) -> Result<NewService, String> {
+    let mut new = NewService::app(name.to_owned(), "");
+    new.kind = "compose".to_owned();
+    new.image = None;
+    let source = data.get("source").cloned().unwrap_or(json!({}));
+    match text(&source, "type").as_deref() {
+        Some("git") => {
+            new.compose_git = Some(NewComposeGit {
+                url: text(&source, "repo").unwrap_or_default(),
+                branch: text(&source, "ref"),
+                path: text(&source, "rootPath").filter(|p| !p.is_empty() && p != "/"),
+                file: text(&source, "composeFile"),
+            });
+        }
+        Some("inline") | None => {
+            new.compose = text(&source, "content").or_else(|| text(data, "composeFile"));
+        }
+        Some(other) => {
+            return Err(format!(
+                "{name}: its Compose source {other} is not supported"
+            ));
+        }
+    }
+    if let Some(env) = text(data, "env") {
+        new.env = env_lines(name, &env)?;
+    }
+    let vars = Vars {
+        project: project.to_owned(),
+        service: name.to_owned(),
+        primary_domain: None,
+        host: host.map(str::to_owned),
+        host_ip: None,
+    };
+    for domain in data
+        .get("domains")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let raw = text(domain, "host").unwrap_or_default();
+        let expanded = placeholders::expand(&raw, &vars);
+        if expanded.contains("$(") {
+            plan.warnings.push(format!(
+                "{name}: domain {raw} left out (set [panel] service_domain for generated domains)"
+            ));
+            continue;
+        }
+        new.domains.push(NewDomain {
+            host: expanded,
+            path: text(domain, "path").unwrap_or_else(|| "/".to_owned()),
+            port: number(domain, "port").unwrap_or(80).clamp(1, 65535) as u16,
+            https: domain.get("https").and_then(Value::as_bool).unwrap_or(true),
+            compose_service: text(domain, "service"),
+        });
+    }
+    Ok(new)
+}
+
 /// The services of a generator's `output` for `project` (`host`: the
 /// generated domains' parent, `[panel] service_domain`).
 pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, String> {
@@ -349,9 +415,14 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
             plan.services.push(new);
             continue;
         }
+        if kind == "compose" {
+            let new = template_compose(&name, &data, project, host, &mut plan)?;
+            plan.services.push(new);
+            continue;
+        }
         if kind != "app" {
             return Err(format!(
-                "{name}: {kind} services are not supported yet (apps and databases are)"
+                "{name}: {kind} services are not supported (apps, databases and Compose are)"
             ));
         }
         let source = data.get("source").cloned().unwrap_or(json!({}));
@@ -410,6 +481,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 path: text(domain, "path").unwrap_or_else(|| "/".to_owned()),
                 port: number(domain, "port").unwrap_or(80).clamp(1, 65535) as u16,
                 https: domain.get("https").and_then(Value::as_bool).unwrap_or(true),
+                compose_service: None,
             });
         }
         for mount in data
@@ -556,9 +628,20 @@ mod tests {
                 .unwrap_err()
                 .contains("heroku-buildpacks")
         );
-        let compose = json!({"services": [{"type": "compose", "data": {"serviceName": "x"}}]});
+        // A Compose template (as EasyPanel's: a file of a repository).
+        let compose = json!({"services": [{"type": "compose", "data": {"serviceName": "x", "source": {"type": "git", "repo": "https://github.com/easypanel-io/compose.git", "ref": "18-05-2026", "rootPath": "/plane/code", "composeFile": "docker-compose.yml"}, "domains": [{"host": "$(EASYPANEL_DOMAIN)", "port": 80, "service": "proxy"}]}}]});
+        let planned = plan(&compose, "p", Some("example.com")).unwrap();
+        let x = &planned.services[0];
+        assert_eq!(x.kind, "compose");
+        let git = x.compose_git.as_ref().unwrap();
+        assert_eq!(
+            (git.path.as_deref(), git.file.as_deref()),
+            (Some("/plane/code"), Some("docker-compose.yml"))
+        );
+        assert_eq!(x.domains[0].compose_service.as_deref(), Some("proxy"));
+        let other = json!({"services": [{"type": "box", "data": {"serviceName": "x"}}]});
         assert!(
-            plan(&compose, "p", None)
+            plan(&other, "p", None)
                 .unwrap_err()
                 .contains("not supported")
         );

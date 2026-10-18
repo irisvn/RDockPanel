@@ -38,6 +38,18 @@ pub struct NewDomain {
     pub path: String,
     pub port: u16,
     pub https: bool,
+    /// A Compose service's container it leads to.
+    pub compose_service: Option<String>,
+}
+
+/// A Compose service's repository: its URL, branch, the Compose project's
+/// folder and file.
+#[derive(Debug, Clone)]
+pub struct NewComposeGit {
+    pub url: String,
+    pub branch: Option<String>,
+    pub path: Option<String>,
+    pub file: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,8 +97,10 @@ pub struct NewService {
     pub database: DatabaseOptions,
     /// An app built by the panel (its `image` then empty).
     pub build: Option<NewBuild>,
-    /// A Compose service's file (`kind` `compose`).
+    /// A Compose service's file (`kind` `compose`)…
     pub compose: Option<String>,
+    /// …or its repository's.
+    pub compose_git: Option<NewComposeGit>,
 }
 
 impl NewService {
@@ -106,6 +120,7 @@ impl NewService {
             database: DatabaseOptions::default(),
             build: None,
             compose: None,
+            compose_git: None,
         }
     }
 
@@ -219,6 +234,35 @@ pub async fn create(
                 "source",
                 "a Compose service's repository is set on its Source tab",
             );
+        }
+        if let Some(git) = &new.compose_git {
+            if !valid_git_url(&git.url) {
+                errors.add("git_url", "must be an https or ssh repository URL");
+            }
+            if git
+                .branch
+                .as_deref()
+                .is_some_and(|b| !b.is_empty() && !valid_ref(b))
+            {
+                errors.add("git_branch", "is not a branch, tag or commit");
+            }
+            for path in [&git.path, &git.file].into_iter().flatten() {
+                if inside(path).is_none() {
+                    errors.add("git_path", "must stay inside the repository");
+                }
+            }
+        }
+        for domain in &new.domains {
+            if !domain
+                .compose_service
+                .as_deref()
+                .is_some_and(crate::services::deploy_service::valid_compose_service)
+            {
+                errors.add(
+                    "domains",
+                    format!("{} names no Compose service", domain.host),
+                );
+            }
         }
     }
     match &new.build {
@@ -340,13 +384,26 @@ pub async fn create(
         } else {
             image
         }),
-        source: Set(new
+        source: Set(match (&new.build, &new.compose_git) {
+            (Some(b), _) => b.source.clone(),
+            (None, Some(_)) => "git".to_owned(),
+            (None, None) => "image".to_owned(),
+        }),
+        git_url: Set(new
             .build
             .as_ref()
-            .map_or_else(|| "image".to_owned(), |b| b.source.clone())),
-        git_url: Set(new.build.as_ref().and_then(|b| b.git_url.clone())),
-        git_branch: Set(new.build.as_ref().and_then(|b| b.git_branch.clone())),
-        git_path: Set(new.build.as_ref().and_then(|b| b.git_path.clone())),
+            .and_then(|b| b.git_url.clone())
+            .or_else(|| new.compose_git.as_ref().map(|g| g.url.clone()))),
+        git_branch: Set(new
+            .build
+            .as_ref()
+            .and_then(|b| b.git_branch.clone())
+            .or_else(|| new.compose_git.as_ref().and_then(|g| g.branch.clone()))),
+        git_path: Set(new
+            .build
+            .as_ref()
+            .and_then(|b| b.git_path.clone())
+            .or_else(|| new.compose_git.as_ref().and_then(|g| g.path.clone()))),
         builder: Set(new
             .build
             .as_ref()
@@ -354,6 +411,7 @@ pub async fn create(
         dockerfile_path: Set(new.build.as_ref().and_then(|b| b.dockerfile_path.clone())),
         dockerfile: Set(new.build.as_ref().and_then(|b| b.dockerfile.clone())),
         compose: Set(new.compose.clone().filter(|t| !t.trim().is_empty())),
+        compose_file: Set(new.compose_git.as_ref().and_then(|g| g.file.clone())),
         command: Set(command),
         replicas: Set(replicas),
         zero_downtime: Set(new.zero_downtime && engine.is_none()),
@@ -377,6 +435,7 @@ pub async fn create(
             path: Set(domain.path.clone()),
             port: Set(i32::from(domain.port)),
             https: Set(domain.https),
+            compose_service: Set(domain.compose_service.clone()),
             created_at: Set(now),
             updated_at: Set(now),
             ..Default::default()

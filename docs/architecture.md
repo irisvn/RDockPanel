@@ -128,7 +128,8 @@ first. What cannot be done is said, never dropped silently: host directories, re
 and registry credentials are left out with a warning; what a service needs to be safe or to run
 (basic authentication, Linux capabilities, sysctls) is created but refused for "Deploy now"; Git, GitHub and
 Dockerfile sources become builds (Dockerfile or Nixpacks; other builders refuse the template), and
-Compose services refuse the template (for now). The same output pasted
+Compose services become Compose services (a file of a repository, or inline; their domains name
+their container; only for `system.manage`). The same output pasted
 is "Create from Schema". Of the 843 templates of October 2026, 829 run; the others build from
 source or use Compose (`PANEL_TEST_TEMPLATES=1` counts again).
 
