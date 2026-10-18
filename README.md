@@ -48,7 +48,8 @@ feature is free: no project limits, no paid tiers.
 - **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
   redirects its HTTP to HTTPS.
 - **Secrets**: environment variables and private registry credentials, encrypted with the app key;
-  the panel shows their names, never their values. A rollback brings back the environment of then.
+  edited as `.env` text; values are shown only with the `services.secrets` permission (each read is
+  audited). A rollback brings back the environment of then.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 

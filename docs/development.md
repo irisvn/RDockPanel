@@ -57,11 +57,23 @@ If MySQL tests fail with `PoolTimedOut`, the Docker daemon may be stuck: restart
 
 ## Front end
 
-The pages are plain JavaScript (`resources/admin/js/rdockpanel/`), loaded by the RustCMS panel with
+**The apps interface** (Dashboard, a project, a service and its tabs) is a React page on the
+RustCMS extension host v2:
+- **Sources:** `resources/admin/src/rdockpanel/dashboard.tsx` is the entry; `apps/` holds the views
+  and `lib/` the shared pieces (`resources.ts` calls the resources' API with the CSRF token, `ui.tsx`
+  has tabs, status dots and fields, `i18n.ts` the Vietnamese catalog).
+- **Build:** `cd resources/admin && npm ci && npm run typecheck && npm run build` (Node 22). Commit
+  the built `js/rdockpanel/dashboard.js`, `css/rdockpanel/dashboard.css`, `.rustcms-build.json` and
+  `package-lock.json`: `cargo build` reads the built files and needs no Node. CI's `frontend` job
+  checks the committed bundle is up to date.
+- **Styles:** `dashboard.css`, theme variables, `rdp2-` prefix. Status dots use fixed colors (the
+  theme keeps `--success` and `--warning` grey).
+
+**The Docker and Server pages** are plain JavaScript (`resources/admin/js/rdockpanel/`), loaded with
 `extension_script` and styled by `resources/admin/css/rdockpanel/panel.css` (theme variables, `rdp-`
 prefix, no inline styles). Shared helpers are in `panel.js` (`window.rdockPanel`): `h` builds elements
 (never `innerHTML`), `api` calls the routes with the CSRF token. Translations: `registerTranslations`
-in `panel.js`. React pages come with the RustCMS extension host v2 (planned).
+in `panel.js`.
 
 xterm.js is vendored in `resources/admin/js/rdockpanel/vendor/` (see its README to update it).
 

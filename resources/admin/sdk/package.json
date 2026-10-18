@@ -1,0 +1,20 @@
+{
+  "name": "@rustcms/admin-sdk",
+  "version": "0.5.0",
+  "description": "Types, hooks and the Vite preset for RustCMS admin extensions (host API v2). Vendored into apps by `rustcms make:page --react`.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": { "types": "./index.d.ts", "default": "./index.js" },
+    "./ui": { "types": "./ui.d.ts", "default": "./ui.js" },
+    "./host": { "types": "./host.d.ts", "default": "./host.js" },
+    "./vite": { "types": "./vite.d.ts", "default": "./vite.js" }
+  },
+  "bin": { "rustcms-build": "./build.js" },
+  "peerDependencies": {
+    "react": "^19.3.0",
+    "@tanstack/react-query": "^5.104.0",
+    "vite": "^7.3.0"
+  }
+}

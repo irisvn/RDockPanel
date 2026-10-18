@@ -32,9 +32,9 @@ who can replace a directory there with a symlink could point a later start elsew
 - Deploying needs `services.deploy`, destroying `services.destroy`; a deployment's log, error and
   image need `deployments.view` (also on the service page).
 - Environment variables and the registry password are sealed with `APP_KEY` (RustCMS encrypted
-  columns): the panel shows their names (and whether a password is set), never their values, not
-  even to the user who set them; the audit log, the deployments' configuration and their logs never
-  hold them. Losing `APP_KEY` loses them (set them again); rotate it with `APP_PREVIOUS_KEYS` and
+  columns): the panel shows their names (and whether a password is set); environment values only to
+  users with `services.secrets` (the Environment tab), each read audited; the registry password
+  never. The audit log, the deployments' configuration and their logs never hold them. Losing `APP_KEY` loses them (set them again); rotate it with `APP_PREVIOUS_KEYS` and
   `rustcms key:reencrypt`.
 - The panel never logs them. The Docker client library logs request bodies (a service's spec) at
   debug level through the `log` crate: the panel caps `log` records at info at boot, whatever

@@ -15,6 +15,8 @@ pub fn provider() -> AdminProvider {
         .resource::<crate::admin::resources::service_mount_resource::ServiceMountResource>()
         .resource::<crate::admin::resources::deployment_resource::DeploymentResource>()
         // rustcms:resources
+        // The apps interface first (React, host API v2).
+        .page::<crate::admin::pages::dashboard_page::DashboardPage>()
         .page::<crate::admin::pages::server_page::ServerPage>()
         .page::<crate::admin::pages::containers_page::ContainersPage>()
         .page::<crate::admin::pages::images_page::ImagesPage>()
@@ -71,6 +73,25 @@ pub fn provider() -> AdminProvider {
         .extension_style(
             "panel",
             include_str!("../../resources/admin/css/rdockpanel/panel.css"),
+        )
+        .extension_script_v2(
+            "dashboard",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/resources/admin/js/rdockpanel/dashboard.js"
+            )),
+            rustcms::admin::Requires {
+                react: "19.3",
+                react_query: "5.104",
+                ui: 1,
+            },
+        )
+        .extension_style(
+            "dashboard",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/resources/admin/css/rdockpanel/dashboard.css"
+            )),
         )
     // rustcms:extensions
 }

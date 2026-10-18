@@ -32,6 +32,23 @@ for the panel's own pages, not for scripts: token-authenticated API routes come 
 | GET / POST | `/networks` | docker.view / docker.manage | list / create `{"name","driver":"bridge"\|"overlay"}` |
 | DELETE | `/networks/{id or name}` | docker.manage | remove |
 
+## Apps (`/apps`)
+
+What the apps interface reads; it writes through the resources' API
+(`/admin/api/resources/{projects,services,service_domains,service_ports,service_mounts}/records`, and
+their actions), so the resources' policies, validation and audit apply.
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/overview` | projects.view_any | every project with its services (status, kind, primary domain) |
+| GET | `/services/{id}` | services.view | a service's page: configuration (names of its environment variables, never values), domains, ports, mounts, pending changes, recent deployments (with deployments.view) |
+| GET | `/deployments/{id}` | deployments.view | one deployment with its log |
+| GET | `/services/{id}/env` | services.secrets | `{"text","revision"}`: the environment as `.env` text, in clear; audited first (`services.env.read`, names only: no audit, no values) |
+| PUT | `/services/{id}/env` | services.update | `{"text","revision"?}` replaces the environment (sealed); with the revision read, 409 `env_stale` when it changed meanwhile; 422 names the bad line; audited (`services.env.update`, names only) |
+
+`/overview` and `/services/{id}` include each kind of record only with its resource's permission
+(`services.view_any`, `service_domains.view_any`, `service_ports.view_any`, `service_mounts.view_any`).
+
 ## Deployments (`/deploy`)
 
 | Method | Path | Permission | |

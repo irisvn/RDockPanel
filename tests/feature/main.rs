@@ -4,6 +4,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod apps;
 mod deployments;
 mod docker;
 mod docker_routes;

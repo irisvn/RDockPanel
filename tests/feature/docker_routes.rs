@@ -57,6 +57,22 @@ db_test!(
                 read("/server/live"),
                 read("/docker/containers/web/stats"),
                 read("/docker/containers/web/logs/follow"),
+                // The apps routes need the resources' permissions, which none of these has.
+                Case::new(Method::GET, "/apps/overview")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/services/1")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/deployments/1")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/services/1/env")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::PUT, "/apps/services/1/env")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
                 // A deployment's log needs deployments.view, which none of these has.
                 Case::new(Method::GET, "/deploy/deployments/1/log")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)

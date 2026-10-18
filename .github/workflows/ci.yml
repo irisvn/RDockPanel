@@ -76,3 +76,22 @@ jobs:
       - run: "cargo test --locked --test feature docker::"
       - run: cargo test --locked --test feature deployments_on_a_real_swarm
       - run: cargo test --locked --test feature domains_route_through_traefik
+
+  # The React pages: types, a build, and the committed bundles up to date
+  # (cargo build reads them, so it needs no Node).
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: resources/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: resources/admin/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: git diff --exit-code -- js css .rustcms-build.json

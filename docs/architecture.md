@@ -19,7 +19,8 @@ src/
   admin/pages/      Server, Containers, Images, Volumes, Networks (script pages)
   admin/resources/  Projects, Services, Domains, Ports, Mounts, Deployments (schema-driven resources)
   admin/slots/      the service page's aside (state, actions, live deployment log)
-resources/admin/    the pages' JavaScript and CSS (+ vendored xterm.js)
+resources/admin/    src/: the React apps interface (built to js/, css/); js/: the Docker and Server pages'
+                    plain JavaScript (+ vendored xterm.js), css/
 scripts/            dev-swarm.sh (a development Swarm with Traefik)
 tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER and
                     PANEL_TEST_SWARM
@@ -109,7 +110,8 @@ generated spec on a real engine.
 
 A service's environment variables (`services.env`) and registry password
 (`services.registry_password`) are RustCMS encrypted columns (`Encrypted<T>`, sealed with `APP_KEY`):
-the form shows the variables' names and whether a password is set, never a value, and the audit log
+the resource form shows the variables' names and whether a password is set, never a value; the
+Environment tab shows the values to users with `services.secrets` (an audited read); the audit log
 never holds them. Asking for a deployment seals the environment it applies into `deployments.env`
 (its own context), so a rollback applies the environment of then. The run opens it, puts it in the
 Swarm spec (`Env`), and sends the service's registry credentials (as they are now) with the pull and
@@ -175,6 +177,17 @@ the panel's process, workers included), each reading the database at that moment
 written is always the latest state. Projects share no network, so a project's services cannot call
 another's directly (domains and published ports remain public). Deleting a project does not yet detach Traefik from its network nor remove the network
 (see the [roadmap](roadmap.md)).
+
+## The apps interface
+
+`Dashboard` (`/admin/p/dashboard`, React, RustCMS extension host v2) is the EasyPanel-like
+interface: server tiles and projects with their service cards; a project; a service with its header
+(status, Deploy, Start/Stop, Restart, Open) and tabs (Overview, Deployments, Environment, Domains,
+Source, Storage, Advanced), by sub-path `<project>/<service>/<tab>`. It reads
+`/admin/api/x/apps/...` (`apps_controller.rs`) and writes through the resources' API and actions, so
+the resources' policies, validation, audit and encrypted fields apply unchanged. The environment is
+edited as `.env` text (`services/dotenv.rs`): `PUT /apps/services/{id}/env` seals it; reading it in
+clear needs `services.secrets` and is audited.
 
 ## Data
 
