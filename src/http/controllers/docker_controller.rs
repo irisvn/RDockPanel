@@ -6,7 +6,7 @@
 use futures_util::StreamExt;
 use rustcms::Principal;
 use rustcms::audit::{self, AuditEntry, RequestMeta};
-use rustcms::auth::{EventStream, LiveSession};
+use rustcms::auth::{EventStream, LiveSession, TargetFuture};
 use rustcms::prelude::*;
 use rustcms::queue;
 use rustcms::{AppError, AppResult, Json, ValidationErrors};
@@ -213,10 +213,7 @@ pub async fn live_stats(
 fn container_target(
     docker: std::sync::Arc<Docker>,
     id: String,
-) -> impl Fn(Principal) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send>>
-+ Send
-+ Sync
-+ 'static {
+) -> impl Fn(Principal) -> TargetFuture + Send + Sync + 'static {
     move |principal| {
         let (docker, id) = (docker.clone(), id.clone());
         Box::pin(async move {

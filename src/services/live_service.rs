@@ -45,7 +45,7 @@ impl Live {
                 let event = match samples.recv().await {
                     Ok(sample) => Event::json("sample", &sample).ok(),
                     // Samples were missed here, for every viewer: they read the history again.
-                    Err(RecvError::Lagged(_)) => Event::json("resync", &json!({})).ok(),
+                    Err(RecvError::Lagged(_)) => Some(Event::resync()),
                     Err(RecvError::Closed) => return None,
                 };
                 Some((event, samples))
