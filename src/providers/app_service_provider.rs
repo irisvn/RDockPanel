@@ -14,6 +14,11 @@ impl ServiceProvider for AppServiceProvider {
             crate::services::deploy_rules_service::PanelConfig::from_config(app.config()),
         );
         app.bind(crate::services::docker_service::Docker::from_env());
+        app.bind(crate::services::template_service::Templates::new(
+            crate::services::deploy_rules_service::config()
+                .templates_url
+                .clone(),
+        ));
         app.bind(crate::services::traefik_service::Traefik::from_config(
             crate::services::deploy_rules_service::config(),
         ));
@@ -23,6 +28,10 @@ impl ServiceProvider for AppServiceProvider {
         // Sealed outside the admin's fields: found by `rustcms key:reencrypt`.
         app.encrypted_column::<crate::models::deployment::Entity>(
             crate::models::deployment::Column::Env,
+            rustcms::crypto::Binding::Column,
+        );
+        app.encrypted_column::<crate::models::deployment::Entity>(
+            crate::models::deployment::Column::Files,
             rustcms::crypto::Binding::Column,
         );
         // `rustcms db:seed` runs this one (it calls the others).

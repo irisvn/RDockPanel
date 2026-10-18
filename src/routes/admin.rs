@@ -7,7 +7,7 @@ use rustcms::prelude::*;
 
 use crate::http::controllers::{
     apps_controller as apps, deploy_controller as deploy, docker_controller as docker,
-    server_controller as server,
+    server_controller as server, templates_controller as templates,
 };
 
 /// Every admin route, with the access it requires.
@@ -79,6 +79,36 @@ pub fn routes() -> AdminRoutes {
                     "/projects/{id}/services",
                     AdminAccess::can("services.create"),
                     apps::create_service,
+                )
+                .get(
+                    "/templates",
+                    AdminAccess::can("projects.view_any"),
+                    templates::list,
+                )
+                .post(
+                    "/templates/refresh",
+                    AdminAccess::can("services.create"),
+                    templates::refresh,
+                )
+                .get(
+                    "/templates/{slug}",
+                    AdminAccess::can("projects.view_any"),
+                    templates::show,
+                )
+                .get(
+                    "/templates/{slug}/logo",
+                    AdminAccess::can("projects.view_any"),
+                    templates::logo,
+                )
+                .post(
+                    "/projects/{id}/templates/{slug}",
+                    AdminAccess::can("services.create"),
+                    templates::create,
+                )
+                .post(
+                    "/projects/{id}/schema",
+                    AdminAccess::can("services.create"),
+                    templates::from_schema,
                 )
                 .get(
                     "/deployments/{id}",

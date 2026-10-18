@@ -132,7 +132,38 @@ pub async fn snapshot_of<C: ConnectionTrait>(
 ) -> AppResult<Snapshot> {
     let snapshot = snapshot_without_env(db, service).await?;
     let env = service_env(service, keyring).map_err(|_| unreadable_env())?;
-    Ok(snapshot.with_env(&env, &env_digest_key(keyring)))
+    let files = service_files(db, service, keyring).await?;
+    let key = env_digest_key(keyring);
+    Ok(snapshot.with_env(&env, &key).with_files(&files, &key))
+}
+
+/// A service's file mounts' contents by path, opened.
+pub async fn service_files<C: ConnectionTrait>(
+    db: &C,
+    service: &service::Model,
+    keyring: &Keyring,
+) -> AppResult<BTreeMap<String, String>> {
+    let mounts = service_mount::Entity::find()
+        .filter(service_mount::Column::ServiceId.eq(service.id))
+        .filter(service_mount::Column::Kind.eq("file"))
+        .all(db)
+        .await?;
+    let mut files = BTreeMap::new();
+    for mount in mounts {
+        let Some(sealed) = &mount.sealed_content else {
+            continue;
+        };
+        let content = sealed
+            .open(keyring, &service_mount::content_context())
+            .map_err(|_| {
+                AppError::BadRequest(format!(
+                    "the file {} cannot be read (sealed with another APP_KEY): set it again",
+                    mount.target
+                ))
+            })?;
+        files.insert(mount.target, content);
+    }
+    Ok(files)
 }
 
 /// [`snapshot_of`] without the environment (names, rules: no key needed).
@@ -205,7 +236,19 @@ pub async fn has_pending_changes<C: ConnectionTrait>(
         },
         None => BTreeMap::new(),
     };
-    Ok(then.with_env(&env_then, &env_digest_key(keyring)).hash() != current.hash())
+    let files_then = match &deployed.files {
+        Some(sealed) => match sealed.open(keyring, &deployment::files_context()) {
+            Ok(files) => files,
+            Err(_) => return Ok(true),
+        },
+        None => BTreeMap::new(),
+    };
+    let key = env_digest_key(keyring);
+    Ok(then
+        .with_env(&env_then, &key)
+        .with_files(&files_then, &key)
+        .hash()
+        != current.hash())
 }
 
 /// Asks for a deployment of `service`, in `txn` (the caller queues
@@ -234,7 +277,7 @@ pub async fn request<C: ConnectionTrait>(
         .await?
         .ok_or(AppError::NotFound)?;
     // The environment it applies, sealed apart from the snapshot.
-    let (mut snapshot, image, env) = match (trigger, rollback_to) {
+    let (mut snapshot, image, env, files) = match (trigger, rollback_to) {
         (Trigger::Rollback, Some(earlier)) => {
             let snapshot: Snapshot =
                 serde_json::from_value(earlier.spec.clone()).map_err(|_| {
@@ -257,22 +300,33 @@ pub async fn request<C: ConnectionTrait>(
             snapshot.project = current.project;
             snapshot.service = current.service;
             // Its environment as it was (credentials: the service's at run).
-            (snapshot, Some(image), earlier.env.clone())
+            (
+                snapshot,
+                Some(image),
+                earlier.env.clone(),
+                earlier.files.clone(),
+            )
         }
         (Trigger::Rollback, None) => {
             return Err(AppError::BadRequest("a rollback needs a deployment".into()));
         }
         // Removing needs no secret (one sealed with a lost key included).
-        (Trigger::Destroy, _) => (snapshot_without_env(txn, service).await?, None, None),
+        (Trigger::Destroy, _) => (snapshot_without_env(txn, service).await?, None, None, None),
         _ => {
             let env = service_env(service, keyring).map_err(|_| unreadable_env())?;
+            let files = service_files(txn, service, keyring).await?;
+            let key = env_digest_key(keyring);
             let snapshot = snapshot_without_env(txn, service)
                 .await?
-                .with_env(&env, &env_digest_key(keyring));
+                .with_env(&env, &key)
+                .with_files(&files, &key);
             let sealed = (!env.is_empty())
                 .then(|| Encrypted::seal(keyring, &deployment::env_context(), &env))
                 .transpose()?;
-            (snapshot, None, sealed)
+            let files = (!files.is_empty())
+                .then(|| Encrypted::seal(keyring, &deployment::files_context(), &files))
+                .transpose()?;
+            (snapshot, None, sealed, files)
         }
     };
     match trigger {
@@ -289,6 +343,7 @@ pub async fn request<C: ConnectionTrait>(
         spec_hash: Set(Some(snapshot.hash())),
         image_digest: Set(image),
         env: Set(env),
+        files: Set(files),
         published: Set(false),
         user_id: Set(user_id),
         created_at: Set(now),
@@ -586,6 +641,8 @@ pub fn deploy_options(force_update: u64) -> DeployOptions {
 /// What a run applies besides its snapshot, opened: never logged.
 struct Secrets {
     env: BTreeMap<String, String>,
+    /// Its file mounts' contents by path.
+    files: BTreeMap<String, String>,
     /// Keys the digest of the environment as resolved (the task template's).
     digest_key: [u8; 32],
     /// The service's registry credentials now (server, user, password),
@@ -605,6 +662,7 @@ impl Secrets {
         if Trigger::parse(&row.trigger) == Some(Trigger::Destroy) {
             return Ok(Self {
                 env: BTreeMap::new(),
+                files: BTreeMap::new(),
                 digest_key,
                 registry: None,
             });
@@ -638,8 +696,17 @@ impl Secrets {
             }
             _ => None,
         };
+        let files = match &row.files {
+            Some(sealed) => sealed
+                .open(keyring, &deployment::files_context())
+                .map_err(|_| {
+                    Outcome::Failed("its files cannot be read (sealed with another APP_KEY)".into())
+                })?,
+            None => BTreeMap::new(),
+        };
         Ok(Self {
             env,
+            files,
             digest_key,
             registry,
         })
@@ -677,6 +744,7 @@ const CONFIG_OF_LABEL: &str = "rdockpanel.config-of";
 async fn file_configs(
     docker: &Docker,
     snapshot: &Snapshot,
+    contents: &BTreeMap<String, String>,
     log: &mut RunLog<'_>,
 ) -> Result<BTreeMap<String, ConfigRef>, Outcome> {
     let mut out = BTreeMap::new();
@@ -696,7 +764,7 @@ async fn file_configs(
         .await
         .map_err(fail)?;
     for file in files {
-        let (Some(name), Some(content)) = (file.config_name(snapshot), file.content.as_deref())
+        let (Some(name), Some(content)) = (file.config_name(snapshot), contents.get(&file.target))
         else {
             continue;
         };
@@ -904,7 +972,7 @@ async fn apply(
         .iter()
         .map(|(k, v)| (k.clone(), placeholders::expand(v, &vars)))
         .collect();
-    let configs = file_configs(docker, &snapshot, log).await?;
+    let configs = file_configs(docker, &snapshot, &secrets.files, log).await?;
     let env_digest = crate::services::deploy_service::env_digest(&env, &secrets.digest_key);
     let runtime = Runtime {
         env,

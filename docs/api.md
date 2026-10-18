@@ -55,6 +55,17 @@ passwords. `GET /services/{id}/credentials` (services.secrets) answers `{"passwo
 `/overview` and `/services/{id}` include each kind of record only with its resource's permission
 (`services.view_any`, `service_domains.view_any`, `service_ports.view_any`, `service_mounts.view_any`).
 
+## Templates (`/apps`)
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/templates` | projects.view_any | the catalog: slug, name, description, tags, logo file |
+| POST | `/templates/refresh` | services.create | fetch the catalog and templates again |
+| GET | `/templates/{slug}` | projects.view_any | name, description, instructions, links, `schema` (the form) |
+| GET | `/templates/{slug}/logo` | projects.view_any | the logo (image, `sandbox` CSP) |
+| POST | `/projects/{id}/templates/{slug}` | services.create (+ projects.view; services.deploy to deploy) | `{"input":{…},"deploy":bool}`: runs the generator, creates its services (databases first), queues their deployments when asked; `{"project","services","warnings"}` |
+| POST | `/projects/{id}/schema` | same | `{"schema":{"services":[…]},"deploy":bool}`: "Create from Schema" |
+
 ## Deployments (`/deploy`)
 
 | Method | Path | Permission | |

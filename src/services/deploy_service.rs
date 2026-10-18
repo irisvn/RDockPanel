@@ -134,16 +134,17 @@ pub struct Mount {
     /// The volume's name, or the host directory (empty for a file).
     pub source: String,
     pub read_only: bool,
-    /// A file's content (a Swarm config).
+    /// A file's content, as a digest keyed with `APP_KEY` (the content is
+    /// sealed apart: `deployments.files`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
+    pub content_digest: Option<String>,
 }
 
 impl Mount {
     /// A file's Swarm config: `rdp_<hash>` of what makes it (project,
-    /// service, path, content), so a new content is a new config.
+    /// service, path, content's digest), so a new content is a new config.
     pub fn config_name(&self, snapshot: &Snapshot) -> Option<String> {
-        let content = self.content.as_deref()?;
+        let content = self.content_digest.as_deref()?;
         let id = sha256_hex(
             format!(
                 "{}\0{}\0{}\0{content}",
@@ -235,7 +236,8 @@ impl Snapshot {
                     kind: m.kind.clone(),
                     source,
                     read_only: m.read_only,
-                    content: (m.kind == "file").then(|| m.content.clone()).flatten(),
+                    // Set from the sealed content ([`Snapshot::with_files`]).
+                    content_digest: None,
                 })
             })
             .collect();
@@ -272,6 +274,16 @@ impl Snapshot {
                 .filter(|u| !u.is_empty())
                 .map(str::to_owned),
         }
+    }
+
+    /// With its files' contents (by path): their digests keyed with `key`.
+    pub fn with_files(mut self, files: &BTreeMap<String, String>, key: &[u8]) -> Self {
+        for mount in self.mounts.iter_mut().filter(|m| m.kind == "file") {
+            mount.content_digest = files.get(&mount.target).and_then(|content| {
+                env_digest(&BTreeMap::from([(String::new(), content.clone())]), key)
+            });
+        }
+        self
     }
 
     /// With the environment `env` (its names, and its digest keyed with `key`).
@@ -813,7 +825,7 @@ mod tests {
                 kind: "volume".to_owned(),
                 source: "html".to_owned(),
                 read_only: true,
-                content: None,
+                content_digest: None,
             }],
             env_names: vec![],
             env_digest: None,
@@ -871,7 +883,7 @@ mod tests {
                 kind: "bind".to_owned(),
                 source: "/srv/shop/data".to_owned(),
                 read_only: false,
-                content: None,
+                content_digest: None,
             }],
             cpu_limit_millis: None,
             mem_limit_mb: None,

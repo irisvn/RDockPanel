@@ -8,6 +8,7 @@ import { Button, ErrorState, Loading } from "@rustcms/admin-sdk/ui";
 import { useState } from "react";
 import { Dashboard, NewService } from "./apps/Dashboard";
 import { ServicePage } from "./apps/ServicePage";
+import { Templates } from "./apps/Templates";
 import type { Overview } from "./apps/types";
 import { StatusDot } from "./lib/ui";
 import { bindSession } from "./lib/resources";
@@ -18,6 +19,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
   const t = props.t;
   const overview = useAdminQuery<Overview>(props, "/apps/overview", { refetchInterval: 5000, refetchOnMount: "always" });
   const [adding, setAdding] = useState(false);
+  const [templating, setTemplating] = useState(false);
   if (overview.isLoading) return <Loading />;
   if (overview.error) return <ErrorState error={overview.error} />;
   const project = overview.data?.projects.find((p) => p.name === props.project);
@@ -33,7 +35,14 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
       </nav>
       <div className="rdp2-head">
         <h2 className="rdp2-title">{project.name}</h2>
-        {props.can("services.create") && <Button onClick={() => setAdding(true)}>+ {t("Service")}</Button>}
+        {props.can("services.create") && (
+          <div className="rdp2-row">
+            <Button variant="outline" onClick={() => setTemplating(true)}>
+              {t("Templates")}
+            </Button>
+            <Button onClick={() => setAdding(true)}>+ {t("Service")}</Button>
+          </div>
+        )}
       </div>
       {project.description && <p className="rdp2-muted">{project.description}</p>}
       <div className="rdp2-cards">
@@ -49,6 +58,18 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
         ))}
       </div>
       {project.services.length === 0 && <p className="rdp2-muted">{t("No service: add one with + Service.")}</p>}
+      {templating && (
+        <Templates
+          {...props}
+          project={project}
+          onClose={() => setTemplating(false)}
+          onDone={(made) => {
+            setTemplating(false);
+            if (made.warnings.length) window.alert(made.warnings.join("\n"));
+            overview.refetch();
+          }}
+        />
+      )}
       {adding && (
         <NewService
           t={t}

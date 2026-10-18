@@ -106,6 +106,31 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
 Snapshot tests (`src/services/snapshots/`, insta) pin the generated spec and routes; a Swarm test runs a
 generated spec on a real engine.
 
+### EasyPanel templates
+
+`services/template_service.rs`, `services/template_engine.rs`, `templates_controller.rs`. The
+catalog (`list.json`), each template's `meta.yaml` and `index.ts`, and logos are fetched from
+`[panel] templates_url` (EasyPanel's repository, raw files) when the Templates dialog opens, and
+kept six hours; nothing is bundled (the repository has no license). Logos go through the panel
+(`/apps/templates/{slug}/logo`): its CSP loads images from itself only.
+
+A template runs as EasyPanel runs it: its form is its JSON Schema (defaults filled in); its
+TypeScript generator (at most 256 KB), types stripped by oxc, runs in QuickJS with a 64 MB, 3 s
+budget, in a child process of the panel's own binary (`rdockpanel __rdockpanel-run-template`: CPU
+and, on Linux, memory limits, killed after 15 s; a crash takes the child down, never the panel),
+and nothing to import but `~templates-utils` (`randomString`, `randomPassword`, `bcryptHash`), its `./meta` and
+`crypto` (`randomBytes`, `randomUUID`; also `require("crypto")` and `Buffer.from` for older
+templates); no file system, no network. Its `{services: [{type, data}]}` output becomes
+services through `creation_service` (one transaction: all or none): apps from an image (env as
+`.env` text, quoted and multi-line values as EasyPanel reads them, placeholders resolved at deploy, `$(EASYPANEL_DOMAIN)` domains as generated domains,
+volumes, files, ports, command, replicas, zero downtime) and databases (their options), databases
+first. What cannot be done is said, never dropped silently: host directories, redirects, resources
+and registry credentials are left out with a warning; what a service needs to be safe or to run
+(basic authentication, Linux capabilities, sysctls) is created but refused for "Deploy now"; Git, GitHub and
+Dockerfile sources, and Compose services, refuse the template (for now). The same output pasted
+is "Create from Schema". Of the 843 templates of October 2026, 829 run; the others build from
+source or use Compose (`PANEL_TEST_TEMPLATES=1` counts again).
+
 ### Databases
 
 A database (`services.kind`: `postgres`, `mysql`, `mariadb`, `mongo`, `redis`) is an app service the
@@ -135,11 +160,12 @@ database's own.
   offers it; it is then a domain like any. The task template's hash counts the environment as
   resolved (keyed digest), so a placeholder resolving differently replaces the tasks; a change of
   `[panel] service_domain` or `public_ip` alone is not shown as pending.
-- **File mounts** (`kind = file`, with their content) become Swarm configs named
-  `rdp_<hash of project, service, path, content>`, labelled `rdockpanel.config-of=<project>_<service>`
-  and mounted read-only. A new content is a new config; a successful deployment removes the
-  service's configs it no longer uses, Destroy all of them. Their content is kept with each
-  deployment's configuration: not for secrets.
+- **File mounts** (`kind = file`) keep their content sealed with `APP_KEY`
+  (`service_mounts.sealed_content`: templates put passwords in files); each deployment seals the
+  files it applies (`deployments.files`, for rollback) and its configuration keeps only their keyed
+  digests. They become Swarm configs named `rdp_<hash of project, service, path, digest>`, labelled
+  `rdockpanel.config-of=<project>_<service>` and mounted read-only. A new content is a new config; a
+  successful deployment removes the service's configs it no longer uses, Destroy all of them.
 
 ### Secrets
 

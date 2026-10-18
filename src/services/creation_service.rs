@@ -302,7 +302,9 @@ pub async fn create(
             source: Set(None),
             target: Set(target.clone()),
             read_only: Set(kind == "file"),
-            content: Set(content),
+            sealed_content: Set(content
+                .map(|c| Encrypted::seal(keyring, &service_mount::content_context(), &c))
+                .transpose()?),
             created_at: Set(now),
             updated_at: Set(now),
             ..Default::default()

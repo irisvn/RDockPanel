@@ -42,6 +42,8 @@ who can replace a directory there with a symlink could point a later start elsew
 - Docker holds the values in clear: in the Swarm service's spec and in the containers' environment.
   Anyone who controls Docker on the host (or with `docker.view`, a container's inspect, which hides
   only secret-looking names) can read them.
+- File mounts' contents are sealed the same way (`service_mounts.sealed_content`,
+  `deployments.files`), written and replaced, never shown back.
 - A secret written into a service's command or health check is stored as typed: use environment
   variables instead.
 - Services run on their project's own overlay network: a project cannot call another project's
@@ -53,6 +55,18 @@ who can replace a directory there with a symlink could point a later start elsew
   `[panel] traefik_dir`: at boot it removes route files of services it does not have.
 - Docker objects of a service are labelled `rdockpanel.managed=true` with their project and service;
   the panel refuses to touch a service of that name it did not create.
+
+## Templates
+
+EasyPanel templates are code (TypeScript generators) from a third-party repository. The panel runs
+them in a child process of the panel (CPU and memory limits, killed after 15 s), in an embedded
+QuickJS with no file system, network or process access, nothing importable but a few random/hash
+helpers (16 bcrypt hashes at most), and a memory (64 MB), stack and time (3 s) budget; sources and
+fetched files are size-limited. Their output is data, checked like any service the panel creates,
+and the related records it asks for (domains, ports, mounts) need their own permissions. A
+template needing authentication or capabilities the panel cannot give yet is never deployed at
+once. Their images and what they configure are as trusted as
+the template: read a template's page before using it.
 
 ## The terminal
 

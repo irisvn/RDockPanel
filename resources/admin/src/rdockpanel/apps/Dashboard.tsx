@@ -6,6 +6,7 @@ import { type AdminApi, type PageProps, useAdminQuery, useEvents } from "@rustcm
 import { Button, Dialog, Input, Loading, ErrorState } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field, Sparkline, StatusDot, bytes } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
+import { Templates } from "./Templates";
 import type { Overview, Project } from "./types";
 
 type Sample = {
@@ -201,6 +202,7 @@ export function Dashboard(props: PageProps<unknown>) {
   const overview = useAdminQuery<Overview>(props, "/apps/overview", { refetchInterval: 5000 });
   const [creating, setCreating] = useState(false);
   const [adding, setAdding] = useState<Project | null>(null);
+  const [templating, setTemplating] = useState<Project | null>(null);
   const [error, setError] = useState<unknown>(null);
   const canCreateProject = props.can("projects.create");
   const canCreateService = props.can("services.create");
@@ -229,9 +231,14 @@ export function Dashboard(props: PageProps<unknown>) {
             </button>
             <div className="rdp2-row">
               {canCreateService && (
-                <Button size="sm" variant="outline" onClick={() => setAdding(project)}>
-                  + {t("Service")}
-                </Button>
+                <>
+                  <Button size="sm" variant="outline" onClick={() => setTemplating(project)}>
+                    {t("Templates")}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setAdding(project)}>
+                    + {t("Service")}
+                  </Button>
+                </>
               )}
               {project.services.length === 0 && props.can("projects.delete") && (
                 <Button
@@ -281,6 +288,18 @@ export function Dashboard(props: PageProps<unknown>) {
           onDone={() => {
             setCreating(false);
             overview.refetch();
+          }}
+        />
+      )}
+      {templating && (
+        <Templates
+          {...props}
+          project={templating}
+          onClose={() => setTemplating(null)}
+          onDone={(made) => {
+            setTemplating(null);
+            if (made.warnings.length) window.alert(made.warnings.join("\n"));
+            props.navigate(`/p/dashboard/${made.project}`);
           }}
         />
       )}

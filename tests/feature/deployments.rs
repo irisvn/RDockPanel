@@ -919,7 +919,7 @@ db_test!(
             )
             .await
             .assert_status(StatusCode::OK);
-        create(&app, &admin, "service_mounts", json!({"service_id": id.to_string(), "kind": "file", "target": "/etc/app.ini", "content": "a=1\n"})).await;
+        create(&app, &admin, "service_mounts", json!({"service_id": id.to_string(), "kind": "file", "target": "/etc/app.ini", "sealed_content": {"replace": "a=1\n"}})).await;
         let deployed = run(&app, &admin, "deploy", id).await;
         assert_eq!(deployed.status, "succeeded", "{:?}", deployed.error);
         let container = |fake: &FakeDocker| {
@@ -949,6 +949,13 @@ db_test!(
         );
         let first = configs[0].config_name.clone().unwrap();
         assert_eq!(fake.configs.lock().unwrap()[&first].1, b"a=1\n");
+        // Sealed: never in the deployment's configuration.
+        assert!(
+            !deployed.spec.to_string().contains("a=1"),
+            "{}",
+            deployed.spec
+        );
+        assert!(deployed.files.is_some());
 
         // A new content: a new config; the old one is removed once unused.
         let mount = service_mount_id(&app, id).await;
@@ -956,7 +963,7 @@ db_test!(
             .send(
                 rustcms::axum::http::Method::PATCH,
                 &format!("{}/{mount}", records(&app, "service_mounts")),
-                Some(&json!({"content": "a=2\n"})),
+                Some(&json!({"sealed_content": {"replace": "a=2\n"}})),
             )
             .await
             .assert_status(StatusCode::OK);

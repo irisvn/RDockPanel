@@ -1,7 +1,7 @@
 //! A service's environment as `.env` text (the Environment tab, templates):
 //! `NAME=value` lines, `#` comments and blank lines skipped. A value may be
 //! quoted: `"…"` takes the escapes `\n`, `\"` and `\\`; `'…'` is taken as
-//! is. Pure functions.
+//! is; either may span lines (a value of several lines). Pure functions.
 
 use std::collections::BTreeMap;
 
@@ -17,7 +17,8 @@ pub struct DotenvError {
 /// The variables of `text` (a name given twice: the last value).
 pub fn parse(text: &str) -> Result<BTreeMap<String, String>, DotenvError> {
     let mut env = BTreeMap::new();
-    for (index, raw) in text.lines().enumerate() {
+    let mut lines = text.lines().enumerate();
+    while let Some((index, raw)) = lines.next() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -36,10 +37,42 @@ pub fn parse(text: &str) -> Result<BTreeMap<String, String>, DotenvError> {
                 "a name is letters, digits and _, not starting with a digit",
             ));
         }
-        let value = unquote(value.trim()).ok_or_else(|| error("a quote is not closed"))?;
+        // A quoted value goes on until its closing quote, lines included.
+        let mut value = value.trim().to_owned();
+        if let Some(quote) = value.chars().next().filter(|c| matches!(c, '"' | '\''))
+            && !closed(&value, quote)
+        {
+            loop {
+                let Some((_, next)) = lines.next() else {
+                    return Err(error("a quote is not closed"));
+                };
+                value.push('\n');
+                value.push_str(next.trim_end());
+                if closed(&value, quote) {
+                    break;
+                }
+            }
+        }
+        let value = unquote(&value).ok_or_else(|| error("a quote is not closed"))?;
         env.insert(name.to_owned(), value);
     }
     Ok(env)
+}
+
+/// Whether `value`, opened by `quote`, is closed (a `"` not escaped).
+fn closed(value: &str, quote: char) -> bool {
+    if value.len() < 2 || !value.ends_with(quote) {
+        return false;
+    }
+    if quote == '\'' {
+        return true;
+    }
+    let backslashes = value[..value.len() - 1]
+        .chars()
+        .rev()
+        .take_while(|c| *c == '\\')
+        .count();
+    backslashes % 2 == 0
 }
 
 fn unquote(value: &str) -> Option<String> {
@@ -115,6 +148,11 @@ mod tests {
         assert_eq!(env["RAW"], "a\\nb");
         assert_eq!(env["URL"], "postgres://u:p@h/db?x=1");
         assert_eq!(env["EMPTY"], "");
+        // A value of several lines, quoted; an escaped quote does not close it.
+        let env = parse("CONFIG=\"db:\n  host: x\nkey: \\\"q\\\"\"\nNEXT=1\nRAW='a\nb'").unwrap();
+        assert_eq!(env["CONFIG"], "db:\n  host: x\nkey: \"q\"");
+        assert_eq!(env["NEXT"], "1");
+        assert_eq!(env["RAW"], "a\nb");
     }
 
     #[test]

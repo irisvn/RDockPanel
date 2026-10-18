@@ -12,6 +12,7 @@ mod m20261018_084014_create_deployments_table;
 mod m20261018_132946_add_secrets_to_services;
 mod m20261018_161513_add_content_to_service_mounts;
 mod m20261018_163345_add_kind_to_services;
+mod m20261018_173253_seal_file_mounts;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -30,6 +31,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261018_132946_add_secrets_to_services::Migration),
             Box::new(m20261018_161513_add_content_to_service_mounts::Migration),
             Box::new(m20261018_163345_add_kind_to_services::Migration),
+            Box::new(m20261018_173253_seal_file_mounts::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

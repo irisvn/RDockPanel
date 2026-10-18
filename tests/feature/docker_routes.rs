@@ -64,6 +64,24 @@ db_test!(
                 Case::new(Method::GET, "/apps/services/1")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/templates")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/templates/ghost/logo")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/templates/ghost")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/templates/refresh")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/projects/1/templates/ghost")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/projects/1/schema")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
                 Case::new(Method::POST, "/apps/projects/1/services")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

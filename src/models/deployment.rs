@@ -32,6 +32,9 @@ pub struct Model {
     /// `deployments.env`): a rollback applies it again.
     #[sea_orm(column_type = "Text", nullable)]
     pub env: Option<Encrypted<BTreeMap<String, String>>>,
+    /// Its file mounts' contents by path, sealed (context `deployments.files`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub files: Option<Encrypted<BTreeMap<String, String>>>,
     pub started_at: Option<DateTimeUtc>,
     pub finished_at: Option<DateTimeUtc>,
     pub created_at: DateTimeUtc,
@@ -46,4 +49,9 @@ impl ActiveModelBehavior for ActiveModel {}
 /// Where `env` is sealed.
 pub fn env_context() -> Context {
     Context::column("deployments", "env")
+}
+
+/// Where `files` is sealed.
+pub fn files_context() -> Context {
+    Context::column("deployments", "files")
 }

@@ -20,8 +20,8 @@ serde_json = "1"
 bollard = "0.21"
 sysinfo = "0.39"
 futures-util = "0.3"
-rustix = { version = "1", features = ["fs"] }
-tokio = { version = "1", features = ["sync", "time", "rt", "macros", "io-util"] }
+rustix = { version = "1", features = ["fs", "process"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros", "io-util", "process"] }
 thiserror = "2"
 tracing = "0.1"
 log = "0.4"
@@ -32,6 +32,11 @@ hmac = "0.13"
 base64 = "0.22"
 getrandom = "0.3"
 percent-encoding = "2"
+# EasyPanel templates: TypeScript generators run in QuickJS (types stripped by oxc).
+rquickjs = { version = "0.14", features = ["loader"] }
+oxc = { version = "0.154", features = ["transformer", "codegen", "semantic"] }
+bcrypt = "0.17"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 shell-words = "1.1"
 
 [dev-dependencies]

@@ -13,5 +13,6 @@ mod health;
 mod live;
 mod projects;
 mod routing;
+mod templates;
 mod terminal;
 // rustcms:tests

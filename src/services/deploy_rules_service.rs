@@ -34,6 +34,9 @@ pub struct PanelConfig {
     pub service_domain: String,
     /// The server's public address (`$(EASYPANEL_HOST_IP)`); empty: unknown.
     pub public_ip: String,
+    /// Where EasyPanel's templates are fetched from (their repository's
+    /// `templates/` folder, raw files).
+    pub templates_url: String,
 }
 
 impl Default for PanelConfig {
@@ -47,6 +50,8 @@ impl Default for PanelConfig {
             traefik_service: "rdp-traefik".to_owned(),
             service_domain: String::new(),
             public_ip: String::new(),
+            templates_url:
+                "https://raw.githubusercontent.com/easypanel-io/templates/main/templates".to_owned(),
         }
     }
 }

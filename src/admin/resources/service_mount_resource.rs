@@ -51,7 +51,8 @@ impl Resource for ServiceMountResource {
                 .sortable()
                 .max_length(512),
             Field::column(service_mount::Column::ReadOnly),
-            Field::column(service_mount::Column::Content).max_length(MAX_FILE),
+            // Sealed with APP_KEY: templates put passwords in files.
+            Field::column(service_mount::Column::SealedContent).encrypted(),
         ]
     }
 
@@ -67,9 +68,9 @@ impl Resource for ServiceMountResource {
             TextInput::make("source").help("Bind: a host directory under an allowed root"),
             TextInput::make("target").help("Path inside the container, e.g. /var/lib/app"),
             Toggle::make("read_only"),
-            Textarea::make("content")
+            SecretInput::make("sealed_content")
                 .column_span(2)
-                .help("File: its content (a config file; not for secrets)"),
+                .help("File: its content (sealed; replaced, never shown)"),
         ])
     }
 
@@ -122,7 +123,18 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
     let source =
         after("source", record.and_then(|r| r.source.as_deref())).filter(|s| !s.is_empty());
     let target = after("target", record.map(|r| r.target.as_str()));
-    let content = after("content", record.and_then(|r| r.content.as_deref()));
+    // A file's content: replaced now (`{"replace": …}`), or kept.
+    let replaced = data
+        .get("sealed_content")
+        .and_then(|v| v.get("replace"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let cleared = data
+        .get("sealed_content")
+        .and_then(|v| v.get("clear"))
+        .is_some_and(|v| v == &Value::Bool(true));
+    let has_content =
+        replaced.is_some() || (!cleared && record.is_some_and(|r| r.sealed_content.is_some()));
     let mut errors = ValidationErrors::new();
     match kind.as_str() {
         "volume" => {
@@ -167,12 +179,10 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
             if source.is_some() {
                 errors.add("source", ctx.t("is only for host directories"));
             }
-            match content.as_deref() {
-                None => errors.add("content", ctx.t("is required")),
-                Some(c) if c.len() > MAX_FILE => {
-                    errors.add("content", ctx.t("is at most 64 KB"));
-                }
-                Some(_) => {}
+            if !has_content {
+                errors.add("sealed_content", ctx.t("is required"));
+            } else if replaced.as_deref().is_some_and(|c| c.len() > MAX_FILE) {
+                errors.add("sealed_content", ctx.t("is at most 64 KB"));
             }
         }
         _ => errors.add("kind", ctx.t("must be volume, bind or file")),

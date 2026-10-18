@@ -49,6 +49,9 @@ feature is free: no project limits, no paid tiers.
   redirects its HTTP to HTTPS.
 - **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:
   credentials generated, data on a volume, health-checked), with their connection URL to copy.
+- **EasyPanel templates**: the 800+ templates of easypanel.io in one click (searched, filled in by
+  their own form, deployed with their databases), fetched from their repository when you open the
+  catalog; or paste a template's output ("Create from Schema").
 - **Secrets**: environment variables and private registry credentials, encrypted with the app key;
   edited as `.env` text; values are shown only with the `services.secrets` permission (each read is
   audited). A rollback brings back the environment of then.

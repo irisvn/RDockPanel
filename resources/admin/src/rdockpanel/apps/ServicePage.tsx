@@ -635,7 +635,7 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                 await resources.create("service_mounts", {
                   service_id: String(d.service.id),
                   kind,
-                  ...(kind === "bind" ? { source: name.trim() } : kind === "file" ? { content } : { name: name.trim() }),
+                  ...(kind === "bind" ? { source: name.trim() } : kind === "file" ? { sealed_content: { replace: content } } : { name: name.trim() }),
                   target: target.trim(),
                   read_only: kind === "file" ? true : readOnly,
                 });
@@ -665,7 +665,7 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
               <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={kind === "file" ? "/etc/app/config.ini" : "/var/lib/app"} />
             </Field>
             {kind === "file" && (
-              <Field label={t("Content")} help={t("A config file (read-only in the container; not for secrets)")} error={fields.content}>
+              <Field label={t("Content")} help={t("A config file, read-only in the container; sealed, never shown again")} error={fields.sealed_content}>
                 <Textarea className="rdp2-env" rows={8} value={content} onChange={(e) => setContent(e.target.value)} />
               </Field>
             )}
