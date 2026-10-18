@@ -280,17 +280,21 @@ pub async fn deployed_routes(
     // Its basic authentication's users, with their hashes now (never kept
     // in a deployment).
     if !snapshot.basic_auth.is_empty() {
-        let names: std::collections::HashSet<String> = snapshot
-            .basic_auth
-            .iter()
-            .filter_map(|u| u.split_once(':').map(|(n, _)| n.to_owned()))
-            .collect();
+        // Exactly the users deployed (name and password): one changed
+        // since signs in with the new password from the next deployment.
+        let deployed: std::collections::HashSet<String> =
+            snapshot.basic_auth.iter().cloned().collect();
         let mut users: Vec<String> = crate::models::service_basic_auth::Entity::find()
             .filter(crate::models::service_basic_auth::Column::ServiceId.eq(row.id))
             .all(db)
             .await?
             .into_iter()
-            .filter(|u| names.contains(&u.username))
+            .filter(|u| {
+                deployed.contains(&crate::services::deploy_service::auth_digest(
+                    &u.username,
+                    &u.password_hash,
+                ))
+            })
             .map(|u| format!("{}:{}", u.username, u.password_hash))
             .collect();
         users.sort();

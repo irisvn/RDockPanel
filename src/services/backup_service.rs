@@ -842,6 +842,16 @@ fn check_tar(path: &Path) -> std::io::Result<()> {
     let mut entries = 0usize;
     for entry in archive.entries()? {
         let mut entry = entry?;
+        // A path or link given twice (PAX): tools read different ones.
+        if let Some(extensions) = entry.pax_extensions()? {
+            let mut seen = std::collections::HashSet::new();
+            for extension in extensions {
+                let key = extension?.key().map_err(std::io::Error::other)?.to_owned();
+                if matches!(key.as_str(), "path" | "linkpath") && !seen.insert(key) {
+                    return Err(std::io::Error::other("an entry names its path twice"));
+                }
+            }
+        }
         let name = entry.path()?.into_owned();
         let outside = |p: &Path| {
             p.is_absolute()

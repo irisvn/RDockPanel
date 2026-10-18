@@ -196,7 +196,9 @@ expression over the request's URL, its replacement, permanent or not, on or off)
 its HTTP basic authentication (`service_basic_auth`: bcrypt hashes, never shown) become Traefik
 middlewares (`redirectRegex`, then `basicAuth`) on every router of its domains. They are part of
 the deployment's snapshot (users as a digest of their hash: the hashes are read from their table
-when the routes are written, never kept in a deployment) and apply on the next deployment.
+when the routes are written, never kept in a deployment) and apply on the next deployment: the
+routes written again (a republish, a restart) keep the users as deployed, a changed password
+signs in from the next deployment.
 Regular expressions are checked as Go's (inline flags `i`, `m`, `s`, `U` only), and no value
 written to Traefik's files may contain `{{` or `}}` (Traefik reads them as Go templates). EasyPanel templates' `basicAuth` and `redirects` are created with the service.
 

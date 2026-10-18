@@ -415,13 +415,7 @@ impl Snapshot {
             .collect();
         let mut users: Vec<String> = users
             .iter()
-            .map(|u| {
-                format!(
-                    "{}:{}",
-                    u.username,
-                    &sha256_hex(u.password_hash.as_bytes())[..16]
-                )
-            })
+            .map(|u| auth_digest(&u.username, &u.password_hash))
             .collect();
         users.sort();
         self.basic_auth = users;
@@ -821,6 +815,12 @@ impl TraefikFile {
     pub fn to_yaml(&self) -> String {
         serde_yaml_ng::to_string(self).expect("routes serialize")
     }
+}
+
+/// A basic authentication user as a snapshot keeps it: `user:<digest of
+/// its hash>`.
+pub fn auth_digest(user: &str, hash: &str) -> String {
+    format!("{user}:{}", &sha256_hex(hash.as_bytes())[..16])
 }
 
 /// A basic authentication user name: letters, digits, `_ - . @`.
