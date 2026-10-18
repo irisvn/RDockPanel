@@ -357,7 +357,7 @@ pub async fn put_env(
     let row = service_of(&app, id).await?;
     // A Compose file reads its environment (`${VAR}`, even in its volumes):
     // the panel's administrators only, as the file itself.
-    if row.kind == "compose"
+    if (row.kind == "compose" || crate::admin::resources::service_resource::privileged(&row))
         && !auth
             .principal()
             .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)

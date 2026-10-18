@@ -1784,5 +1784,22 @@ db_test!(
         assert_eq!(spec.capability_add.unwrap(), ["NET_ADMIN", "SYS_TIME"]);
         assert_eq!(spec.capability_drop.unwrap(), ["NET_RAW"]);
         assert_eq!(spec.sysctls.unwrap()["net.ipv4.ip_forward"], "1");
+        // Now privileged: what it runs is its administrators' to change.
+        editor
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"image": "evil:1"})),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        editor
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &app.admin_api(&format!("x/apps/services/{id}/env")),
+                Some(&json!({"text": "X=1\n"})),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
     }
 );

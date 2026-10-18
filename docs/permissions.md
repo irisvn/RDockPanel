@@ -33,7 +33,9 @@ The Deploy group's resources use the panel's standard permissions, one set per r
   `backups.restore` (restore one, replacing the database's data; lists a provider's files);
 
 - notifications: `notification_channels.*` (Settings);
-- adding Linux capabilities or sysctls to a service needs `system.manage` (dropping does not);
+- adding Linux capabilities or sysctls to a service needs `system.manage` (dropping does not); a
+  service that has some is then edited (its fields, environment, mounts) and rolled back to such a
+  deployment with `system.manage` only;
 - redirects: `service_redirects.*`; basic authentication users: `services.update`; scripts:
   `service_scripts.*` to write them, `docker.exec` to run them (a command in the container);
 

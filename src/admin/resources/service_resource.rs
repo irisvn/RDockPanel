@@ -230,8 +230,9 @@ impl Resource for ServiceResource {
             .one(txn)
             .await?
             .ok_or(rustcms::AppError::NotFound)?;
-        // A Compose file runs anything on the host: its administrators only.
-        if record.kind == "compose"
+        // A Compose file runs anything on the host, as a service with added
+        // capabilities or sysctls does: its administrators only.
+        if (record.kind == "compose" || privileged(&record))
             && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
         {
             return Err(rustcms::AppError::Forbidden);
@@ -239,6 +240,18 @@ impl Resource for ServiceResource {
         check(ctx, &data, Some(&record))?;
         Ok(data)
     }
+}
+
+/// Whether a service runs with added capabilities or sysctls.
+pub(crate) fn privileged(service: &service::Model) -> bool {
+    service
+        .cap_add
+        .as_deref()
+        .is_some_and(|c| !c.trim().is_empty())
+        || service
+            .sysctls
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
 }
 
 /// The image as Docker takes it (no surrounding spaces).

@@ -88,18 +88,20 @@ impl Resource for ServiceMountResource {
 
     async fn mutate_before_create(
         ctx: &Ctx,
-        _txn: &DatabaseTransaction,
+        txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
+        privileged_parent(ctx, txn, crate::admin::int(&data, "service_id")).await?;
         check(ctx, data, None)
     }
 
     async fn mutate_before_update(
         ctx: &Ctx,
-        _txn: &DatabaseTransaction,
+        txn: &DatabaseTransaction,
         record: &service_mount::Model,
         data: Data,
     ) -> AppResult<Data> {
+        privileged_parent(ctx, txn, Some(record.service_id)).await?;
         check(ctx, data, Some(record))
     }
 }
@@ -195,4 +197,25 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
     } else {
         Err(errors.into())
     }
+}
+
+/// The mounts of a service with added capabilities or sysctls: as the
+/// service itself, its administrators' only.
+async fn privileged_parent(
+    ctx: &Ctx,
+    txn: &DatabaseTransaction,
+    service_id: Option<i64>,
+) -> AppResult<()> {
+    use sea_orm::EntityTrait;
+    let Some(id) = service_id else {
+        return Ok(());
+    };
+    let privileged = crate::models::service::Entity::find_by_id(id)
+        .one(txn)
+        .await?
+        .is_some_and(|s| crate::admin::resources::service_resource::privileged(&s));
+    if privileged && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION) {
+        return Err(rustcms::AppError::Forbidden);
+    }
+    Ok(())
 }

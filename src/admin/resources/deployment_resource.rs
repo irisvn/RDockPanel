@@ -137,6 +137,23 @@ fn can_return_to(record: &Data) -> bool {
         && !matches!(field("trigger"), Some("stop" | "destroy"))
 }
 
+/// Whether a deployment's snapshot adds capabilities or sysctls.
+fn privileged(record: &Data) -> bool {
+    let spec = match record.get("spec") {
+        Some(serde_json::Value::String(text)) => {
+            serde_json::from_str(text).unwrap_or(serde_json::Value::Null)
+        }
+        Some(value) => value.clone(),
+        None => return true,
+    };
+    let set = |field: &str| match &spec[field] {
+        serde_json::Value::Array(a) => !a.is_empty(),
+        serde_json::Value::Object(o) => !o.is_empty(),
+        _ => false,
+    };
+    set("cap_add") || set("sysctls")
+}
+
 struct ReadOnly;
 
 #[async_trait]
@@ -148,6 +165,9 @@ impl Policy for ReadOnly {
                 ctx.can("deployments.view")
                     && ctx.can("services.deploy")
                     && record.is_none_or(can_return_to)
+                    // Back to added capabilities or sysctls: as setting them.
+                    && (record.is_none_or(|r| !privileged(r))
+                        || ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION))
             }
             _ => false,
         }
