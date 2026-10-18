@@ -100,3 +100,12 @@
   .rdp2-table th:nth-child(4), .rdp2-table td:nth-child(4),
   .rdp2-table th:nth-child(5), .rdp2-table td:nth-child(5) { display: none; }
 }
+
+/* Service kinds (New service) */
+.rdp2-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.5rem; }
+.rdp2-kind {
+  padding: 0.55rem 0.7rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card); color: inherit; cursor: pointer; font: inherit; text-align: left; font-size: 0.875rem;
+}
+.rdp2-kind:hover { border-color: var(--ring); }
+.rdp2-kind-active { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }

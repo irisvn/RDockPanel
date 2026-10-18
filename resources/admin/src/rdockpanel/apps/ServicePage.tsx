@@ -1,7 +1,7 @@
 // A service's page: its header (status, Deploy and the other actions, always
 // visible) and its tabs, in the URL (`/p/dashboard/<project>/<service>/<tab>`).
 // Saving never deploys: the page says when a change waits for Deploy.
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
 import { Alert, Button, Checkbox, Dialog, ErrorState, Input, Loading, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
 import { CopyButton, ErrorNote, Facts, Field, Section, StatusBadge, Tabs, when } from "../lib/ui";
@@ -11,7 +11,7 @@ import type { Deployment, ServiceDetail } from "./types";
 type Props = PageProps<unknown> & { project: string; serviceId: number; tab: string };
 type T = (s: string) => string;
 
-const TABS = ["overview", "deployments", "environment", "domains", "source", "storage", "advanced"] as const;
+const TABS = ["overview", "credentials", "deployments", "environment", "domains", "source", "storage", "advanced"] as const;
 
 export function ServicePage(props: Props) {
   const t = props.t;
@@ -95,6 +95,7 @@ export function ServicePage(props: Props) {
         }}
         tabs={[
           { id: "overview", label: t("Overview") },
+          ...(d.database ? [{ id: "credentials", label: t("Credentials") }] : []),
           { id: "deployments", label: t("Deployments") },
           { id: "environment", label: t("Environment") },
           { id: "domains", label: t("Domains") },
@@ -105,6 +106,7 @@ export function ServicePage(props: Props) {
       />
       <div className="rdp2-tab-body">
         {tab === "overview" && <OverviewTab {...props} d={d} />}
+        {tab === "credentials" && d.database && <CredentialsTab {...props} d={d} />}
         {tab === "deployments" && <DeploymentsTab {...props} d={d} onError={setError} refresh={refresh} />}
         {tab === "environment" && <EnvironmentTab {...props} d={d} onSaved={saved} />}
         {tab === "domains" && !d.can.domains.view && <p className="rdp2-muted">{t("You may not see domains.")}</p>}
@@ -192,6 +194,53 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
       )}
       {!d.latest && d.can.deployments && <p className="rdp2-muted">{t("Not deployed yet: press Deploy.")}</p>}
     </div>
+  );
+}
+
+/** How apps of the project connect, with copy buttons. The passwords are
+ * an audited read, only with `services.secrets`. */
+function CredentialsTab(props: Props & { d: ServiceDetail }) {
+  const { t, d } = props;
+  const [secret, setSecret] = useState<{ password: string; root_password: string | null; url: string } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    if (!d.can.secrets) return;
+    props.api
+      .get<{ password: string; root_password: string | null; url: string }>(`/apps/services/${d.service.id}/credentials`)
+      .then(setSecret)
+      .catch(setError);
+    // Once per service page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.service.id, d.can.secrets]);
+  const db = { ...d.database!, ...(secret ?? {}) };
+  const row = (label: string, value: string | null | undefined) =>
+    value ? (
+      [
+        label,
+        <span className="rdp2-row">
+          <code className="rdp2-ellipsis">{value}</code>
+          <CopyButton text={value} label={t("Copy")} copied={t("Copied")} />
+        </span>,
+      ] as [string, ReactNode]
+    ) : null;
+  const items = [
+    row(t("Internal host"), db.host),
+    row(t("Port"), String(db.port)),
+    row(t("User"), db.user),
+    row(t("Password"), db.password),
+    row(t("Database"), db.database || null),
+    row(t("Root password"), db.root_password ?? null),
+    row(t("Internal URL"), db.url),
+  ].filter((x): x is [string, ReactNode] => x !== null);
+  return (
+    <Section
+      title={t("Credentials")}
+      description={t("Apps of this project connect with these. Changing the password here does not change it in a database already created.")}
+    >
+      {!d.can.secrets && <Alert variant="warning">{t("You may not read the password (services.secrets).")}</Alert>}
+      <ErrorNote error={error} />
+      <Facts items={items} />
+    </Section>
   );
 }
 
@@ -701,9 +750,11 @@ function AdvancedTab(props: {
               <Input value={command} onChange={(e) => setCommand(e.target.value)} disabled={disabled} />
             </Field>
           </div>
-          <label className="rdp2-row">
-            <Switch checked={zero} onCheckedChange={setZero} disabled={disabled} /> {t("Zero downtime")}
-          </label>
+          {s.kind === "app" && (
+            <label className="rdp2-row">
+              <Switch checked={zero} onCheckedChange={setZero} disabled={disabled} /> {t("Zero downtime")}
+            </label>
+          )}
           {zero && !d.zero_downtime_possible && (
             <p className="rdp2-muted rdp2-small">
               {t("Zero downtime needs a health check and no host-mode port: updates stop the old task first.")}

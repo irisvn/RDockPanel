@@ -193,3 +193,146 @@ db_test!(
         let _ = records(&app, "services");
     }
 );
+
+db_test!(
+    databases_come_configured,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        let project = create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let url = app.admin_api(&format!("x/apps/projects/{project}/services"));
+
+        // A database: only a name.
+        let made = admin
+            .post_json(&url, &json!({"name": "db", "kind": "postgres"}))
+            .await;
+        made.assert_status(StatusCode::OK);
+        let id = made.json()["id"].as_i64().unwrap();
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        assert_eq!(page["service"]["kind"], "postgres");
+        assert_eq!(page["service"]["image"], "postgres:17");
+        assert_eq!(page["service"]["replicas"], 1);
+        assert_eq!(page["mounts"][0]["target"], "/var/lib/postgresql/data");
+        let facts = &page["database"];
+        assert_eq!(facts["user"], "postgres");
+        assert_eq!(facts["database"], "shop");
+        assert_eq!(facts["host"], "shop_db");
+        assert!(facts["password"].is_null(), "never on the page");
+        // The passwords: an audited read.
+        let secret = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}/credentials")))
+            .await;
+        secret.assert_status(StatusCode::OK);
+        let secret = secret.json();
+        let password = secret["password"].as_str().unwrap().to_owned();
+        let password = password.as_str();
+        assert_eq!(password.len(), 24);
+        assert_eq!(
+            secret["url"],
+            format!("postgres://postgres:{password}@shop_db:5432/shop?sslmode=disable")
+        );
+        let audit = rustcms::models::audit_log::Entity::find()
+            .all(app.state().db())
+            .await
+            .unwrap();
+        assert!(format!("{audit:?}").contains("services.credentials.read"));
+        // Without services.secrets: no password, no URL.
+        let viewer = support::user_with(&app, "viewer", &["services.view"]).await;
+        let viewer = app.acting_as(&viewer).await;
+        let seen = viewer
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        viewer
+            .get(&app.admin_api(&format!("x/apps/services/{id}/credentials")))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        assert!(!format!("{seen}").contains(password));
+        // One replica only.
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{}/{id}", records(&app, "services")),
+                Some(&json!({"replicas": 2})),
+            )
+            .await
+            .assert_validation_error("replicas");
+        // Never two tasks on its data: no zero downtime.
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{}/{id}", records(&app, "services")),
+                Some(&json!({"zero_downtime": true})),
+            )
+            .await
+            .assert_validation_error("zero_downtime");
+
+        // Deployed with its credentials in the environment, its volume and check.
+        let deployment = admin
+            .post_json(
+                &app.admin_api("resources/services/actions/deploy"),
+                &json!({"keys": [id.to_string()]}),
+            )
+            .await;
+        deployment.assert_status(StatusCode::OK);
+        let queued = crate::deployments::last_deployment(&app, id).await;
+        rdockpanel::services::deployment_service::run(app.state(), queued.id, FAST)
+            .await
+            .unwrap();
+        let spec = fake.services.lock().unwrap()["shop_db"]
+            .spec
+            .clone()
+            .unwrap()
+            .task_template
+            .unwrap()
+            .container_spec
+            .unwrap();
+        let env = spec.env.unwrap();
+        assert!(
+            env.contains(&format!("POSTGRES_PASSWORD={password}")),
+            "{env:?}"
+        );
+        assert!(env.contains(&"POSTGRES_DB=shop".to_owned()));
+        assert!(spec.health_check.unwrap().test.unwrap()[1].contains("pg_isready"));
+
+        // Redis: the password from the environment, never in the arguments.
+        let made = admin
+            .post_json(&url, &json!({"name": "cache", "kind": "redis"}))
+            .await;
+        made.assert_status(StatusCode::OK);
+        // An app needs an image; a name is checked; a taken one refused.
+        admin
+            .post_json(&url, &json!({"name": "web", "kind": "app"}))
+            .await
+            .assert_validation_error("image");
+        admin
+            .post_json(
+                &url,
+                &json!({"name": "Bad Name", "kind": "app", "image": "nginx"}),
+            )
+            .await
+            .assert_validation_error("name");
+        admin
+            .post_json(&url, &json!({"name": "db", "kind": "mysql"}))
+            .await
+            .assert_validation_error("name");
+        admin
+            .post_json(&url, &json!({"name": "x", "kind": "oracle"}))
+            .await
+            .assert_validation_error("kind");
+    }
+);
+
+const FAST: rdockpanel::services::deployment_service::Timings =
+    rdockpanel::services::deployment_service::Timings {
+        poll: std::time::Duration::from_millis(5),
+        settle: std::time::Duration::from_millis(20),
+        timeout: std::time::Duration::from_secs(2),
+    };

@@ -106,6 +106,22 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
 Snapshot tests (`src/services/snapshots/`, insta) pin the generated spec and routes; a Swarm test runs a
 generated spec on a real engine.
 
+### Databases
+
+A database (`services.kind`: `postgres`, `mysql`, `mariadb`, `mongo`, `redis`) is an app service the
+panel configures when it is created (`services/creation_service.rs`, `services/database_service.rs`):
+the engine's image (`postgres:17`, `mysql:9`, `mariadb:11`, `mongo:8`, `redis:7` by default), a
+`data` volume at the engine's data path, its credentials in the environment (sealed; passwords
+generated: 24 letters and digits), a health check of the engine (`pg_isready`, `mysqladmin ping`,
+…; every 5 s, 20 tries), one replica, stop-first updates (zero downtime is refused: two tasks
+never share its data). Redis takes its password from the
+environment (`--requirepass "$REDIS_PASSWORD"`), never from its arguments. So it deploys, rolls back
+and logs like any service; the Credentials tab reads (an audited read, `services.secrets`) the
+user, password and internal URL
+(`postgres://…@<project>_<service>:5432/<db>`, …) back from its environment. A database's
+credentials apply when its volume is first initialized: changing them later does not change the
+database's own.
+
 ### Placeholders, generated domains, files
 
 - **Placeholders** (`services/placeholders.rs`), as EasyPanel's templates write them, are replaced

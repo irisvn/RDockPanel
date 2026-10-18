@@ -52,6 +52,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
       {adding && (
         <NewService
           t={t}
+          api={props.api}
           project={project}
           onClose={() => setAdding(false)}
           onDone={(name) => {

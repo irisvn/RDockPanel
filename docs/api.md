@@ -43,8 +43,14 @@ their actions), so the resources' policies, validation and audit apply.
 | GET | `/overview` | projects.view_any | every project with its services (status, kind, primary domain) |
 | GET | `/services/{id}` | services.view | a service's page: configuration (names of its environment variables, never values), domains, ports, mounts, pending changes, recent deployments (with deployments.view) |
 | GET | `/deployments/{id}` | deployments.view | one deployment with its log |
+| POST | `/projects/{id}/services` | services.create | `{"name","kind","image"?,"database"?:{database,user,password,root_password}}`: an app (`kind` `app`, `image` required) or a database (`postgres`, `mysql`, `mariadb`, `mongo`, `redis`: credentials generated when left out); 422 on bad names, images, taken names; audited (`services.create`) |
+| GET | `/services/{id}/credentials` | services.secrets | a database's passwords and internal URL; audited first |
 | GET | `/services/{id}/env` | services.secrets | `{"text","revision"}`: the environment as `.env` text, in clear; audited first (`services.env.read`, names only: no audit, no values) |
 | PUT | `/services/{id}/env` | services.update | `{"text","revision"?}` replaces the environment (sealed); with the revision read, 409 `env_stale` when it changed meanwhile; 422 names the bad line; audited (`services.env.update`, names only) |
+
+A database's page includes `database`: engine, internal host, port, user, database; never its
+passwords. `GET /services/{id}/credentials` (services.secrets) answers `{"password",
+"root_password","url"}`, audited first (`services.credentials.read`).
 
 `/overview` and `/services/{id}` include each kind of record only with its resource's permission
 (`services.view_any`, `service_domains.view_any`, `service_ports.view_any`, `service_mounts.view_any`).

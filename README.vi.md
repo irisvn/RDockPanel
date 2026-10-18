@@ -49,6 +49,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
   - mỗi lần deploy lưu lại cấu hình để xem lịch sử và rollback;
   - trang service báo khi có thay đổi chưa deploy.
 - **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS.
+- **Database:** PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ với một cú bấm (chỉ cần đặt tên: mật khẩu tự sinh, dữ liệu trên volume, có healthcheck), kèm URL kết nối để copy.
 - **Bí mật:** biến môi trường (sửa như file `.env`) và tài khoản registry riêng được mã hoá bằng app key; chỉ người có quyền `services.secrets` mới xem được giá trị, mỗi lần xem đều ghi audit. Rollback trả lại đúng biến môi trường của lần deploy đó.
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))

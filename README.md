@@ -47,6 +47,8 @@ feature is free: no project limits, no paid tiers.
   configuration, for history and rollback, and the page shows changes not deployed yet.
 - **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
   redirects its HTTP to HTTPS.
+- **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:
+  credentials generated, data on a volume, health-checked), with their connection URL to copy.
 - **Secrets**: environment variables and private registry credentials, encrypted with the app key;
   edited as `.env` text; values are shown only with the `services.secrets` permission (each read is
   audited). A rollback brings back the environment of then.

@@ -19,6 +19,8 @@ pub struct Model {
     pub id: i64,
     pub project_id: i64,
     pub name: String,
+    /// `app`, or a database: `postgres`, `mysql`, `mariadb`, `mongo`, `redis`.
+    pub kind: String,
     pub image: String,
     pub command: Option<String>,
     pub replicas: i32,

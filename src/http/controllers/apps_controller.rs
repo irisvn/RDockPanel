@@ -14,6 +14,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::models::{deployment, project, service, service_domain, service_mount, service_port};
+use crate::services::creation_service::{self, DatabaseOptions, NewService};
+use crate::services::database_service::Engine;
 use crate::services::deployment_service::{
     has_pending_changes, placeholder_vars, service_env, snapshot_without_env, summary,
 };
@@ -73,7 +75,7 @@ pub async fn overview(State(app): State<AppState>, auth: Auth) -> AppResult<Json
                     json!({
                         "id": s.id,
                         "name": s.name,
-                        "kind": "app",
+                        "kind": s.kind,
                         "image": s.image,
                         "status": s.status,
                         "desired_state": s.desired_state,
@@ -184,7 +186,7 @@ pub async fn service(
         "service": {
             "id": row.id,
             "name": row.name,
-            "kind": "app",
+            "kind": row.kind,
             "image": row.image,
             "command": row.command,
             "replicas": row.replicas,
@@ -212,6 +214,7 @@ pub async fn service(
         "pending": has_pending_changes(db, &row, app.keyring()).await?,
         "zero_downtime_possible": snapshot.zero_downtime_possible(),
         "env_names": env_names,
+        "database": database_facts(&app, &row, &snapshot.service_name()),
         "env_readable": env_readable,
         "domains": domains,
         "ports": ports,
@@ -368,4 +371,115 @@ pub async fn deployment(
         .await?
         .ok_or(AppError::NotFound)?;
     Ok(Json(summary(&row)))
+}
+
+/// A database's connection facts, never its passwords (`/credentials`).
+fn database_facts(app: &AppState, row: &service::Model, host: &str) -> Value {
+    let Some(engine) = Engine::parse(&row.kind) else {
+        return Value::Null;
+    };
+    let env = service_env(row, app.keyring()).unwrap_or_default();
+    let credentials = engine.credentials_of(&env);
+    json!({
+        "engine": engine.kind(),
+        "host": host,
+        "port": engine.port(),
+        "user": credentials.user,
+        "database": credentials.database,
+    })
+}
+
+/// A database's passwords and internal URL (an audited read, like `/env`).
+pub async fn credentials(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    let db = app.db();
+    let row = service_of(&app, id).await?;
+    let engine = Engine::parse(&row.kind).ok_or(AppError::NotFound)?;
+    let env = service_env(&row, app.keyring()).map_err(|_| {
+        AppError::BadRequest("the credentials cannot be read (sealed with another APP_KEY)".into())
+    })?;
+    let credentials = engine.credentials_of(&env);
+    let host = snapshot_without_env(db, &row).await?.service_name();
+    let entry = AuditEntry::new("services.credentials.read", "services").key(id.to_string());
+    // No audit, no values.
+    let txn = db.begin().await?;
+    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    txn.commit().await?;
+    Ok(Json(json!({
+        "password": credentials.password,
+        "root_password": credentials.root_password,
+        "url": engine.url(&host, &credentials),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatabaseBody {
+    pub database: Option<String>,
+    pub user: Option<String>,
+    pub password: Option<String>,
+    pub root_password: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewServiceBody {
+    pub name: String,
+    #[serde(default = "app_kind")]
+    pub kind: String,
+    pub image: Option<String>,
+    pub database: Option<DatabaseBody>,
+}
+
+fn app_kind() -> String {
+    "app".to_owned()
+}
+
+/// A new service in project `id`: an app (`image`), or a database
+/// (`kind`: postgres, mysql, …) with generated credentials. Audited.
+pub async fn create_service(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+    Json(body): Json<NewServiceBody>,
+) -> AppResult<Json<Value>> {
+    // Only into a project the user may see (as the resources' forms).
+    if !auth.principal().can("projects.view") {
+        return Err(AppError::NotFound);
+    }
+    let txn = app.db().begin().await?;
+    let project = project::Entity::find_by_id(id)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let mut new = match Engine::parse(&body.kind) {
+        Some(engine) => NewService::database(body.name.trim(), engine),
+        None => NewService::app(body.name.trim(), body.image.clone().unwrap_or_default()),
+    };
+    new.kind = body.kind.clone();
+    if Engine::parse(&body.kind).is_some() {
+        new.image = body.image.clone();
+    }
+    if let Some(db) = body.database {
+        new.database = DatabaseOptions {
+            database: db.database,
+            user: db.user,
+            password: db.password,
+            root_password: db.root_password,
+        };
+    }
+    let row = creation_service::create(&txn, app.keyring(), &project, new).await?;
+    let entry = AuditEntry::new("services.create", "services")
+        .key(row.id.to_string())
+        .meta(json!({ "project": project.name, "name": row.name, "kind": row.kind }));
+    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    txn.commit().await?;
+    Ok(Json(
+        json!({ "id": row.id, "name": row.name, "kind": row.kind }),
+    ))
 }

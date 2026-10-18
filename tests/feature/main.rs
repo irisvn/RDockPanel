@@ -5,6 +5,7 @@
 mod support;
 
 mod apps;
+mod databases;
 mod deployments;
 mod docker;
 mod docker_routes;

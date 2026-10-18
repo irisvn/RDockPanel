@@ -59,6 +59,14 @@ export type ServiceDetail = {
   swarm_name: string;
   internal_host: string;
   auto_domain: string | null;
+  /** A database's connection facts (password and URL with services.secrets). */
+  database: {
+    engine: string;
+    host: string;
+    port: number;
+    user: string;
+    database: string;
+  } | null;
   pending: boolean;
   zero_downtime_possible: boolean;
   env_names: string[];

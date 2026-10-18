@@ -303,6 +303,23 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
             errors.add(reservation, ctx.t("cannot exceed the limit"));
         }
     }
+    // A database runs one task (its data volume is its own).
+    if let Some(record) = record
+        && record.kind != "app"
+        && int(data, "replicas").is_some_and(|n| n > 1)
+    {
+        errors.add("replicas", ctx.t("a database runs one replica"));
+    }
+    // Two tasks on one data volume: never (a database stops before it starts).
+    if let Some(record) = record
+        && record.kind != "app"
+        && data.get("zero_downtime").and_then(|v| v.as_bool()) == Some(true)
+    {
+        errors.add(
+            "zero_downtime",
+            ctx.t("a database stops before it starts again"),
+        );
+    }
     // Once deployed (or while a first deployment runs), the Docker objects
     // carry the names.
     if let Some(record) = record.filter(|r| r.status != NEW) {

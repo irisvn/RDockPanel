@@ -75,10 +75,20 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("services.view"),
                     apps::service,
                 )
+                .post(
+                    "/projects/{id}/services",
+                    AdminAccess::can("services.create"),
+                    apps::create_service,
+                )
                 .get(
                     "/deployments/{id}",
                     AdminAccess::can("deployments.view"),
                     apps::deployment,
+                )
+                .get(
+                    "/services/{id}/credentials",
+                    AdminAccess::can(apps::SECRETS_PERMISSION),
+                    apps::credentials,
                 )
                 .get(
                     "/services/{id}/env",

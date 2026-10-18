@@ -2,7 +2,7 @@
 // services as cards (status, kind, domain). Creating a project or a service
 // asks for a name (and an image), nothing else.
 import { useState } from "react";
-import { type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
+import { type AdminApi, type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
 import { Button, Dialog, Input, Loading, ErrorState } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field, Sparkline, StatusDot, bytes } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
@@ -106,19 +106,32 @@ function NewProject(props: { t: (s: string) => string; onDone: (name: string) =>
   );
 }
 
-/** A new app service: a name and an image (the rest has defaults). */
+const KINDS: Array<[string, string]> = [
+  ["app", "App (Docker image)"],
+  ["postgres", "PostgreSQL"],
+  ["mysql", "MySQL"],
+  ["mariadb", "MariaDB"],
+  ["mongo", "MongoDB"],
+  ["redis", "Redis"],
+];
+
+/** A new service: a name, and an image for an app; a database needs only
+ * its name (its credentials are generated). */
 export function NewService(props: {
   t: (s: string) => string;
+  api: AdminApi;
   project: Project;
   onDone: (name: string) => void;
   onClose: () => void;
 }) {
   const t = props.t;
+  const [kind, setKind] = useState("app");
   const [name, setName] = useState("");
   const [image, setImage] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const fields = error instanceof ResourceError ? error.fieldErrors : {};
+  const fields = (error as { fieldErrors?: Record<string, string[]> } | null)?.fieldErrors ?? {};
+  const app = kind === "app";
   return (
     <Dialog open onClose={props.onClose} title={`${t("Create service in")} ${props.project.name}`}>
       <form
@@ -126,13 +139,12 @@ export function NewService(props: {
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
+          setError(null);
           try {
-            await resources.create("services", {
-              project_id: String(props.project.id),
+            await props.api.post(`/apps/projects/${props.project.id}/services`, {
               name: name.trim(),
-              image: image.trim(),
-              replicas: 1,
-              zero_downtime: true,
+              kind,
+              image: image.trim() || undefined,
             });
             props.onDone(name.trim());
           } catch (err) {
@@ -142,18 +154,40 @@ export function NewService(props: {
           }
         }}
       >
-        <Field label={t("Service name")} help={t("Lowercase letters, digits and dashes")} error={fields.name}>
-          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="web" />
+        <Field label={t("Type")}>
+          <div className="rdp2-kinds">
+            {KINDS.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={id === kind ? "rdp2-kind rdp2-kind-active" : "rdp2-kind"}
+                onClick={() => {
+                  // Another kind: the image typed for the last one does not fit.
+                  if (id !== kind) setImage("");
+                  setKind(id);
+                }}
+              >
+                {t(label)}
+              </button>
+            ))}
+          </div>
         </Field>
-        <Field label={t("Docker image")} help={t("e.g. nginx:1.27 or ghcr.io/org/app:v2")} error={fields.image}>
-          <Input value={image} onChange={(e) => setImage(e.target.value)} placeholder="nginx:1.27-alpine" />
+        <Field label={t("Service name")} help={t("Lowercase letters, digits and dashes")} error={fields.name}>
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={app ? "web" : "db"} />
+        </Field>
+        <Field
+          label={app ? t("Docker image") : t("Image (optional)")}
+          help={app ? t("e.g. nginx:1.27 or ghcr.io/org/app:v2") : t("The engine's official image by default; credentials are generated.")}
+          error={fields.image}
+        >
+          <Input value={image} onChange={(e) => setImage(e.target.value)} placeholder={app ? "nginx:1.27-alpine" : ""} />
         </Field>
         {!fields.name && !fields.image && <ErrorNote error={error} />}
         <div className="rdp2-row rdp2-end">
           <Button type="button" variant="ghost" onClick={props.onClose}>
             {t("Cancel")}
           </Button>
-          <Button type="submit" disabled={busy || !name.trim() || !image.trim()}>
+          <Button type="submit" disabled={busy || !name.trim() || (app && !image.trim())}>
             {t("Create")}
           </Button>
         </div>
@@ -253,6 +287,7 @@ export function Dashboard(props: PageProps<unknown>) {
       {adding && (
         <NewService
           t={t}
+          api={props.api}
           project={adding}
           onClose={() => setAdding(null)}
           onDone={(name) => {
