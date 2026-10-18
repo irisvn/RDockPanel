@@ -32,6 +32,7 @@ use crate::services::deploy_service::{
 use crate::services::docker_service::{
     Docker, DockerError, MANAGED_LABEL, NetworkRequest, SwarmService, SwarmTask, TaskState,
 };
+use crate::services::traefik_service::{self, Traefik};
 
 /// How long a deployment holds its service without renewing: a run renews it
 /// every few seconds, so only a run that died (or hangs on Docker) loses it.
@@ -404,8 +405,9 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
     active.updated_at = Set(Utc::now());
     let row = active.update(db).await?;
     let mut log = RunLog::new(db, &row);
+    let traefik = state.service::<Traefik>();
     let outcome = match state.service::<Docker>() {
-        Some(docker) => apply(&docker, &row, &mut log, timings).await,
+        Some(docker) => apply(&docker, traefik.as_deref(), &row, &mut log, timings).await,
         None => Err(Outcome::Failed("Docker is not available".into())),
     };
     let (outcome, image) = match outcome {
@@ -422,12 +424,51 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
-    finish(db, row, outcome, image).await
+    let id = row.id;
+    finish(db, row, outcome, image).await?;
+    // Traefik follows what the service is now (this deployment's routes if
+    // it succeeded, the previous ones otherwise).
+    if let Some(traefik) = traefik {
+        publish(db, &traefik, service.id, id).await?;
+    }
+    Ok(())
+}
+
+/// Writes the routes of the service as deployed now; records on deployment
+/// `id` whether that worked ([`deployment::Model::published`]).
+pub async fn publish(
+    db: &DatabaseConnection,
+    traefik: &Traefik,
+    service_id: i64,
+    id: i64,
+) -> AppResult<bool> {
+    let service = service::Entity::find_by_id(service_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let written = traefik_service::republish(db, traefik, &service, &deploy_options(0)).await?;
+    deployment::Entity::update_many()
+        .col_expr(deployment::Column::Published, Expr::value(written))
+        .filter(deployment::Column::Id.eq(id))
+        .exec(db)
+        .await?;
+    Ok(written)
+}
+
+/// The routes' and spec's options from the `[panel]` configuration.
+pub fn deploy_options(force_update: u64) -> DeployOptions {
+    let cfg = config();
+    DeployOptions {
+        force_update,
+        cert_resolver: cfg.cert_resolver.clone(),
+        https_port: cfg.https_port,
+    }
 }
 
 /// Applies `row` to Docker: the outcome and the image it ran, or how it failed.
 async fn apply(
     docker: &Docker,
+    traefik: Option<&Traefik>,
     row: &deployment::Model,
     log: &mut RunLog<'_>,
     timings: Timings,
@@ -444,6 +485,14 @@ async fn apply(
         .map_err(fail)?;
     let api = docker.engine();
 
+    // Not routed any more before its tasks go.
+    if !snapshot.running
+        && let Some(traefik) = traefik
+        && let Err(err) = traefik.remove(&name).await
+    {
+        log.line(format!("warning: routes not removed: {err}"))
+            .await;
+    }
     if trigger == Trigger::Destroy {
         if existing.is_some() {
             log.line(format!("removing {name}")).await;
@@ -484,29 +533,59 @@ async fn apply(
         attachable: true,
         internal: false,
     };
-    docker.ensure_network(network).await.map_err(fail)?;
+    let network = docker.ensure_network(network).await.map_err(fail)?;
+    // Traefik reaches the service on its project's network.
+    if snapshot.running
+        && !snapshot.domains.is_empty()
+        && let Some(traefik) = traefik
+    {
+        match traefik.attach(docker, &network.name, &network.id).await {
+            Ok(true) => {
+                log.line(format!(
+                    "attached Traefik to {} (it restarts)",
+                    network.name
+                ))
+                .await;
+            }
+            Ok(false) => {}
+            // Its domains would lead nowhere: not deployed.
+            Err(err) => {
+                return Err(Outcome::Failed(format!(
+                    "Traefik ({}) could not join {}: {err}",
+                    traefik.service, network.name
+                )));
+            }
+        }
+    }
 
     let image = image_for(docker, trigger, &snapshot, row, existing.as_ref(), log).await?;
     log.hold().await?;
     if let Some(warning) = image.warning() {
         log.line(format!("warning: {warning}")).await;
     }
-    let force_update = force_update_of(existing.as_ref()) + u64::from(trigger == Trigger::Restart);
-    let cfg = config();
-    let options = DeployOptions {
-        force_update,
-        cert_resolver: cfg.cert_resolver.clone(),
-        https_port: cfg.https_port,
-    };
+    let options =
+        deploy_options(force_update_of(existing.as_ref()) + u64::from(trigger == Trigger::Restart));
     let out = desired(&snapshot, &image, &options);
     let sent = Utc::now();
     match existing {
         None => {
             log.line(format!("creating {name} ({})", image.reference()))
                 .await;
-            api.create_service(out.spec.clone(), None)
-                .await
-                .map_err(fail)?;
+            // Swarm's address allocator may refuse while another network
+            // is being removed ("Pool overlaps"): tried again shortly.
+            let mut tries = 0;
+            loop {
+                match api.create_service(out.spec.clone(), None).await {
+                    Err(err) if tries < 5 && err.to_string().contains("Pool overlaps") => {
+                        tries += 1;
+                        log.line(format!("Swarm is busy ({err}), trying again"))
+                            .await;
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        log.hold().await?;
+                    }
+                    other => break other.map(drop).map_err(fail)?,
+                };
+            }
         }
         Some(_) => {
             log.line(format!("updating {name} ({})", image.reference()))
@@ -950,6 +1029,7 @@ pub fn summary(row: &deployment::Model) -> serde_json::Value {
         "status": row.status,
         "error": row.error,
         "image": row.image_digest,
+        "published": row.published,
         "log": row.log,
         "finished": !matches!(row.status.as_str(), QUEUED | RUNNING),
     })

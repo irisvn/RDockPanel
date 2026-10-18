@@ -345,6 +345,9 @@ impl DockerApi for FakeDocker {
                 message: Some(format!("update {state}")),
                 ..Default::default()
             });
+        } else {
+            // (Swarm keeps an old one, hours old by then: not this run's.)
+            service.update_status = None;
         }
         Ok(vec![])
     }

@@ -25,8 +25,8 @@ impl Job for RunDeployment {
         1
     }
 
-    /// More than a run waits for Swarm (`Timings::timeout`), less than the
-    /// service lock's lease.
+    /// More than a run waits for Swarm (`Timings::timeout`). Its lease is
+    /// renewed meanwhile; a run aborted at this timeout lets it expire.
     fn timeout() -> Duration {
         Duration::from_secs(15 * 60)
     }

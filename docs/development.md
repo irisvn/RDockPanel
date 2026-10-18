@@ -27,7 +27,7 @@ Traefik as the service `rdp-traefik` on ports 8080 and 8443, reading routes from
 |---|---|
 | `RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql` | the test database server |
 | `RUSTCMS_TEST_BACKENDS=mysql` | run database tests on MySQL only (required) |
-| `PANEL_TEST_SWARM=1` | also run the Swarm tests (needs a Swarm manager: `scripts/dev-swarm.sh`): an overlay network and a service created, updated, removed |
+| `PANEL_TEST_SWARM=1` | also run the Swarm tests (needs `scripts/dev-swarm.sh`: a Swarm manager and Traefik on 8080/8443): an overlay network and a service created, updated, removed; deployments; domains routed through Traefik, an image change under load without a failed request, HTTPS, projects isolated |
 | `PANEL_TEST_DOCKER=1` | also run against the real Docker engine: pulls `alpine:3.20`, runs a container labelled `rdockpanel.test=1`, removes it |
 
 - Feature tests (`tests/feature/`) drive the app through HTTP with a `FakeDocker`

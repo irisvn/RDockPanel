@@ -122,6 +122,27 @@ become `interrupted` and free their service.
 The service page's aside (`ServiceLiveSlot`, `service-live.js`) shows the state, pending changes, the
 action buttons and the latest deployment, its log followed live over SSE.
 
+### Routes (Traefik)
+
+`services/traefik_service.rs`. Traefik reads one file per service, `<project>_<service>.yml`, from
+`[panel] traefik_dir` (its file provider; `storage/traefik/dynamic` in development). The panel
+writes it whole (a hidden temporary file, then renamed) after each deployment, from the deployment
+that made the
+service what it is (its configuration hash): a new domain is routed once deployed, a failed
+deployment leaves the routes of what still runs, Stop and Destroy remove the file before the tasks go.
+Whether the write worked is the deployment's `published`; the service's **Republish routes** action
+(a `deploy.publish` job) writes it again. At boot every file is written again from the database, and
+files of services that no longer exist are removed.
+
+Traefik reaches a service as `http://<project>_<service>:<port>` on the project's network: before
+the first deployment with a domain, the panel attaches `[panel] traefik_service` (`rdp-traefik`) to
+`rdp_<project>` (Swarm restarts Traefik then: a few seconds without routing); when it cannot, the
+deployment fails rather than publish domains that lead nowhere. Writes are serialized (one lock in
+the panel's process, workers included), each reading the database at that moment, so the last one
+written is always the latest state. Projects share no
+network, so a project's services cannot reach another's. Deleting a project does not yet detach
+Traefik from its network nor remove the network (see the [roadmap](roadmap.md)).
+
 ## Data
 
 MySQL 8.4 (`docker-compose.yml` for development). Besides the framework's tables (users, roles,

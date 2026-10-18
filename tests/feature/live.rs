@@ -34,6 +34,7 @@ impl Drop for Server {
 async fn serve(app: &TestApp, docker: FakeDocker) -> Server {
     let mut builder = bootstrap::build(app.state().config().clone());
     builder.bind(Docker::new(docker));
+    builder.bind(support::scratch_traefik());
     let served = builder
         .build_with_db(app.state().db().clone())
         .await

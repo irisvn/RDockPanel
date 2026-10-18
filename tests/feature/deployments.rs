@@ -11,7 +11,8 @@ use rdockpanel::services::docker_service::{ServiceUpdateStatusStateEnum, TaskSta
 use rustcms::axum::http::StatusCode;
 use rustcms_testing::{TestApp, TestClient, TestDb, TestResponse, db_test};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    QueryOrder, Set,
 };
 use serde_json::{Value, json};
 
@@ -23,17 +24,22 @@ const FAST: Timings = Timings {
     timeout: Duration::from_secs(2),
 };
 
-fn records(app: &TestApp, slug: &str) -> String {
+pub(crate) fn records(app: &TestApp, slug: &str) -> String {
     app.admin_api(&format!("resources/{slug}/records"))
 }
 
-async fn create(app: &TestApp, client: &TestClient<'_>, slug: &str, body: Value) -> String {
+pub(crate) async fn create(
+    app: &TestApp,
+    client: &TestClient<'_>,
+    slug: &str,
+    body: Value,
+) -> String {
     let response = client.post_json(&records(app, slug), &body).await;
     response.assert_status(StatusCode::CREATED);
     response.json()["data"]["key"].as_str().unwrap().to_owned()
 }
 
-async fn action(
+pub(crate) async fn action(
     app: &TestApp,
     client: &TestClient<'_>,
     slug: &str,
@@ -69,7 +75,7 @@ async fn service_row(app: &TestApp, id: i64) -> service::Model {
         .unwrap()
 }
 
-async fn last_deployment(app: &TestApp, service: i64) -> deployment::Model {
+pub(crate) async fn last_deployment(app: &TestApp, service: i64) -> deployment::Model {
     deployment::Entity::find()
         .filter(deployment::Column::ServiceId.eq(service))
         .order_by_desc(deployment::Column::Id)
@@ -656,6 +662,9 @@ db_test!(
         action(&app, &deployer, "services", "destroy", &id.to_string())
             .await
             .assert_status(StatusCode::FORBIDDEN);
+        action(&app, &viewer, "services", "republish", &id.to_string())
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
 
         // The service's aside: its deployments (log, error) only with their
         // own permission.
@@ -677,6 +686,161 @@ db_test!(
     }
 );
 
+db_test!(
+    domains_need_traefik_on_the_network,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        fake.services.lock().unwrap().remove("rdp-traefik");
+        let (admin, id) = shop(&app).await;
+        let failed = run(&app, &admin, "deploy", id).await;
+        assert_eq!(failed.status, "failed");
+        assert!(
+            failed
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("could not join rdp_shop"),
+            "{:?}",
+            failed.error
+        );
+        assert!(!fake.services.lock().unwrap().contains_key("shop_web"));
+    }
+);
+
+db_test!(
+    routes_follow_the_deployed_service,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let dir = support::traefik_dir(&app);
+        let file = dir.join("shop_web.yml");
+        let (admin, id) = shop(&app).await;
+        let traefik_updates = |fake: &FakeDocker| {
+            fake.calls()
+                .iter()
+                .filter(|c| *c == "update service rdp-traefik")
+                .count()
+        };
+
+        let deployed = run(&app, &admin, "deploy", id).await;
+        assert_eq!(deployed.status, "succeeded", "{:?}", deployed.error);
+        assert!(deployment_by_id(&app, deployed.id).await.published);
+        let routes = std::fs::read_to_string(&file).unwrap();
+        assert!(routes.contains("Host(`shop.localhost`)"), "{routes}");
+        assert!(routes.contains("http://shop_web:80"), "{routes}");
+        // Traefik joined the project's network, once, the rest of it kept.
+        let traefik = fake.services.lock().unwrap()["rdp-traefik"]
+            .spec
+            .clone()
+            .unwrap();
+        assert_eq!(traefik.labels.unwrap()["rdockpanel.system"], "true");
+        let template = traefik.task_template.unwrap();
+        let targets: Vec<_> = template
+            .networks
+            .unwrap()
+            .into_iter()
+            .filter_map(|n| n.target)
+            .collect();
+        assert_eq!(targets, ["ingress-extra", "rdp_shop"]);
+        assert!(template.container_spec.unwrap().args.is_some());
+        assert_eq!(run(&app, &admin, "restart", id).await.status, "succeeded");
+        assert_eq!(traefik_updates(&fake), 1);
+
+        // A domain added: routed only once deployed.
+        create(&app, &admin, "service_domains", json!({"service_id": id.to_string(), "host": "www.shop.localhost", "path": "/", "port": 80, "https": true})).await;
+        assert!(
+            !std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("www.shop.localhost")
+        );
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let routes = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            routes.contains("www.shop.localhost") && routes.contains("websecure"),
+            "{routes}"
+        );
+
+        // A failed deployment (of another domain) leaves the routes of what
+        // still runs.
+        create(&app, &admin, "service_domains", json!({"service_id": id.to_string(), "host": "new.shop.localhost", "path": "/", "port": 80, "https": false})).await;
+        *fake.task_state.lock().unwrap() = Some(TaskState::FAILED);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "failed");
+        let routes = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            routes.contains("www.shop.localhost") && !routes.contains("new.shop.localhost"),
+            "{routes}"
+        );
+        *fake.task_state.lock().unwrap() = None;
+        // Swarm rolled it back: the same.
+        *fake.update_state.lock().unwrap() = Some(ServiceUpdateStatusStateEnum::ROLLBACK_COMPLETED);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "rolled_back");
+        assert!(
+            !std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("new.shop.localhost")
+        );
+        *fake.update_state.lock().unwrap() = None;
+
+        // Stopped: not routed; started: routed again; destroyed: gone.
+        assert_eq!(run(&app, &admin, "stop", id).await.status, "succeeded");
+        assert!(!file.exists());
+        assert_eq!(run(&app, &admin, "start", id).await.status, "succeeded");
+        assert!(file.exists());
+
+        // Routes that cannot be written: the deployment says so; Republish
+        // (a job) writes them once they can be.
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::write(&dir, "not a directory").unwrap();
+        let unpublished = run(&app, &admin, "restart", id).await;
+        assert_eq!(unpublished.status, "succeeded");
+        assert!(!deployment_by_id(&app, unpublished.id).await.published);
+        let aside = aside(&app, &admin, id).await;
+        assert_eq!(aside["latest"]["published"], json!(false), "{aside}");
+        std::fs::remove_file(&dir).unwrap();
+        action(&app, &admin, "services", "republish", &id.to_string())
+            .await
+            .assert_status(StatusCode::OK);
+        let jobs = rustcms::models::job::Entity::find()
+            .filter(rustcms::models::job::Column::Kind.eq("deploy.publish"))
+            .count(app.state().db())
+            .await
+            .unwrap();
+        assert_eq!(jobs, 1);
+        let traefik = app
+            .state()
+            .service::<rdockpanel::services::traefik_service::Traefik>()
+            .unwrap();
+        // (The job's body.)
+        assert!(
+            deployment_service::publish(app.state().db(), &traefik, id, unpublished.id)
+                .await
+                .unwrap()
+        );
+        assert!(file.exists());
+        assert!(deployment_by_id(&app, unpublished.id).await.published);
+
+        // At boot: written again from the database, strays removed.
+        std::fs::remove_file(&file).unwrap();
+        std::fs::write(dir.join("gone_web.yml"), "http: {}").unwrap();
+        std::fs::write(dir.join("custom.yml"), "http: {}").unwrap();
+        let options = deployment_service::deploy_options(0);
+        let written =
+            rdockpanel::services::traefik_service::sync_all(app.state().db(), &traefik, &options)
+                .await
+                .unwrap();
+        assert_eq!(written, 1);
+        assert!(file.exists() && !dir.join("gone_web.yml").exists());
+        assert!(dir.join("custom.yml").exists(), "not a service's: kept");
+
+        assert_eq!(run(&app, &admin, "destroy", id).await.status, "succeeded");
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+);
+
 // With `PANEL_TEST_SWARM=1`: the whole flow on a real Swarm, from the
 // panel's actions: deploy (nginx, a health check), a rolling update to
 // another image, stop, start, destroy.
@@ -687,6 +851,7 @@ db_test!(
         if std::env::var_os("PANEL_TEST_SWARM").is_none() {
             return;
         }
+        let _swarm = support::swarm_lock().await;
         let app = support::app(db).await;
         let user = support::user_with(&app, "admin", &[]).await;
         app.make_super_admin(&user).await;

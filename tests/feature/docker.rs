@@ -508,6 +508,7 @@ async fn against_a_real_swarm() {
     if std::env::var_os("PANEL_TEST_SWARM").is_none() {
         return;
     }
+    let _swarm = crate::support::swarm_lock().await;
     use rdockpanel::services::docker_service::{NetworkRequest, SwarmRole};
     let docker = Docker::new(BollardDocker::connect().expect("docker client"));
     assert_eq!(docker.info().await.unwrap().swarm, SwarmRole::Manager);
@@ -639,6 +640,7 @@ async fn desired_specs_run_on_a_real_swarm() {
     if std::env::var_os("PANEL_TEST_SWARM").is_none() {
         return;
     }
+    let _swarm = crate::support::swarm_lock().await;
     use rdockpanel::services::deploy_service::{
         DeployOptions, Healthcheck, Mount, Snapshot, desired, network_name, pin_image, volume_name,
     };

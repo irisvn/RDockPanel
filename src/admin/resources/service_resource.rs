@@ -10,6 +10,7 @@ use rustcms::{AppResult, ValidationErrors, async_trait};
 use sea_orm::{DatabaseTransaction, EntityTrait, QuerySelect};
 
 use crate::admin::{int, is_set, text};
+use crate::jobs::publish_routes::PublishRoutes;
 use crate::jobs::run_deployment::RunDeployment;
 use crate::models::service::{self, NEW};
 use crate::services::deploy_rules_service::{valid_image_reference, valid_name};
@@ -132,6 +133,22 @@ impl Resource for ServiceResource {
             deployment_action("stop", Trigger::Stop, "Stop")
                 .requires_confirmation("Stop this service? Its tasks are removed."),
             deployment_action("restart", Trigger::Restart, "Restart"),
+            Action::<service::Entity>::new("republish", |ctx, txn, services, _| {
+                Box::pin(async move {
+                    for service in services {
+                        ctx.dispatch(
+                            txn,
+                            &PublishRoutes {
+                                service_id: service.id,
+                            },
+                        )
+                        .await?;
+                    }
+                    Ok(())
+                })
+            })
+            .label("Republish routes")
+            .ability("deploy"),
             deployment_action("destroy", Trigger::Destroy, "Destroy")
                 .ability("destroy")
                 .color("danger")

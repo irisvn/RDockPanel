@@ -24,6 +24,11 @@ pub struct PanelConfig {
     /// The public HTTPS port HTTP routes redirect to (443; 8443 with
     /// `scripts/dev-swarm.sh`).
     pub https_port: u16,
+    /// Traefik's file provider directory: the panel writes the routes there.
+    pub traefik_dir: PathBuf,
+    /// Traefik's Swarm service, attached to each project's network (empty:
+    /// Traefik is not a Swarm service the panel manages).
+    pub traefik_service: String,
 }
 
 impl Default for PanelConfig {
@@ -33,6 +38,8 @@ impl Default for PanelConfig {
             reserved_ports: vec![],
             cert_resolver: String::new(),
             https_port: 443,
+            traefik_dir: PathBuf::from("storage/traefik/dynamic"),
+            traefik_service: "rdp-traefik".to_owned(),
         }
     }
 }

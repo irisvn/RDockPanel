@@ -19,7 +19,8 @@ The Deploy group's resources use the panel's standard permissions, one set per r
 `service_domains.*`, `service_ports.*`, `service_mounts.*`, and `deployments.view_any` /
 `deployments.view` (deployments are written by the panel only). Besides:
 
-- `services.deploy` runs a service's Deploy, Start, Stop and Restart, and a deployment's Rollback
+- `services.deploy` runs a service's Deploy, Start, Stop, Restart and Republish routes, and a
+  deployment's Rollback
   (to a deployment that succeeded running a recorded image: not a Stop or a Destroy);
 - `services.destroy` removes a service from Swarm (Destroy; its volumes are kept);
 - a service's deployments (their log, error and image), on its page too, need `deployments.view`;

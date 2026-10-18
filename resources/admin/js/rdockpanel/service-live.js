@@ -61,6 +61,8 @@ window.rustcms.registerSlot("rdockpanel/service-live", {
           );
         }
       }
+      const unpublished = data.latest?.finished && !data.latest.published;
+      if (data.can?.deploy && !busy && unpublished) buttons.push(run("republish", "Republish routes"));
       if (data.can?.destroy && !busy && data.status && data.status !== "new")
         buttons.push(run("destroy", "Destroy", "danger", "Remove this service from Docker? Its volumes are kept."));
       const actions = h("div", { className: "rdp-actions" }, buttons);
@@ -77,6 +79,8 @@ window.rustcms.registerSlot("rdockpanel/service-live", {
       const notes = [];
       if (data.pending && data.status !== "new")
         notes.push(t("The configuration changed since the last deployment: deploy to apply it."));
+      if (unpublished)
+        notes.push(t("Traefik's routes were not written: the domains may not follow this deployment. Republish them."));
       if (data.zero_downtime && !data.zero_downtime_possible)
         notes.push(t("Zero downtime needs a health check and no host-mode port: updates stop the old task first."));
       if (notes.length) {
@@ -178,6 +182,9 @@ window.rustcms.registerTranslations("vi", {
   Start: "Chạy",
   Stop: "Dừng",
   Restart: "Khởi động lại",
+  "Republish routes": "Ghi lại route",
+  "Traefik's routes were not written: the domains may not follow this deployment. Republish them.":
+    "Chưa ghi được route Traefik: domain có thể chưa theo lần deploy này. Bấm Ghi lại route.",
   Destroy: "Gỡ khỏi Docker",
   "Stop this service? Its tasks are removed.": "Dừng service này? Các task sẽ bị gỡ.",
   "Remove this service from Docker? Its volumes are kept.": "Gỡ service khỏi Docker? Volume được giữ lại.",

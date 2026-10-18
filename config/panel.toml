@@ -18,3 +18,12 @@ cert_resolver = ""
 # The public HTTPS port HTTP is redirected to (development: 8443, set in .env
 # as RUSTCMS_PANEL__HTTPS_PORT).
 https_port = 443
+
+# Traefik's file provider directory: the panel writes one file of routes per
+# service there (the installer: /etc/rdockpanel/traefik/dynamic). Relative
+# paths are from the panel's working directory.
+traefik_dir = "storage/traefik/dynamic"
+
+# Traefik's Swarm service: attached to each project's network so it reaches
+# the services there (scripts/dev-swarm.sh and the installer name it so).
+traefik_service = "rdp-traefik"

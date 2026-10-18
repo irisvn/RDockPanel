@@ -520,7 +520,7 @@ impl TraefikFile {
 /// them), one Traefik service per container port, reached through the
 /// service's name on the project network. Names start with the Swarm
 /// service's, so files never collide.
-fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFile> {
+pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFile> {
     if snapshot.domains.is_empty() {
         return None;
     }

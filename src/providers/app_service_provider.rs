@@ -14,6 +14,9 @@ impl ServiceProvider for AppServiceProvider {
             crate::services::deploy_rules_service::PanelConfig::from_config(app.config()),
         );
         app.bind(crate::services::docker_service::Docker::from_env());
+        app.bind(crate::services::traefik_service::Traefik::from_config(
+            crate::services::deploy_rules_service::config(),
+        ));
         app.bind(crate::services::system_stats_service::SystemStats::from_env());
         let shutdown = app.shutdown();
         app.bind(crate::services::live_service::Live::new(shutdown));
@@ -22,6 +25,7 @@ impl ServiceProvider for AppServiceProvider {
         // rustcms:seeders
         app.job::<crate::jobs::pull_image::PullImage>();
         app.job::<crate::jobs::run_deployment::RunDeployment>();
+        app.job::<crate::jobs::publish_routes::PublishRoutes>();
         // rustcms:jobs
         // rustcms:commands
     }
@@ -35,6 +39,14 @@ impl ServiceProvider for AppServiceProvider {
         }
         // Then every minute: a run whose job timed out or died stops renewing.
         crate::services::deployment_service::reap_every_minute(state);
+        // Traefik's routes, written again from the database.
+        if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {
+            let options = crate::services::deployment_service::deploy_options(0);
+            match crate::services::traefik_service::sync_all(state.db(), &traefik, &options).await {
+                Ok(n) => tracing::info!(n, dir = %traefik.dir.display(), "routes written"),
+                Err(err) => tracing::debug!(%err, "routes not written"),
+            }
+        }
         use crate::http::controllers::docker_controller::TERMINAL_SESSION;
         use crate::services::action_service::interrupted_terminals;
         use crate::services::docker_service::Docker;

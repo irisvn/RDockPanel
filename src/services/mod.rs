@@ -7,4 +7,5 @@ pub mod deployment_service;
 pub mod docker_service;
 pub mod live_service;
 pub mod system_stats_service;
+pub mod traefik_service;
 // rustcms:services
