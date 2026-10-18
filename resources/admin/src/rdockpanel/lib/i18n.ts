@@ -366,8 +366,8 @@ window.rustcms?.registerTranslations?.("vi", {
   "We will be back soon.": "Chúng tôi sẽ sớm quay lại.",
   // Scripts.
   Scripts: "Script",
-  "Shell commands run with sh -c in a running container of the service (at most 2 minutes).":
-    "Lệnh shell chạy bằng sh -c trong một container đang chạy của service (tối đa 2 phút).",
+  "Shell commands run with sh -c in a running container of the service (at most 25 seconds).":
+    "Lệnh shell chạy bằng sh -c trong một container đang chạy của service (tối đa 25 giây).",
   "No script.": "Chưa có script.",
   Run: "Chạy",
   "Running…": "Đang chạy…",

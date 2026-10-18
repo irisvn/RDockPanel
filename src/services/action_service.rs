@@ -126,6 +126,41 @@ pub async fn interrupted_terminals<C: ConnectionTrait>(
     Ok(ended)
 }
 
+/// Script runs still running at boot (the panel stopped before they
+/// ended): marked failed; their containers and marks, for killing them.
+pub async fn interrupted_scripts<C: ConnectionTrait>(
+    db: &C,
+    kind: &str,
+    prefix: &str,
+) -> AppResult<Vec<(String, String)>> {
+    use sea_orm::{ColumnTrait, QueryFilter};
+    let rows = action::Entity::find()
+        .filter(action::Column::Kind.eq(kind))
+        .filter(action::Column::Status.eq(action::RUNNING))
+        .all(db)
+        .await?;
+    let mut ended = Vec::new();
+    for row in rows {
+        let mark = row
+            .log
+            .as_deref()
+            .and_then(|log| log.strip_prefix(prefix))
+            .map(str::to_owned);
+        let target = row.target.clone();
+        finish(
+            db,
+            row,
+            Some("interrupted: the panel stopped before it ended".to_owned()),
+            None,
+        )
+        .await?;
+        if let Some(mark) = mark {
+            ended.push((target, mark));
+        }
+    }
+    Ok(ended)
+}
+
 /// Marks the row of `id` running (a job picked it up).
 pub async fn running<C: ConnectionTrait>(db: &C, id: i64) -> AppResult<Option<action::Model>> {
     let Some(row) = action::Entity::find_by_id(id).one(db).await? else {

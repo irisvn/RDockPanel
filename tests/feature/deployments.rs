@@ -1695,12 +1695,18 @@ db_test!(
         .await;
         let url = app.admin_api(&format!("x/apps/scripts/{script}/run"));
         // Not running yet.
+        let shown = json!({"command": "php artisan migrate --force"});
         admin
-            .post_json(&url, &json!({}))
+            .post_json(&url, &shown)
             .await
             .assert_status(StatusCode::BAD_REQUEST);
         assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
-        let ran = admin.post_json(&url, &json!({})).await;
+        // Only the command shown.
+        admin
+            .post_json(&url, &json!({"command": "rm -rf /"}))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+        let ran = admin.post_json(&url, &shown).await;
         ran.assert_status(StatusCode::OK);
         assert_eq!(ran.json()["exit_code"], 0);
         assert!(

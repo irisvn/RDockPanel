@@ -249,7 +249,7 @@ export function ScriptsTab(props: Props) {
   return (
     <Section
       title={t("Scripts")}
-      description={t("Shell commands run with sh -c in a running container of the service (at most 2 minutes).")}
+      description={t("Shell commands run with sh -c in a running container of the service (at most 25 seconds).")}
     >
       {d.scripts.length === 0 && <p className="rdp2-muted">{t("No script.")}</p>}
       <ul className="rdp2-list">
@@ -266,7 +266,7 @@ export function ScriptsTab(props: Props) {
                   setRunning(s.id);
                   setError(null);
                   try {
-                    const out = await props.api.post<{ exit_code: number | null; output: string }>(`/apps/scripts/${s.id}/run`, {});
+                    const out = await props.api.post<{ exit_code: number | null; output: string }>(`/apps/scripts/${s.id}/run`, { command: s.command });
                     setResult({ name: s.name, ...out });
                   } catch (err) {
                     setError(err);

@@ -167,6 +167,28 @@ impl ServiceProvider for AppServiceProvider {
             Ok(_) => {}
             Err(err) => tracing::debug!(%err, "interrupted terminals not checked"),
         }
+        // Scripts cut by a stop: their commands killed in their containers.
+        {
+            use crate::http::controllers::apps_controller::{SCRIPT_ACTION, SCRIPT_MARK};
+            match crate::services::action_service::interrupted_scripts(
+                state.db(),
+                SCRIPT_ACTION,
+                SCRIPT_MARK,
+            )
+            .await
+            {
+                Ok(runs) => {
+                    if let Some(docker) = state.service::<Docker>() {
+                        for (container, mark) in runs {
+                            if let Err(err) = docker.engine().kill_marked(&container, &mark).await {
+                                tracing::warn!(%err, container, "an interrupted script not killed");
+                            }
+                        }
+                    }
+                }
+                Err(err) => tracing::debug!(%err, "interrupted scripts not checked"),
+            }
+        }
         // Before migrations ran (a fresh install's `migrate`) there is no table yet.
         match crate::services::action_service::reap_stale(state.db()).await {
             Ok(0) => {}

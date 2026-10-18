@@ -818,32 +818,61 @@ pub async fn github_webhook(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunScriptBody {
+    /// The command as the one who runs it saw it: run only if it is still so.
+    pub command: String,
+}
+
+/// How long a script may run (within the request's own timeout).
+const SCRIPT_TIME: std::time::Duration = std::time::Duration::from_secs(25);
+
 /// Runs a script of a service in one of its running containers (`sh -c`,
-/// at most 2 minutes, its output's last 64 KB): `{exit_code, output}`.
-/// Audited (its name, never its output).
+/// at most 25 s, its output's last 64 KB): `{exit_code, output}`. Only the
+/// command shown (409 if changed meanwhile), only in a service the panel
+/// deployed. Logged as an action (`script.run`: a run cut by a stop is
+/// killed at boot) and audited (its name, never its output).
 pub async fn run_script(
     State(app): State<AppState>,
     auth: Auth,
     request: RequestMeta,
     Path(id): Path<i64>,
+    Json(body): Json<RunScriptBody>,
 ) -> AppResult<Json<Value>> {
     use crate::models::service_script;
+    use crate::services::action_service::{self, Initiator};
     use crate::services::docker_service::{Docker, ExecChunk, TaskState};
     use futures_util::StreamExt;
     let script = service_script::Entity::find_by_id(id)
         .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
+    if script.command != body.command {
+        return Err(AppError::Conflict {
+            code: "script_changed",
+            reason: "changed",
+            message: "The script changed since it was shown: look at it again",
+        });
+    }
     let row = service_of(&app, script.service_id).await?;
     if row.kind == "compose" {
         return Err(AppError::BadRequest(
             "a Compose service's scripts are not run by the panel".into(),
         ));
     }
-    let name = snapshot_without_env(app.db(), &row).await?.service_name();
+    let snapshot = snapshot_without_env(app.db(), &row).await?;
+    let name = snapshot.service_name();
     let docker = app
         .service::<Docker>()
         .ok_or_else(|| AppError::BadRequest("Docker is not available".into()))?;
+    // The panel's own deployment of this service (never another object of
+    // that name, such as one of the panel's).
+    docker
+        .managed_service(&name, &snapshot.project, &snapshot.service)
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+        .ok_or_else(|| AppError::BadRequest("the service is not deployed".into()))?;
     let tasks = docker
         .engine()
         .list_tasks(&name)
@@ -865,18 +894,36 @@ pub async fn run_script(
         .key(row.id.to_string())
         .meta(json!({ "script": script.name }));
     let txn = app.db().begin().await?;
-    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    audit::record(&txn, &audit_context(&auth, request.clone()), entry).await?;
     txn.commit().await?;
     let mark = format!(
         "rdp-script-{}",
         crate::services::database_service::random_string(20)
     );
+    let by = Initiator::user(auth.principal(), request);
+    let action = action_service::start(
+        app.db(),
+        &by,
+        SCRIPT_ACTION,
+        &container,
+        crate::models::action::RUNNING,
+    )
+    .await?;
+    let action = action_service::note(app.db(), action, &format!("{SCRIPT_MARK}{mark}")).await?;
     let cmd = vec!["sh".to_owned(), "-c".to_owned(), script.command.clone()];
-    let mut chunks = docker
+    let mut chunks = match docker
         .engine()
         .run_in_container(&container, cmd, &mark, None)
         .await
-        .map_err(|e| AppError::BadRequest(format!("the script could not start: {e}")))?;
+    {
+        Ok(chunks) => chunks,
+        Err(e) => {
+            let _ = action_service::finish(app.db(), action, Some(e.to_string()), None).await;
+            return Err(AppError::BadRequest(format!(
+                "the script could not start: {e}"
+            )));
+        }
+    };
     let mut output = Vec::new();
     let mut code = None;
     let read = async {
@@ -897,16 +944,23 @@ pub async fn run_script(
             }
         }
     };
-    let timed_out = tokio::time::timeout(std::time::Duration::from_secs(120), read)
-        .await
-        .is_err();
+    let timed_out = tokio::time::timeout(SCRIPT_TIME, read).await.is_err();
     if timed_out {
         // Dropped above: its processes are killed in the container.
-        output.extend_from_slice(b"\n(stopped after 2 minutes)\n");
+        output.extend_from_slice(b"\n(stopped after 25 s)\n");
     }
     let start = output.len().saturating_sub(64 * 1024);
-    Ok(Json(json!({
-        "exit_code": code,
-        "output": String::from_utf8_lossy(&output[start..]),
-    })))
+    let text = String::from_utf8_lossy(&output[start..]).into_owned();
+    let error = match code {
+        Some(0) => None,
+        Some(c) => Some(format!("exited with {c}")),
+        None => Some("stopped".to_owned()),
+    };
+    let _ = action_service::finish(app.db(), action, error, None).await;
+    Ok(Json(json!({ "exit_code": code, "output": text })))
 }
+
+/// A script's run in the actions log; its log holds the mark of its
+/// processes (`SCRIPT_MARK<mark>`), to kill them after a stop.
+pub const SCRIPT_ACTION: &str = "script.run";
+pub const SCRIPT_MARK: &str = "mark:";

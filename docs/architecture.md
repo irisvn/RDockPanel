@@ -287,7 +287,7 @@ notification" sends at once and answers why it failed.
 
 As EasyPanel's Scripts. A service's scripts (`service_scripts`: a name, a shell command) run with
 `sh -c` in one of its running containers (`POST /apps/scripts/{id}/run`, `docker.exec` as a
-terminal), at most 2 minutes (then killed in the container), their output's last 64 KB returned;
+terminal), at most 25 seconds (then killed in the container; within the request's own timeout), only the command its runner saw (409 otherwise), only in a service the panel deployed; a run cut by a stop is killed at boot (`script.run` actions hold its mark), their output's last 64 KB returned;
 each run is audited (its name, never its output). Not for Compose services.
 
 ### Maintenance mode

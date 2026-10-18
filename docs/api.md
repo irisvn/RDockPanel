@@ -49,7 +49,7 @@ their actions), so the resources' policies, validation and audit apply.
 | POST | `/services/{id}/trigger` | services.deploy | a new deployment trigger URL, shown once: `{"url"}`; the old one stops working; audited |
 | POST | `/services/{id}/basic-auth` | services.update | `{"username","password"}`: a user of its basic authentication (bcrypt; the same user replaced); audited |
 | DELETE | `/services/{id}/basic-auth/{user}` | services.update | removes one; audited |
-| POST | `/scripts/{id}/run` | docker.exec | runs a script in a running container: `{"exit_code","output"}` (2 minutes at most); audited |
+| POST | `/scripts/{id}/run` | docker.exec | runs a script in a running container: `{"exit_code","output"}` (25 s at most); `{"command"}` must be the script as shown (409 otherwise); audited |
 | GET | `/services/{id}/credentials` | services.secrets | a database's passwords and internal URL; audited first |
 | GET | `/services/{id}/env` | services.secrets | `{"text","revision"}`: the environment as `.env` text, in clear; audited first (`services.env.read`, names only: no audit, no values) |
 | PUT | `/services/{id}/env` | services.update | `{"text","revision"?}` replaces the environment (sealed); with the revision read, 409 `env_stale` when it changed meanwhile; 422 names the bad line; audited (`services.env.update`, names only) |
