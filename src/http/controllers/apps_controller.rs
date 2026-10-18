@@ -911,52 +911,59 @@ pub async fn run_script(
     .await?;
     let action = action_service::note(app.db(), action, &format!("{SCRIPT_MARK}{mark}")).await?;
     let cmd = vec!["sh".to_owned(), "-c".to_owned(), script.command.clone()];
-    let mut chunks = match docker
-        .engine()
-        .run_in_container(&container, cmd, &mark, None)
-        .await
-    {
-        Ok(chunks) => chunks,
-        Err(e) => {
-            let _ = action_service::finish(app.db(), action, Some(e.to_string()), None).await;
-            return Err(AppError::BadRequest(format!(
-                "the script could not start: {e}"
-            )));
-        }
-    };
-    let mut output = Vec::new();
-    let mut code = None;
-    let read = async {
-        while let Some(chunk) = chunks.next().await {
-            match chunk {
-                Ok(ExecChunk::Out(bytes)) | Ok(ExecChunk::Err(bytes)) => {
-                    output.extend_from_slice(&bytes);
-                    if output.len() > 128 * 1024 {
-                        let cut = output.len() - 64 * 1024;
-                        output.drain(..cut);
+    // Run apart from the request: its action is finished even if the
+    // request is dropped (its timeout); the response waits for it.
+    let db = app.db().clone();
+    let run = tokio::spawn(async move {
+        let mut chunks = match docker
+            .engine()
+            .run_in_container(&container, cmd, &mark, None)
+            .await
+        {
+            Ok(chunks) => chunks,
+            Err(e) => {
+                let _ = action_service::finish(&db, action, Some(e.to_string()), None).await;
+                return Err(format!("the script could not start: {e}"));
+            }
+        };
+        let mut output = Vec::new();
+        let mut code = None;
+        let read = async {
+            while let Some(chunk) = chunks.next().await {
+                match chunk {
+                    Ok(ExecChunk::Out(bytes)) | Ok(ExecChunk::Err(bytes)) => {
+                        output.extend_from_slice(&bytes);
+                        if output.len() > 128 * 1024 {
+                            let cut = output.len() - 64 * 1024;
+                            output.drain(..cut);
+                        }
+                    }
+                    Ok(ExecChunk::Exit(c)) => code = Some(c),
+                    Err(e) => {
+                        output.extend_from_slice(format!("\n{e}\n").as_bytes());
+                        break;
                     }
                 }
-                Ok(ExecChunk::Exit(c)) => code = Some(c),
-                Err(e) => {
-                    output.extend_from_slice(format!("\n{e}\n").as_bytes());
-                    break;
-                }
             }
+        };
+        if tokio::time::timeout(SCRIPT_TIME, read).await.is_err() {
+            // Dropped: its processes are killed in the container.
+            output.extend_from_slice(b"\n(stopped after 25 s)\n");
         }
-    };
-    let timed_out = tokio::time::timeout(SCRIPT_TIME, read).await.is_err();
-    if timed_out {
-        // Dropped above: its processes are killed in the container.
-        output.extend_from_slice(b"\n(stopped after 25 s)\n");
-    }
-    let start = output.len().saturating_sub(64 * 1024);
-    let text = String::from_utf8_lossy(&output[start..]).into_owned();
-    let error = match code {
-        Some(0) => None,
-        Some(c) => Some(format!("exited with {c}")),
-        None => Some("stopped".to_owned()),
-    };
-    let _ = action_service::finish(app.db(), action, error, None).await;
+        let start = output.len().saturating_sub(64 * 1024);
+        let text = String::from_utf8_lossy(&output[start..]).into_owned();
+        let error = match code {
+            Some(0) => None,
+            Some(c) => Some(format!("exited with {c}")),
+            None => Some("stopped".to_owned()),
+        };
+        let _ = action_service::finish(&db, action, error, None).await;
+        Ok((code, text))
+    });
+    let (code, text) = run
+        .await
+        .map_err(AppError::internal)?
+        .map_err(AppError::BadRequest)?;
     Ok(Json(json!({ "exit_code": code, "output": text })))
 }
 

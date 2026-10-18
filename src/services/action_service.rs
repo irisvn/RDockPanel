@@ -126,39 +126,33 @@ pub async fn interrupted_terminals<C: ConnectionTrait>(
     Ok(ended)
 }
 
-/// Script runs still running at boot (the panel stopped before they
-/// ended): marked failed; their containers and marks, for killing them.
-pub async fn interrupted_scripts<C: ConnectionTrait>(
+/// Script runs left running (their run lasts seconds: older than `after`,
+/// the request that ran them is gone): each with its container and mark,
+/// for killing them before they are finished.
+pub async fn abandoned_scripts<C: ConnectionTrait>(
     db: &C,
     kind: &str,
     prefix: &str,
-) -> AppResult<Vec<(String, String)>> {
+    after: chrono::Duration,
+) -> AppResult<Vec<(action::Model, Option<(String, String)>)>> {
     use sea_orm::{ColumnTrait, QueryFilter};
     let rows = action::Entity::find()
         .filter(action::Column::Kind.eq(kind))
         .filter(action::Column::Status.eq(action::RUNNING))
+        .filter(action::Column::UpdatedAt.lt(Utc::now() - after))
         .all(db)
         .await?;
-    let mut ended = Vec::new();
-    for row in rows {
-        let mark = row
-            .log
-            .as_deref()
-            .and_then(|log| log.strip_prefix(prefix))
-            .map(str::to_owned);
-        let target = row.target.clone();
-        finish(
-            db,
-            row,
-            Some("interrupted: the panel stopped before it ended".to_owned()),
-            None,
-        )
-        .await?;
-        if let Some(mark) = mark {
-            ended.push((target, mark));
-        }
-    }
-    Ok(ended)
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let mark = row
+                .log
+                .as_deref()
+                .and_then(|log| log.strip_prefix(prefix))
+                .map(|mark| (row.target.clone(), mark.to_owned()));
+            (row, mark)
+        })
+        .collect())
 }
 
 /// Marks the row of `id` running (a job picked it up).

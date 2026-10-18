@@ -87,6 +87,38 @@ impl ServiceProvider for AppServiceProvider {
                 }
                 // Pushes kept for a deployment cut short: deployed now.
                 crate::services::deployment_service::drain_pending(&state).await?;
+                // Scripts whose request is gone: killed, then finished (a
+                // kill that fails is tried again next time).
+                use crate::http::controllers::apps_controller::{SCRIPT_ACTION, SCRIPT_MARK};
+                let left = crate::services::action_service::abandoned_scripts(
+                    state.db(),
+                    SCRIPT_ACTION,
+                    SCRIPT_MARK,
+                    chrono::Duration::minutes(5),
+                )
+                .await?;
+                let docker = state.service::<crate::services::docker_service::Docker>();
+                for (row, mark) in left {
+                    let killed = match (&mark, &docker) {
+                        (Some((container, mark)), Some(docker)) => {
+                            docker.engine().kill_marked(container, mark).await
+                        }
+                        (None, _) => Ok(()),
+                        (Some(_), None) => continue,
+                    };
+                    match killed {
+                        Ok(()) => {
+                            crate::services::action_service::finish(
+                                state.db(),
+                                row,
+                                Some("interrupted: its request ended before it".to_owned()),
+                                None,
+                            )
+                            .await?;
+                        }
+                        Err(err) => tracing::warn!(%err, "an abandoned script not killed yet"),
+                    }
+                }
                 Ok(())
             }),
         );
@@ -166,28 +198,6 @@ impl ServiceProvider for AppServiceProvider {
             }
             Ok(_) => {}
             Err(err) => tracing::debug!(%err, "interrupted terminals not checked"),
-        }
-        // Scripts cut by a stop: their commands killed in their containers.
-        {
-            use crate::http::controllers::apps_controller::{SCRIPT_ACTION, SCRIPT_MARK};
-            match crate::services::action_service::interrupted_scripts(
-                state.db(),
-                SCRIPT_ACTION,
-                SCRIPT_MARK,
-            )
-            .await
-            {
-                Ok(runs) => {
-                    if let Some(docker) = state.service::<Docker>() {
-                        for (container, mark) in runs {
-                            if let Err(err) = docker.engine().kill_marked(&container, &mark).await {
-                                tracing::warn!(%err, container, "an interrupted script not killed");
-                            }
-                        }
-                    }
-                }
-                Err(err) => tracing::debug!(%err, "interrupted scripts not checked"),
-            }
         }
         // Before migrations ran (a fresh install's `migrate`) there is no table yet.
         match crate::services::action_service::reap_stale(state.db()).await {
