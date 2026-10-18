@@ -615,8 +615,11 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
         None => Ok(()),
     };
     // A push came meanwhile: deployed again (claimed once).
-    if let Err(err) = redeploy_if_pending(state, service.id).await {
-        tracing::warn!(%err, service = service.id, "the pending deployment not asked for");
+    match redeploy_if_pending(state, service.id).await {
+        Ok(()) | Err(AppError::Conflict { .. }) => {}
+        Err(err) => {
+            tracing::warn!(%err, service = service.id, "the pending deployment not asked for");
+        }
     }
     // Said in the background: never in the way of the routes.
     let notify = state.clone();
@@ -626,8 +629,27 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
     published
 }
 
-/// Asks for the Deploy a push asked for while another one ran.
-async fn redeploy_if_pending(state: &AppState, service_id: i64) -> AppResult<()> {
+/// Every service whose pending Deploy was left (its deployment cut short):
+/// asked for now when it is idle. Every minute, after the reaper.
+pub async fn drain_pending(state: &AppState) -> AppResult<()> {
+    let pending = service::Entity::find()
+        .filter(service::Column::RedeployPending.eq(true))
+        .all(state.db())
+        .await?;
+    for row in pending {
+        match redeploy_if_pending(state, row.id).await {
+            Ok(()) | Err(AppError::Conflict { .. }) => {}
+            Err(err) => {
+                tracing::warn!(%err, service = row.id, "the pending deployment not asked for")
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Asks for the Deploy a push asked for while another one ran (the flag
+/// cleared in the same transaction: kept when one still runs).
+pub async fn redeploy_if_pending(state: &AppState, service_id: i64) -> AppResult<()> {
     let db = state.db();
     let txn = rustcms::db::begin_write(db).await?;
     let claimed = service::Entity::update_many()

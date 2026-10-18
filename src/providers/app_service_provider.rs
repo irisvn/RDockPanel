@@ -85,6 +85,8 @@ impl ServiceProvider for AppServiceProvider {
                 if n > 0 {
                     tracing::warn!(n, "deployments interrupted (their run stopped)");
                 }
+                // Pushes kept for a deployment cut short: deployed now.
+                crate::services::deployment_service::drain_pending(&state).await?;
                 Ok(())
             }),
         );

@@ -191,6 +191,12 @@ pub async fn github(
                     .filter(service::Column::Id.eq(id))
                     .exec(app.db())
                     .await?;
+                // The one running may have ended meanwhile (its check
+                // done): asked for now if so, else kept for its end.
+                match deployment_service::redeploy_if_pending(&app, id).await {
+                    Ok(()) | Err(AppError::Conflict { .. }) => {}
+                    Err(err) => return Err(err),
+                }
                 return Ok((StatusCode::ACCEPTED, Json(json!({ "pending": true }))));
             }
             Err(err) => return Err(err),
