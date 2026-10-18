@@ -164,6 +164,11 @@ pub fn routes() -> AdminRoutes {
                     backups::show_run,
                 )
                 .get(
+                    "/services/{id}/stats",
+                    AdminAccess::can("services.view"),
+                    apps::stats,
+                )
+                .get(
                     "/actions",
                     AdminAccess::can("projects.view_any"),
                     actions::index,

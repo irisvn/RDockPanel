@@ -577,3 +577,59 @@ pub async fn trigger(
         json!({ "url": format!("{base}/api/v1/deploy/{id}?token={token}") }),
     ))
 }
+
+/// A service's resources now (its Overview's monitor): CPU and memory of each
+/// running task on this node, and their sum. Two samples of Docker's stats
+/// (the first has no CPU delta), at most 3 s.
+pub async fn stats(State(app): State<AppState>, Path(id): Path<i64>) -> AppResult<Json<Value>> {
+    use crate::services::docker_service::{Docker, TaskState};
+    use futures_util::StreamExt;
+    let row = service_of(&app, id).await?;
+    let name = snapshot_without_env(app.db(), &row).await?.service_name();
+    let docker = app
+        .service::<Docker>()
+        .ok_or_else(|| AppError::BadRequest("Docker is not available".into()))?;
+    let tasks = docker.engine().list_tasks(&name).await.unwrap_or_default();
+    let containers: Vec<(i64, String)> = tasks
+        .iter()
+        .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
+        .filter_map(|t| {
+            let container = t
+                .status
+                .as_ref()?
+                .container_status
+                .as_ref()?
+                .container_id
+                .clone()?;
+            Some((t.slot.unwrap_or(0), container))
+        })
+        .collect();
+    let samples = futures_util::future::join_all(containers.iter().map(|(slot, container)| {
+        let stream = docker.engine().stats(container);
+        async move {
+            let last = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                stream.take(2).fold(None, |_, s| async move { s.ok() }),
+            )
+            .await
+            .ok()
+            .flatten();
+            (*slot, last)
+        }
+    }))
+    .await;
+    let mut cpu = 0.0;
+    let mut mem = 0u64;
+    let tasks: Vec<Value> = samples
+        .into_iter()
+        .filter_map(|(slot, s)| {
+            let s = s?;
+            cpu += s.cpu_percent;
+            mem += s.mem_used;
+            Some(json!({ "slot": slot, "cpu_percent": s.cpu_percent, "mem_used": s.mem_used, "mem_limit": s.mem_limit }))
+        })
+        .collect();
+    Ok(Json(
+        json!({ "cpu_percent": cpu, "mem_used": mem, "tasks": tasks }),
+    ))
+}

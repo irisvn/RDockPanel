@@ -305,6 +305,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "Nothing yet.": "Chưa có gì.",
   Where: "Ở đâu",
   ok: "xong",
+  Monitor: "Giám sát",
 });
 
 export {};

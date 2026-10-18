@@ -43,6 +43,7 @@ their actions), so the resources' policies, validation and audit apply.
 | GET | `/overview` | projects.view_any | every project with its services (status, kind, primary domain) |
 | GET | `/services/{id}` | services.view | a service's page: configuration (names of its environment variables, never values), domains, ports, mounts, pending changes, recent deployments (with deployments.view) |
 | GET | `/deployments/{id}` | deployments.view | one deployment with its log |
+| GET | `/services/{id}/stats` | services.view | the Overview's monitor: CPU and memory of each running task on this node, and their sum (two Docker stats samples, at most 3 s) |
 | POST | `/projects/{id}/services` | services.create | `{"name","kind","image"?,"database"?:{database,user,password,root_password}}`: an app (`kind` `app`, `image` required) or a database (`postgres`, `mysql`, `mariadb`, `mongo`, `redis`: credentials generated when left out); 422 on bad names, images, taken names; audited (`services.create`) |
 | POST | `/services/{id}/deploy-key` | services.update | a new SSH deploy key (ed25519): `{"public_key"}`, the private half sealed; audited |
 | POST | `/services/{id}/trigger` | services.deploy | a new deployment trigger URL, shown once: `{"url"}`; the old one stops working; audited |

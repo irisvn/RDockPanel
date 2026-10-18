@@ -336,3 +336,44 @@ const FAST: rdockpanel::services::deployment_service::Timings =
         settle: std::time::Duration::from_millis(20),
         timeout: std::time::Duration::from_secs(2),
     };
+
+db_test!(
+    a_running_service_shows_its_resources,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::deployment_service;
+        let fake = crate::support::fake_docker::FakeDocker::default();
+        let app = support::app_with_docker(db, fake).await;
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        let project =
+            crate::deployments::create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let id = crate::deployments::create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 2}),
+        )
+        .await;
+        crate::deployments::action(&app, &admin, "services", "deploy", &id)
+            .await
+            .assert_status(StatusCode::OK);
+        let queued = crate::deployments::last_deployment(&app, id.parse().unwrap()).await;
+        let fast = deployment_service::Timings {
+            poll: std::time::Duration::from_millis(5),
+            settle: std::time::Duration::from_millis(20),
+            timeout: std::time::Duration::from_secs(2),
+        };
+        deployment_service::run(app.state(), queued.id, fast)
+            .await
+            .unwrap();
+        let stats = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}/stats")))
+            .await;
+        stats.assert_status(StatusCode::OK);
+        let stats = stats.json();
+        assert_eq!(stats["tasks"].as_array().unwrap().len(), 2, "{stats}");
+        assert_eq!(stats["cpu_percent"], 25.0);
+    }
+);

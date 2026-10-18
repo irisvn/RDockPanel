@@ -4,7 +4,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
 import { Alert, Button, Checkbox, Dialog, ErrorState, Input, Loading, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
-import { CopyButton, ErrorNote, Facts, Field, Section, StatusBadge, Tabs, when } from "../lib/ui";
+import { CopyButton, ErrorNote, Facts, Field, Section, Sparkline, StatusBadge, Tabs, bytes, when } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 import { BackupsTab } from "./Backups";
 import type { Deployment, ServiceDetail } from "./types";
@@ -186,6 +186,7 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
           ]}
         />
       </Section>
+      {s.status === "running" && <Monitor {...props} />}
       {d.latest && (
         <Section
           title={`${t("Deployment")} #${d.latest.id} · ${t(d.latest.trigger)}`}
@@ -197,6 +198,46 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
       )}
       {!d.latest && d.can.deployments && <p className="rdp2-muted">{t("Not deployed yet: press Deploy.")}</p>}
     </div>
+  );
+}
+
+type Stats = { cpu_percent: number; mem_used: number; tasks: Array<{ slot: number; cpu_percent: number; mem_used: number; mem_limit: number }> };
+
+/** CPU and memory of the service's tasks, every few seconds (EasyPanel's monitor). */
+function Monitor(props: Props & { d: ServiceDetail }) {
+  const { d, t } = props;
+  const stats = useAdminQuery<Stats>(props, `/apps/services/${d.service.id}/stats`, { refetchInterval: 5000 });
+  const [cpu, setCpu] = useState<number[]>([]);
+  const [mem, setMem] = useState<number[]>([]);
+  const last = useRef<Stats | null>(null);
+  useEffect(() => {
+    if (!stats.data || stats.data === last.current) return;
+    last.current = stats.data;
+    setCpu((v) => [...v.slice(-59), stats.data!.cpu_percent]);
+    setMem((v) => [...v.slice(-59), stats.data!.mem_used]);
+  }, [stats.data]);
+  const data = stats.data;
+  if (!data) return null;
+  return (
+    <Section title={t("Monitor")}>
+      <div className="rdp2-tiles">
+        <div className="rdp2-tile">
+          <span className="rdp2-muted rdp2-small">{t("CPU")}</span>
+          <strong>{data.cpu_percent.toFixed(1)}%</strong>
+          <Sparkline values={cpu} />
+        </div>
+        <div className="rdp2-tile">
+          <span className="rdp2-muted rdp2-small">{t("Memory")}</span>
+          <strong>{bytes(data.mem_used)}</strong>
+          <Sparkline values={mem} />
+        </div>
+      </div>
+      {data.tasks.length > 1 && (
+        <p className="rdp2-muted rdp2-small">
+          {data.tasks.map((task) => `#${task.slot}: ${task.cpu_percent.toFixed(1)}% · ${bytes(task.mem_used)}`).join("  ·  ")}
+        </p>
+      )}
+    </Section>
   );
 }
 
