@@ -33,9 +33,12 @@ The Deploy group's resources use the panel's standard permissions, one set per r
   `backups.restore` (restore one, replacing the database's data; lists a provider's files);
 
 - notifications: `notification_channels.*` (Settings);
-- adding Linux capabilities, sysctls or supplemental groups to a service needs `system.manage` (dropping does not); a
-  service that has some is then edited (its fields, environment, mounts) and rolled back to such a
-  deployment with `system.manage` only;
+- adding Linux capabilities, sysctls or supplemental groups to a service needs `system.manage`
+  (dropping capabilities does not). Such a **privileged** service (like a Compose service) is then
+  the panel's administrators' only: editing it, its environment and mounts (a mount never moves to
+  another service), deploying or rolling it back, making its trigger URL or GitHub webhook,
+  running its scripts, restoring into it. Its terminal needs `docker.exec`, root in most images
+  anyway: grant it carefully;
 - redirects: `service_redirects.*`; basic authentication users: `services.update`; scripts:
   `service_scripts.*` to write them, `docker.exec` to run them (a command in the container);
 

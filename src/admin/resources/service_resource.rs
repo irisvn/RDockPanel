@@ -243,6 +243,13 @@ impl Resource for ServiceResource {
     }
 }
 
+/// [`privileged`] of a record as the resources see it.
+fn privileged_data(record: &Data) -> bool {
+    ["cap_add", "sysctls", "groups"]
+        .iter()
+        .any(|f| text(record, f).is_some_and(|v| !v.trim().is_empty()))
+}
+
 /// Whether a service runs with added capabilities or sysctls.
 pub(crate) fn privileged(service: &service::Model) -> bool {
     service
@@ -520,6 +527,14 @@ struct ServicePolicy;
 impl Policy for ServicePolicy {
     async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
         if !ctx.can(&format!("services.{ability}")) {
+            return false;
+        }
+        // A privileged service (added capabilities, sysctls or groups):
+        // acted on by the panel's administrators only.
+        if !matches!(ability, "view" | "view_any")
+            && record.is_some_and(privileged_data)
+            && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+        {
             return false;
         }
         // Deployed, deploying, or left by a failed first run: Destroy first.

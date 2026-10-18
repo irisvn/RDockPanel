@@ -106,6 +106,19 @@ async fn service_of(app: &AppState, id: i64) -> AppResult<service::Model> {
 
 /// A service's page: its configuration (no secret value), domains, ports,
 /// mounts, state and recent deployments.
+/// A service with added capabilities, sysctls or groups (or a Compose
+/// service): what it runs or how is the panel's administrators' only.
+pub(crate) fn forbid_privileged(auth: &Auth, row: &service::Model) -> AppResult<()> {
+    if (row.kind == "compose" || crate::admin::resources::service_resource::privileged(row))
+        && !auth
+            .principal()
+            .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 pub async fn service(
     State(app): State<AppState>,
     auth: Auth,
@@ -391,6 +404,8 @@ pub async fn put_env(
         .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
+    // Checked again on the locked row (it may have become privileged).
+    forbid_privileged(&auth, &current)?;
     if let Some(revision) = &body.revision
         && *revision != env_revision(&app, &current)
     {
@@ -622,6 +637,7 @@ pub async fn trigger(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let row = service_of(&app, id).await?;
+    forbid_privileged(&auth, &row)?;
     let token = crate::services::database_service::random_string(40);
     let txn = app.db().begin().await?;
     service::Entity::update_many()
@@ -812,6 +828,7 @@ pub async fn github_webhook(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let row = service_of(&app, id).await?;
+    forbid_privileged(&auth, &row)?;
     let secret = crate::services::database_service::random_string(40);
     let sealed = Encrypted::seal(app.keyring(), &service::webhook_secret_context(), &secret)?;
     let txn = app.db().begin().await?;
@@ -871,6 +888,7 @@ pub async fn run_script(
         });
     }
     let row = service_of(&app, script.service_id).await?;
+    forbid_privileged(&auth, &row)?;
     if row.kind == "compose" {
         return Err(AppError::BadRequest(
             "a Compose service's scripts are not run by the panel".into(),

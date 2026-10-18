@@ -172,6 +172,8 @@ pub async fn restore(
         .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
+    // A restore runs its file's commands in the service's container.
+    crate::http::controllers::apps_controller::forbid_privileged(&auth, &row)?;
     let mut errors = ValidationErrors::new();
     let volume = body
         .volume

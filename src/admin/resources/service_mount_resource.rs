@@ -74,6 +74,10 @@ impl Resource for ServiceMountResource {
         ])
     }
 
+    fn policy() -> std::sync::Arc<dyn Policy> {
+        std::sync::Arc::new(MountPolicy)
+    }
+
     fn table() -> Table {
         Table::new()
             .columns(vec![
@@ -102,6 +106,12 @@ impl Resource for ServiceMountResource {
         data: Data,
     ) -> AppResult<Data> {
         privileged_parent(ctx, txn, Some(record.service_id)).await?;
+        // Never moved to another service (whose own rules it would skip).
+        if crate::admin::int(&data, "service_id").is_some_and(|id| id != record.service_id) {
+            return Err(
+                rustcms::ValidationErrors::field("service_id", ctx.t("cannot change")).into(),
+            );
+        }
         check(ctx, data, Some(record))
     }
 }
@@ -218,4 +228,40 @@ async fn privileged_parent(
         return Err(rustcms::AppError::Forbidden);
     }
     Ok(())
+}
+
+/// The permissions, and a privileged service's mounts deleted by its
+/// administrators only.
+struct MountPolicy;
+
+#[async_trait]
+impl Policy for MountPolicy {
+    async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
+        use sea_orm::EntityTrait;
+        if !ctx.can(&format!("service_mounts.{ability}")) {
+            return false;
+        }
+        if matches!(ability, "view" | "view_any")
+            || ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+        {
+            return true;
+        }
+        let Some(id) = record.and_then(|r| crate::admin::int(r, "service_id")) else {
+            return true;
+        };
+        crate::models::service::Entity::find_by_id(id)
+            .one(&ctx.conn())
+            .await
+            .is_ok_and(|s| {
+                !s.is_some_and(|s| crate::admin::resources::service_resource::privileged(&s))
+            })
+    }
+
+    async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {
+        ctx.can(&format!("service_mounts.{ability}"))
+    }
+
+    fn view_depends_on_record(&self) -> bool {
+        false
+    }
 }

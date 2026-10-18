@@ -1802,5 +1802,26 @@ db_test!(
             )
             .await
             .assert_status(StatusCode::FORBIDDEN);
+        // Nor deployed, nor given a trigger, by anyone else.
+        let deployer = support::user_with(
+            &app,
+            "deployer",
+            &["services.view", "services.deploy", "deployments.view"],
+        )
+        .await;
+        let deployer = app.acting_as(&deployer).await;
+        let denied = action(&app, &deployer, "services", "deploy", &id.to_string()).await;
+        assert!(
+            denied.status != StatusCode::OK || denied.text().contains("denied"),
+            "{}",
+            denied.text()
+        );
+        deployer
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{id}/trigger")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
     }
 );
