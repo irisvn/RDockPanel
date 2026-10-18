@@ -11,13 +11,30 @@ use std::path::{Component, Path, PathBuf};
 use serde::Deserialize;
 
 /// The `[panel]` configuration section.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct PanelConfig {
     /// Host directories services may bind-mount (system managers only).
     pub bind_roots: Vec<PathBuf>,
     /// Ports services may not publish.
     pub reserved_ports: Vec<u16>,
+    /// Traefik's certificate resolver for HTTPS domains (`""`: Traefik's
+    /// default certificate, as in development).
+    pub cert_resolver: String,
+    /// The public HTTPS port HTTP routes redirect to (443; 8443 with
+    /// `scripts/dev-swarm.sh`).
+    pub https_port: u16,
+}
+
+impl Default for PanelConfig {
+    fn default() -> Self {
+        Self {
+            bind_roots: vec![],
+            reserved_ports: vec![],
+            cert_resolver: String::new(),
+            https_port: 443,
+        }
+    }
 }
 
 impl PanelConfig {

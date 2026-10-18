@@ -1,0 +1,93 @@
+---
+source: src/services/deploy_service.rs
+expression: canonical(&out.spec)
+---
+{
+  "EndpointSpec": {
+    "Mode": "vip",
+    "Ports": []
+  },
+  "Labels": {
+    "rdockpanel.managed": "true",
+    "rdockpanel.project": "shop",
+    "rdockpanel.service": "web",
+    "rdockpanel.spec-hash": "698237ac2b6d299265f428965060e8c67fd5c9dfeabc6930a89b011e61c06fec"
+  },
+  "Mode": {
+    "Replicated": {
+      "Replicas": 2
+    }
+  },
+  "Name": "shop_web",
+  "RollbackConfig": {
+    "FailureAction": "pause",
+    "Monitor": 30000000000,
+    "Order": "start-first",
+    "Parallelism": 1
+  },
+  "TaskTemplate": {
+    "ContainerSpec": {
+      "HealthCheck": {
+        "Interval": 10000000000,
+        "Retries": 3,
+        "StartPeriod": 10000000000,
+        "Test": [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1/ || exit 1"
+        ],
+        "Timeout": 5000000000
+      },
+      "Image": "nginx:1.27@sha256:abc",
+      "Init": true,
+      "Labels": {
+        "rdockpanel.managed": "true",
+        "rdockpanel.project": "shop",
+        "rdockpanel.service": "web"
+      },
+      "Mounts": [
+        {
+          "ReadOnly": true,
+          "Source": "rdp_shop_web_html",
+          "Target": "/usr/share/nginx/html",
+          "Type": "volume",
+          "VolumeOptions": {
+            "Labels": {
+              "rdockpanel.managed": "true",
+              "rdockpanel.project": "shop",
+              "rdockpanel.service": "web"
+            }
+          }
+        }
+      ]
+    },
+    "ForceUpdate": 0,
+    "Networks": [
+      {
+        "Aliases": [
+          "web"
+        ],
+        "Target": "rdp_shop"
+      }
+    ],
+    "Resources": {
+      "Limits": {
+        "MemoryBytes": 268435456,
+        "NanoCPUs": 500000000
+      },
+      "Reservations": {
+        "MemoryBytes": 67108864
+      }
+    },
+    "RestartPolicy": {
+      "Condition": "any",
+      "Delay": 5000000000,
+      "MaxAttempts": 0
+    }
+  },
+  "UpdateConfig": {
+    "FailureAction": "rollback",
+    "Monitor": 30000000000,
+    "Order": "start-first",
+    "Parallelism": 1
+  }
+}

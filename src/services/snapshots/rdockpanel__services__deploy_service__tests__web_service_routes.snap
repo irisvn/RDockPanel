@@ -1,0 +1,53 @@
+---
+source: src/services/deploy_service.rs
+expression: out.routes.unwrap().to_yaml()
+---
+http:
+  routers:
+    shop_web-0:
+      rule: Host(`shop.example.com`)
+      entryPoints:
+      - websecure
+      service: shop_web-80
+      tls:
+        certResolver: letsencrypt
+    shop_web-0-http:
+      rule: Host(`shop.example.com`)
+      entryPoints:
+      - web
+      service: shop_web-80
+      middlewares:
+      - shop_web-https
+    shop_web-1:
+      rule: Host(`shop.example.com`) && PathPrefix(`/api`)
+      entryPoints:
+      - websecure
+      service: shop_web-8080
+      tls:
+        certResolver: letsencrypt
+    shop_web-1-http:
+      rule: Host(`shop.example.com`) && PathPrefix(`/api`)
+      entryPoints:
+      - web
+      service: shop_web-8080
+      middlewares:
+      - shop_web-https
+    shop_web-2:
+      rule: Host(`shop.localhost`)
+      entryPoints:
+      - web
+      service: shop_web-80
+  services:
+    shop_web-80:
+      loadBalancer:
+        servers:
+        - url: http://shop_web:80
+    shop_web-8080:
+      loadBalancer:
+        servers:
+        - url: http://shop_web:8080
+  middlewares:
+    shop_web-https:
+      redirectScheme:
+        permanent: true
+        scheme: https

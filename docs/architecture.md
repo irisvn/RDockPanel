@@ -69,8 +69,28 @@ framework). Their rules (names, hostnames, paths, ports, images, bind mounts) ar
 `services/deploy_rules_service.rs`, with the `[panel]` configuration (`config/panel.toml`). A service
 becomes the Swarm service `<project>_<service>`, labelled `rdockpanel.managed=true` with its project
 and service: `Docker::managed_service` refuses any service of that name the panel did not deploy, and
-Swarm updates go at the version just read, retried when Swarm moved it meanwhile. Deploying comes next
-(see the [roadmap](roadmap.md)).
+Swarm updates go at the version just read, retried when Swarm moved it meanwhile.
+
+`services/deploy_service.rs` turns a service into what it becomes, as pure functions:
+
+- `Snapshot::of(...)` is the configuration one deployment applies (stored with it for history and
+  rollback; no secret values). `Snapshot::hash()` (SHA-256 of its JSON, lists sorted) tells whether the
+  configuration changed since the last deployment.
+- `pin_image` pins the configured image to what was just pulled: the digest the pull reported
+  (`nginx:1.27@sha256:…`), else the repository's only registry digest (Docker Hub's names `nginx`,
+  `library/nginx`, `docker.io/library/nginx` are one; several digests are ambiguous), else the local
+  image id, with a warning that only that node has it.
+- `desired(...)` gives the Swarm `ServiceSpec`: on the project network with the service's short name
+  as alias, ownership labels on the service and its containers (the configuration hash on the service
+  only, so a new domain or more replicas restart no task), health check, limits and reservations, volumes
+  (`rdp_<project>_<service>_<name>`), ports, start-first updates with automatic rollback when a health
+  check makes that safe (stop-first otherwise), 0 replicas when stopped. And the Traefik routes: one
+  router per domain (HTTPS routers with an HTTP router redirecting to them on `[panel] https_port`,
+  `certResolver` from `[panel] cert_resolver`), one Traefik service per container port, reached as
+  `http://<project>_<service>:<port>`.
+
+Snapshot tests (`src/services/snapshots/`, insta) pin the generated spec and routes; a Swarm test runs a
+generated spec on a real engine. Deploying comes next (see the [roadmap](roadmap.md)).
 
 ## Data
 

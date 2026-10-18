@@ -9,3 +9,12 @@ bind_roots = []
 
 # Ports services may not publish: the proxy's, the panel's.
 reserved_ports = [80, 443, 3000, 8000, 8080, 8443]
+
+# Traefik's certificate resolver for HTTPS domains ("letsencrypt" in
+# production, from the installer). Empty: Traefik's default (self-signed)
+# certificate, as in development.
+cert_resolver = ""
+
+# The public HTTPS port HTTP is redirected to (development: 8443, set in .env
+# as RUSTCMS_PANEL__HTTPS_PORT).
+https_port = 443

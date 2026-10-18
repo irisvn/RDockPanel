@@ -631,3 +631,123 @@ async fn against_a_real_swarm() {
     }
     assert!(api.inspect_service(&name).await.unwrap().is_none());
 }
+
+/// With `PANEL_TEST_SWARM=1`: what `desired` makes of a service is a spec
+/// Docker runs (pinned image, health check, volume, command, labels).
+#[tokio::test]
+async fn desired_specs_run_on_a_real_swarm() {
+    if std::env::var_os("PANEL_TEST_SWARM").is_none() {
+        return;
+    }
+    use rdockpanel::services::deploy_service::{
+        DeployOptions, Healthcheck, Mount, Snapshot, desired, network_name, pin_image, volume_name,
+    };
+    use rdockpanel::services::docker_service::{NetworkRequest, TaskState};
+    let docker = Docker::new(BollardDocker::connect().expect("docker client"));
+    let api = docker.engine();
+    let project = format!("d{}", std::process::id());
+    let snapshot = Snapshot {
+        project: project.clone(),
+        service: "app".to_owned(),
+        image: "alpine:3.20".to_owned(),
+        command: Some("sh -c 'echo ok > /data/ready; sleep 300'".to_owned()),
+        replicas: 1,
+        running: true,
+        cpu_limit_millis: Some(250),
+        mem_limit_mb: Some(64),
+        cpu_reservation_millis: None,
+        mem_reservation_mb: None,
+        zero_downtime: true,
+        healthcheck: Some(Healthcheck {
+            command: "test -f /data/ready".to_owned(),
+            interval_s: 1,
+            retries: 3,
+        }),
+        domains: vec![],
+        ports: vec![],
+        mounts: vec![Mount {
+            target: "/data".to_owned(),
+            kind: "volume".to_owned(),
+            source: "data".to_owned(),
+            read_only: false,
+        }],
+    };
+    let name = snapshot.service_name();
+    let network = NetworkRequest {
+        name: network_name(&project),
+        driver: "overlay".to_owned(),
+        labels: [("rdockpanel.managed".to_owned(), "true".to_owned())].into(),
+        attachable: true,
+        internal: false,
+    };
+    docker.ensure_network(network).await.unwrap();
+    let pulled: Vec<String> = docker
+        .pull_image("alpine:3.20")
+        .map(|line| line.unwrap())
+        .collect()
+        .await;
+    let digest =
+        rdockpanel::services::deploy_service::pulled_digest(pulled.iter().map(String::as_str));
+    let image = pin_image(
+        &snapshot.image,
+        digest.as_deref(),
+        &api.inspect_image("alpine:3.20").await.unwrap(),
+    );
+    assert!(image.digest().is_some(), "{image:?}");
+    let out = desired(&snapshot, &image, &DeployOptions::default());
+
+    let checks = std::panic::AssertUnwindSafe(async {
+        api.create_service(out.spec.clone(), None).await.unwrap();
+        let service = docker
+            .managed_service(&name, &project, "app")
+            .await
+            .unwrap()
+            .expect("created");
+        let labels = service.spec.and_then(|s| s.labels).unwrap_or_default();
+        assert_eq!(labels.get("rdockpanel.spec-hash"), Some(&out.hash));
+        // Running, and healthy (the command wrote the file the check looks for).
+        let mut healthy = false;
+        for _ in 0..90 {
+            let tasks = api.list_tasks(&name).await.unwrap();
+            let running = tasks
+                .iter()
+                .find(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING));
+            if let Some(container) = running.and_then(|t| {
+                t.status
+                    .as_ref()?
+                    .container_status
+                    .as_ref()?
+                    .container_id
+                    .clone()
+            }) {
+                let doc = api.inspect_container(&container).await.unwrap();
+                if doc
+                    .pointer("/State/Health/Status")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("healthy")
+                {
+                    healthy = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        assert!(healthy, "the service never became healthy");
+    });
+    let outcome = futures_util::FutureExt::catch_unwind(checks).await;
+    let _ = api.delete_service(&name).await;
+    for _ in 0..30 {
+        let volume_gone = api
+            .remove_volume(&volume_name(&project, "app", "data"))
+            .await
+            .is_ok();
+        let network_gone = api.remove_network(&network_name(&project)).await.is_ok();
+        if volume_gone && network_gone {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}

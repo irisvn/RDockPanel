@@ -87,6 +87,7 @@ db_test!(
             (json!({"name": "API"}), "name"),
             (json!({"name": "web"}), "already taken in this project"),
             (json!({"image": "bad image"}), "image"),
+            (json!({"command": "sh -c 'echo"}), "unclosed quote"),
             (json!({"replicas": 0}), "replicas"),
             (json!({"replicas": 51}), "replicas"),
             (

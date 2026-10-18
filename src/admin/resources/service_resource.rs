@@ -12,6 +12,7 @@ use sea_orm::DatabaseTransaction;
 use crate::admin::{int, is_set, text};
 use crate::models::service;
 use crate::services::deploy_rules_service::{valid_image_reference, valid_name};
+use crate::services::deploy_service::command_args;
 
 pub struct ServiceResource;
 
@@ -173,6 +174,13 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
             "name",
             ctx.t("must be 1-40 lowercase letters, digits and dashes, starting with a letter"),
         );
+    }
+    if let Some(command) = text(data, "command")
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        && command_args(command).is_none()
+    {
+        errors.add("command", ctx.t("has an unclosed quote"));
     }
     if let Some(image) = text(data, "image")
         && !valid_image_reference(image)

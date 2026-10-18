@@ -1,0 +1,80 @@
+---
+source: src/services/deploy_service.rs
+expression: canonical(&out.spec)
+---
+{
+  "EndpointSpec": {
+    "Mode": "vip",
+    "Ports": [
+      {
+        "Protocol": "tcp",
+        "PublishMode": "host",
+        "PublishedPort": 5432,
+        "TargetPort": 5432
+      }
+    ]
+  },
+  "Labels": {
+    "rdockpanel.managed": "true",
+    "rdockpanel.project": "shop",
+    "rdockpanel.service": "worker",
+    "rdockpanel.spec-hash": "92c589c7644ebacb45dde55c21c1cc921a3a53df0b4ec2274891fab9c3b0f774"
+  },
+  "Mode": {
+    "Replicated": {
+      "Replicas": 1
+    }
+  },
+  "Name": "shop_worker",
+  "RollbackConfig": {
+    "FailureAction": "pause",
+    "Monitor": 30000000000,
+    "Order": "stop-first",
+    "Parallelism": 1
+  },
+  "TaskTemplate": {
+    "ContainerSpec": {
+      "Args": [
+        "worker",
+        "--queue",
+        "high priority"
+      ],
+      "Image": "sha256:local",
+      "Init": true,
+      "Labels": {
+        "rdockpanel.managed": "true",
+        "rdockpanel.project": "shop",
+        "rdockpanel.service": "worker"
+      },
+      "Mounts": [
+        {
+          "ReadOnly": false,
+          "Source": "/srv/shop/data",
+          "Target": "/data",
+          "Type": "bind"
+        }
+      ]
+    },
+    "ForceUpdate": 0,
+    "Networks": [
+      {
+        "Aliases": [
+          "worker"
+        ],
+        "Target": "rdp_shop"
+      }
+    ],
+    "Resources": {},
+    "RestartPolicy": {
+      "Condition": "any",
+      "Delay": 5000000000,
+      "MaxAttempts": 0
+    }
+  },
+  "UpdateConfig": {
+    "FailureAction": "rollback",
+    "Monitor": 30000000000,
+    "Order": "stop-first",
+    "Parallelism": 1
+  }
+}
