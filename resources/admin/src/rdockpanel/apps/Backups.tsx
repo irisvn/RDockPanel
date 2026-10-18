@@ -57,7 +57,10 @@ function volumeLabel(path: string): string {
     .join("-")
     .replace(/[^A-Za-z0-9_$-]/g, "-")
     .replace(/^-+/, "");
-  return name.slice(0, 64) || "volume";
+  // A short hash of the whole path: `/data-a` and `/data/a` stay apart.
+  let hash = 0x811c9dc5;
+  for (const c of path) hash = Math.imul(hash ^ c.charCodeAt(0), 0x01000193) >>> 0;
+  return `${name.slice(0, 55) || "volume"}-${hash.toString(16).padStart(8, "0")}`;
 }
 type Props = PageProps<unknown> & { d: ServiceDetail };
 

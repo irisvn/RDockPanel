@@ -761,10 +761,16 @@ async fn restore(
     let source = path.clone();
     let plain = scratch.0.join("restore.sql");
     let target = plain.clone();
-    tokio::task::spawn_blocking(move || unpack(&source, gzip.then_some(target.as_path())))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| format!("the file is not a valid gzip archive: {e}"))?;
+    let tarball = matches!(what, What::Volume(_));
+    tokio::task::spawn_blocking(move || {
+        unpack(&source, gzip.then_some(target.as_path()))?;
+        // A volume's archive: a whole tar of relative paths, before its
+        // volume is emptied.
+        if tarball { check_tar(&source) } else { Ok(()) }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("the file is not a valid archive: {e}"))?;
     let feed_from = if gzip { plain } else { path.clone() };
     // The file as the client's input.
     let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
@@ -826,6 +832,34 @@ fn unpack(path: &Path, to: Option<&Path>) -> std::io::Result<()> {
         }
         None => std::io::copy(&mut reader, &mut std::io::sink()).map(drop),
     }
+}
+
+/// Reads the `.tar.gz` at `path` through: every entry readable, none
+/// absolute or with `..`.
+fn check_tar(path: &Path) -> std::io::Result<()> {
+    let reader = flate2::read::MultiGzDecoder::new(std::fs::File::open(path)?);
+    let mut archive = tar::Archive::new(reader);
+    let mut entries = 0usize;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let name = entry.path()?.into_owned();
+        if name.is_absolute()
+            || name
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(std::io::Error::other(format!(
+                "{} leaves the volume",
+                name.display()
+            )));
+        }
+        std::io::copy(&mut entry, &mut std::io::sink())?;
+        entries += 1;
+    }
+    if entries == 0 {
+        return Err(std::io::Error::other("the archive is empty"));
+    }
+    Ok(())
 }
 
 /// Sends `path` in chunks; stops when nobody reads.

@@ -285,7 +285,7 @@ db_test!(
             .assert_status(StatusCode::ACCEPTED);
         let broken = run_last(&app, id).await;
         assert_eq!(broken.status, "failed");
-        assert!(broken.error.unwrap().contains("not a valid gzip"));
+        assert!(broken.error.unwrap().contains("not a valid archive"));
         assert_eq!(
             fake.calls().iter().filter(|c| c.contains("psql")).count(),
             runs_before
@@ -553,9 +553,33 @@ db_test!(
         }
 
         // A restore feeds the archive (checked whole first) to tar.
-        let archive = {
+        // A gzip that is not a tar: refused before anything is emptied.
+        let not_tar = {
             let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-            std::io::Write::write_all(&mut gz, b"a tar").unwrap();
+            std::io::Write::write_all(&mut gz, &[7u8; 2048]).unwrap();
+            gz.finish().unwrap()
+        };
+        std::fs::write(root.join("volumes/junk.tar.gz"), &not_tar).unwrap();
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{web}/restore")),
+                &json!({"storage_provider_id": provider.parse::<i64>().unwrap(), "file": "volumes/junk.tar.gz", "database": "content", "volume": "/usr/share/nginx/html"}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        let junk = run_last(&app, web).await;
+        assert_eq!(junk.status, "failed", "{:?}", junk.log);
+        assert!(!fake.calls().iter().any(|c| c.contains("tar -xzf")));
+        let archive = {
+            let mut tar = tar::Builder::new(Vec::new());
+            let mut header = tar::Header::new_gnu();
+            header.set_size(5);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, "index.html", &b"hello"[..])
+                .unwrap();
+            let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            std::io::Write::write_all(&mut gz, &tar.into_inner().unwrap()).unwrap();
             gz.finish().unwrap()
         };
         std::fs::write(root.join("volumes/site.tar.gz"), &archive).unwrap();
