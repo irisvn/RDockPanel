@@ -11,7 +11,7 @@ publish = false
 version = "0.4.0"
 
 [dependencies]
-rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.4.0" }
+rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.4.1" }
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "with-chrono", "with-uuid", "with-rust_decimal", "with-json"] }
 sea-orm-migration = { version = "=2.0.4", default-features = false }
 anyhow = "1"
@@ -31,6 +31,6 @@ shell-words = "1.1"
 
 [dev-dependencies]
 insta = "1"
-rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.4.0" }
+rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.4.1" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 [workspace]

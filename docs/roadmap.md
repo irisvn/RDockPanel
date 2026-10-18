@@ -46,7 +46,7 @@ Deleting a project will also detach Traefik from its network and remove it.
 | RustCMS | Used for | Status |
 |---|---|---|
 | 0.4.0: admin routes, server-sent events, hub, WebSocket, `*_FILE` secrets | Phase 1 | done |
-| W8: encrypted columns, key rotation | Phase 2 environment variables, registry credentials | requested first for 0.4.1 |
-| W4: scheduler | reconcile/drift, periodic prune, backups | requested for 0.4.1 |
+| 0.4.1 W8: encrypted columns, key rotation | Phase 2 environment variables, registry credentials | released, next |
+| 0.4.1 W4: scheduler | the deployment lease reaper (every minute); reconcile/drift, periodic prune, backups | released, in use |
 | W5: React extension host | richer pages | planned |
 | TOTP | two-factor authentication | planned |

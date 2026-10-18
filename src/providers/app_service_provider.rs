@@ -26,6 +26,22 @@ impl ServiceProvider for AppServiceProvider {
         app.job::<crate::jobs::pull_image::PullImage>();
         app.job::<crate::jobs::run_deployment::RunDeployment>();
         app.job::<crate::jobs::publish_routes::PublishRoutes>();
+        // Deployments whose run stopped renewing its lease (`serve` only;
+        // in the process, never queued behind long pulls or deployments).
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "reap-deployments",
+                std::time::Duration::from_secs(60),
+            )
+            .run(|state| async move {
+                let n =
+                    crate::services::deployment_service::recover_interrupted(state.db()).await?;
+                if n > 0 {
+                    tracing::warn!(n, "deployments interrupted (their run stopped)");
+                }
+                Ok(())
+            }),
+        );
         // rustcms:jobs
         // rustcms:commands
     }
@@ -37,8 +53,6 @@ impl ServiceProvider for AppServiceProvider {
             Ok(n) => tracing::info!(n, "deployments interrupted by a stop"),
             Err(err) => tracing::debug!(%err, "interrupted deployments not checked"),
         }
-        // Then every minute: a run whose job timed out or died stops renewing.
-        crate::services::deployment_service::reap_every_minute(state);
         // Traefik's routes, written again from the database.
         if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {
             let options = crate::services::deployment_service::deploy_options(0);

@@ -117,7 +117,7 @@ generated spec on a real engine.
 3. **Finish** (one transaction): the deployment's status and pinned image, the service's status, and
    the lock released only if still its own.
 
-At boot, then every minute, deployments whose lease expired (their run died, or its job timed out)
+At boot, then every minute (RustCMS scheduler: `reap-deployments`, run in the process), deployments whose lease expired (their run died, or its job timed out)
 become `interrupted` and free their service.
 The service page's aside (`ServiceLiveSlot`, `service-live.js`) shows the state, pending changes, the
 action buttons and the latest deployment, its log followed live over SSE.

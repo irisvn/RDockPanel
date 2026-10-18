@@ -571,21 +571,9 @@ async fn apply(
         None => {
             log.line(format!("creating {name} ({})", image.reference()))
                 .await;
-            // Swarm's address allocator may refuse while another network
-            // is being removed ("Pool overlaps"): tried again shortly.
-            let mut tries = 0;
-            loop {
-                match api.create_service(out.spec.clone(), None).await {
-                    Err(err) if tries < 5 && err.to_string().contains("Pool overlaps") => {
-                        tries += 1;
-                        log.line(format!("Swarm is busy ({err}), trying again"))
-                            .await;
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                        log.hold().await?;
-                    }
-                    other => break other.map(drop).map_err(fail)?,
-                };
-            }
+            api.create_service(out.spec.clone(), None)
+                .await
+                .map_err(fail)?;
         }
         Some(_) => {
             log.line(format!("updating {name} ({})", image.reference()))
@@ -814,6 +802,15 @@ async fn converge(
                     .filter(|t| {
                         matches!(task_state(t), Some(TaskState::FAILED | TaskState::REJECTED))
                     })
+                    // Swarm refuses tasks for a while when a network was
+                    // just removed and its addresses given again ("Pool
+                    // overlaps"); it retries them: only the timeout ends it.
+                    .filter(|t| {
+                        !t.status
+                            .as_ref()
+                            .and_then(|s| s.err.as_deref())
+                            .is_some_and(|e| e.contains("Pool overlaps"))
+                    })
                     .filter(|t| {
                         t.status
                             .as_ref()
@@ -941,7 +938,7 @@ async fn finish(
 
 /// Deployments still queued or running whose service lock expired (their run
 /// died, or its job timed out) are `interrupted`, and the lock released. At
-/// boot, then every minute ([`reap_every_minute`]).
+/// boot, then every minute (the `reap-deployments` schedule).
 pub async fn recover_interrupted(db: &DatabaseConnection) -> AppResult<u64> {
     let now = Utc::now();
     let expired = service::Entity::find()
@@ -984,28 +981,6 @@ pub async fn recover_interrupted(db: &DatabaseConnection) -> AppResult<u64> {
         count += released.rows_affected;
     }
     Ok(count)
-}
-
-/// Runs [`recover_interrupted`] every minute until the server stops.
-pub fn reap_every_minute(state: &AppState) {
-    let Some(shutdown) = state.service::<rustcms::realtime::Shutdown>() else {
-        return;
-    };
-    let db = state.db().clone();
-    let token = shutdown.token();
-    shutdown.spawn(async move {
-        loop {
-            tokio::select! {
-                () = token.cancelled() => return,
-                () = tokio::time::sleep(Duration::from_secs(60)) => {}
-            }
-            match recover_interrupted(&db).await {
-                Ok(0) => {}
-                Ok(n) => tracing::warn!(n, "deployments interrupted (their run stopped)"),
-                Err(err) => tracing::debug!(%err, "interrupted deployments not checked"),
-            }
-        }
-    });
 }
 
 /// The latest deployment of a service, for its page.

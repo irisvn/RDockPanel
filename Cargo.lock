@@ -929,6 +929,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
 
 [[package]]
+name = "croner"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b5b023fc2978536bbb2a3b71237964fc4630bec1eb31077b4977127f4cdb9c0"
+dependencies = [
+ "chrono",
+ "derive_builder",
+ "strum 0.27.2",
+]
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1058,6 +1069,7 @@ dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
+ "strsim",
  "syn 2.0.119",
 ]
 
@@ -1096,6 +1108,37 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "derive_builder"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947"
+dependencies = [
+ "derive_builder_macro",
+]
+
+[[package]]
+name = "derive_builder_core"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "derive_builder_macro"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c"
+dependencies = [
+ "derive_builder_core",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2942,8 +2985,8 @@ dependencies = [
 
 [[package]]
 name = "rustcms"
-version = "0.4.0"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.0#a75456e14e7173f285dbb42b0d05c9dc2318b7b1"
+version = "0.4.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.1#4f6ad998bc706df77cfd257a95bee4bd86636e86"
 dependencies = [
  "async-trait",
  "axum",
@@ -2958,8 +3001,8 @@ dependencies = [
 
 [[package]]
 name = "rustcms-admin"
-version = "0.4.0"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.0#a75456e14e7173f285dbb42b0d05c9dc2318b7b1"
+version = "0.4.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.1#4f6ad998bc706df77cfd257a95bee4bd86636e86"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -2989,8 +3032,8 @@ dependencies = [
 
 [[package]]
 name = "rustcms-auth"
-version = "0.4.0"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.0#a75456e14e7173f285dbb42b0d05c9dc2318b7b1"
+version = "0.4.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.1#4f6ad998bc706df77cfd257a95bee4bd86636e86"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3019,8 +3062,8 @@ dependencies = [
 
 [[package]]
 name = "rustcms-core"
-version = "0.4.0"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.0#a75456e14e7173f285dbb42b0d05c9dc2318b7b1"
+version = "0.4.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.1#4f6ad998bc706df77cfd257a95bee4bd86636e86"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3030,6 +3073,7 @@ dependencies = [
  "cap-std",
  "chrono",
  "clap",
+ "croner",
  "dotenvy",
  "figment",
  "form_urlencoded",
@@ -3059,16 +3103,16 @@ dependencies = [
 
 [[package]]
 name = "rustcms-migration"
-version = "0.4.0"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.0#a75456e14e7173f285dbb42b0d05c9dc2318b7b1"
+version = "0.4.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.1#4f6ad998bc706df77cfd257a95bee4bd86636e86"
 dependencies = [
  "sea-orm-migration",
 ]
 
 [[package]]
 name = "rustcms-testing"
-version = "0.4.0"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.0#a75456e14e7173f285dbb42b0d05c9dc2318b7b1"
+version = "0.4.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.4.1#4f6ad998bc706df77cfd257a95bee4bd86636e86"
 dependencies = [
  "async-trait",
  "axum",
@@ -3214,7 +3258,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "sqlx-core",
- "strum",
+ "strum 0.28.0",
  "thiserror",
  "time",
  "tracing",
@@ -3829,9 +3873,30 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros",
+]
+
+[[package]]
+name = "strum"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "subtle"
