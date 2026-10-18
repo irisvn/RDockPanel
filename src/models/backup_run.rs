@@ -18,6 +18,8 @@ pub struct Model {
     /// `queued`, `running`, `succeeded`, `failed`.
     pub status: String,
     pub database_name: String,
+    /// A volume's path in the container (a volume backup or restore).
+    pub volume: Option<String>,
     /// The file in the provider (written, or restored from), named when the
     /// run is asked for.
     pub file: Option<String>,

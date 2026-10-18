@@ -9,7 +9,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 > **Trạng thái: đang phát triển.**
 > - Phase 1 (giám sát server, quản lý Docker) đã chạy được.
 > - Phase 2 (deploy app) đã chạy được từ mã nguồn: project, service, deploy, domain, biến môi trường mã hoá, registry riêng.
-> - Đã có installer cài bằng một lệnh, build từ Git hoặc Dockerfile, backup database, thông báo, Compose. Còn lại: backup volume.
+> - Đã có installer cài bằng một lệnh, build từ Git hoặc Dockerfile, backup database và volume, thông báo, Compose.
 > - Chưa dùng được cho production.
 
 ![Bảng điều khiển server](docs/images/server.png)
@@ -53,13 +53,12 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Template EasyPanel:** hơn 800 template của easypanel.io, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải từ repo của họ khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
 - **Build:** app từ repo Git (https, hoặc ssh với deploy key sinh sẵn; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo hoặc Nixpacks, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI hoặc webhook của Git host.
 - **Compose:** file Compose (viết trong panel hoặc lấy từ Git) chạy bằng `docker compose` trong network của project, domain trỏ tới một service trong file.
-- **Backup database:** dump PostgreSQL, MySQL, MariaDB và MongoDB theo lịch (cron) vào thư mục trên server hoặc bucket tương thích S3, giữ lại N bản, có log từng lần chạy, nút "Run now" và Khôi phục.
+- **Backup:** dump PostgreSQL, MySQL, MariaDB và MongoDB, và nén volume, theo lịch (cron) vào thư mục trên server hoặc bucket tương thích S3, giữ lại N bản, có log từng lần chạy, nút "Run now" và Khôi phục.
 - **Thông báo:** Discord, Slack, Telegram, email (SMTP) và webhook, cho deploy, backup và ổ đĩa sắp đầy, có nút "Gửi thử".
 - **Bí mật:** biến môi trường (sửa như file `.env`) và tài khoản registry riêng được mã hoá bằng app key; chỉ người có quyền `services.secrets` mới xem được giá trị, mỗi lần xem đều ghi audit. Rollback trả lại đúng biến môi trường của lần deploy đó.
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- Backup volume.
 - **Sau đó:** nhiều node, xác thực 2 lớp, API và CLI.
 
 | Container | Log trực tiếp | Terminal |

@@ -1,5 +1,5 @@
-//! `database_backups` table: a database service's backup configuration (a
-//! database, a cron schedule in UTC, a storage provider and a path in it, how
+//! `database_backups` table: a service's backup configuration — of its
+//! database, or of one of its volumes (`volume`) — (a cron schedule in UTC, a storage provider and a path in it, how
 //! many files to keep there). Its runs are `backup_runs`.
 
 use sea_orm::entity::prelude::*;
@@ -11,7 +11,11 @@ pub struct Model {
     pub id: i64,
     pub service_id: i64,
     pub storage_provider_id: i64,
+    /// The database dumped; for a volume, the volume's name (its label).
     pub database_name: String,
+    /// A volume backup: the volume's path in the service's container (a
+    /// tar of it); `None`: the database.
+    pub volume: Option<String>,
     /// Whether the schedule runs it (it can always be run by hand).
     pub enabled: bool,
     /// Five-field cron, UTC.

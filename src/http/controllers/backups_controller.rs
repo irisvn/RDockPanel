@@ -38,6 +38,7 @@ fn summary(run: &backup_run::Model) -> Value {
         "trigger": run.trigger,
         "status": run.status,
         "database_name": run.database_name,
+        "volume": run.volume,
         "file": run.file,
         "size": run.size,
         "error": run.error,
@@ -47,13 +48,17 @@ fn summary(run: &backup_run::Model) -> Value {
     })
 }
 
-async fn database_service(app: &AppState, id: i64) -> AppResult<(service::Model, Engine)> {
-    let row = service::Entity::find_by_id(id)
-        .one(app.db())
+/// The paths of a service's named volumes in its container.
+async fn volume_paths(app: &AppState, id: i64) -> AppResult<Vec<String>> {
+    use crate::models::service_mount;
+    Ok(service_mount::Entity::find()
+        .filter(service_mount::Column::ServiceId.eq(id))
+        .filter(service_mount::Column::Kind.eq("volume"))
+        .all(app.db())
         .await?
-        .ok_or(AppError::NotFound)?;
-    let engine = Engine::parse(&row.kind).ok_or(AppError::NotFound)?;
-    Ok((row, engine))
+        .into_iter()
+        .map(|m| m.target)
+        .collect())
 }
 
 /// A database service's Backups tab: its configurations, its last runs, the
@@ -63,7 +68,11 @@ pub async fn index(
     auth: Auth,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let (row, engine) = database_service(&app, id).await?;
+    let row = service::Entity::find_by_id(id)
+        .one(app.db())
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let volumes = volume_paths(&app, row.id).await?;
     let db = app.db();
     let configs = database_backup::Entity::find()
         .filter(database_backup::Column::ServiceId.eq(row.id))
@@ -88,11 +97,13 @@ pub async fn index(
         vec![]
     };
     Ok(Json(json!({
-        "supported": supported(engine),
+        "supported": Engine::parse(&row.kind).is_some_and(supported),
+        "volumes": volumes,
         "configs": configs.iter().map(|c| json!({
             "id": c.id,
             "storage_provider_id": c.storage_provider_id,
             "database_name": c.database_name,
+            "volume": c.volume,
             "enabled": c.enabled,
             "schedule": c.schedule,
             "retention": c.retention,
@@ -143,8 +154,10 @@ pub struct RestoreBody {
     pub storage_provider_id: i64,
     /// The file in the provider, e.g. `production/shop/shop-20261019T020000Z.sql.gz`.
     pub file: String,
-    /// The database restored into.
+    /// The database restored into (for a volume: its name, a label).
     pub database: String,
+    /// A volume's path in the container: a volume restore.
+    pub volume: Option<String>,
 }
 
 /// Restores a file into the service's database (in place): 202 with the run.
@@ -155,17 +168,40 @@ pub async fn restore(
     Path(id): Path<i64>,
     Json(body): Json<RestoreBody>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    let (row, engine) = database_service(&app, id).await?;
+    let row = service::Entity::find_by_id(id)
+        .one(app.db())
+        .await?
+        .ok_or(AppError::NotFound)?;
     let mut errors = ValidationErrors::new();
-    if !supported(engine) {
-        errors.add("database", "this engine is not restored by the panel");
-    }
+    let volume = body
+        .volume
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
     let file = body.file.trim().trim_start_matches('/');
-    if !valid_key(file) || !(file.ends_with(".sql.gz") || file.ends_with(".archive.gz")) {
-        errors.add(
-            "file",
-            "must be a backup file of the provider (.sql.gz or .archive.gz)",
-        );
+    match volume {
+        Some(path) => {
+            if !volume_paths(&app, row.id).await?.iter().any(|v| v == path) {
+                errors.add("volume", "is not a volume of this service");
+            }
+            if !valid_key(file) || !file.ends_with(".tar.gz") {
+                errors.add("file", "must be a volume backup of the provider (.tar.gz)");
+            }
+        }
+        None => {
+            if !Engine::parse(&row.kind).is_some_and(supported) {
+                errors.add(
+                    "database",
+                    "this service has no database restored by the panel",
+                );
+            }
+            if !valid_key(file) || !(file.ends_with(".sql.gz") || file.ends_with(".archive.gz")) {
+                errors.add(
+                    "file",
+                    "must be a backup file of the provider (.sql.gz or .archive.gz)",
+                );
+            }
+        }
     }
     if !valid_database(body.database.trim()) {
         errors.add("database", "is not a database name");
@@ -187,6 +223,7 @@ pub async fn restore(
         &provider,
         file,
         body.database.trim(),
+        volume,
         user_id(&auth),
     )
     .await?;

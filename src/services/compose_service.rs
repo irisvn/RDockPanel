@@ -47,6 +47,9 @@ pub fn prepare(text: &str, project: &str, service: &str) -> Result<Prepared, Str
     }
     let mut root: Value =
         serde_yaml_ng::from_str(text).map_err(|e| format!("the Compose file: {e}"))?;
+    // `<<` merges resolved first: what a service inherits is what it has.
+    root.apply_merge()
+        .map_err(|e| format!("the Compose file: {e}"))?;
     let base = crate::services::deploy_service::service_name(project, service);
     let network = network_name(project);
     let top = root
@@ -154,6 +157,17 @@ pub fn prepare(text: &str, project: &str, service: &str) -> Result<Prepared, Str
     })
 }
 
+/// Where the service was last deployed (in its directory, recorded at each
+/// deployment), if anywhere.
+fn deployed_dir(dir: &Path) -> Option<PathBuf> {
+    let relative = std::fs::read_to_string(dir.join(DEPLOYED)).ok()?;
+    let path = inside(relative.trim())?;
+    Some(dir.join(path))
+}
+
+/// The record of [`deployed_dir`].
+const DEPLOYED: &str = ".rdockpanel-deployed";
+
 /// A Compose service's directory (`compose_dir/<project>_<service>`).
 pub fn directory(snapshot: &Snapshot) -> PathBuf {
     let root = &config().compose_dir;
@@ -198,11 +212,20 @@ async fn compose(
 ) -> Result<(), Outcome> {
     log.line(format!("docker compose {}", args.join(" "))).await;
     log.hold().await?;
-    let (code, output) = docker
-        .engine()
-        .compose(dir, project, FILE, args)
-        .await
-        .map_err(|e| failed(e.to_string()))?;
+    // The deployment's lock renewed meanwhile; lost, the command is
+    // stopped (dropped: its process killed).
+    let engine = docker.engine();
+    let work = engine.compose(dir, project, FILE, args);
+    tokio::pin!(work);
+    let mut renew = tokio::time::interval(std::time::Duration::from_secs(30));
+    renew.tick().await;
+    let done = loop {
+        tokio::select! {
+            done = &mut work => break done,
+            _ = renew.tick() => log.hold().await?,
+        }
+    };
+    let (code, output) = done.map_err(|e| failed(e.to_string()))?;
     for line in output.lines().filter(|l| !l.trim().is_empty()).take(400) {
         log.line(line).await;
     }
@@ -238,6 +261,12 @@ pub(crate) async fn apply(
             dir.join("src").join(path)
         }
         None => dir.clone(),
+    };
+    // Stop, Start, Restart and Destroy act where it was last deployed (a
+    // Source changed since leaves the running containers where they are).
+    let project_dir = match deployed_dir(&dir) {
+        Some(deployed) if trigger != Trigger::Deploy => deployed,
+        _ => project_dir,
     };
     let deployed = project_dir.join(FILE).is_file();
     match trigger {
@@ -337,8 +366,24 @@ pub(crate) async fn apply(
             )));
         }
     }
+    // The containers deployed from elsewhere before: taken down first.
+    if let Some(before) = deployed_dir(&dir)
+        && before != project_dir
+        && before.join(FILE).is_file()
+    {
+        compose(docker, &before, &name, &["down", "--remove-orphans"], log).await?;
+    }
     std::fs::write(project_dir.join(FILE), &prepared.yaml)
         .map_err(|e| failed(format!("{FILE}: {e}")))?;
+    let relative = project_dir
+        .strip_prefix(&dir)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    std::fs::write(
+        dir.join(DEPLOYED),
+        if relative.is_empty() { "." } else { &relative },
+    )
+    .map_err(|e| failed(format!("{DEPLOYED}: {e}")))?;
     // Placeholders resolved as for any service (`$(PROJECT_NAME)`, …).
     let vars = crate::services::deployment_service::placeholder_vars(snapshot);
     let env: BTreeMap<String, String> = secrets
@@ -348,14 +393,13 @@ pub(crate) async fn apply(
         .collect();
     write_env(&project_dir, &env).map_err(|e| failed(format!(".env: {e}")))?;
     crate::services::deployment_service::project_network(docker, traefik, snapshot, log).await?;
-    compose(
-        docker,
-        &project_dir,
-        &name,
-        &["up", "-d", "--build", "--remove-orphans"],
-        log,
-    )
-    .await?;
+    // A stopped service is deployed stopped (its containers made, not started).
+    let up: &[&str] = if snapshot.running {
+        &["up", "-d", "--build", "--remove-orphans"]
+    } else {
+        &["create", "--build", "--remove-orphans"]
+    };
+    compose(docker, &project_dir, &name, up, log).await?;
     Ok((Outcome::Succeeded, None))
 }
 
@@ -400,6 +444,20 @@ networks:
         assert_eq!(db["labels"]["rdockpanel.service"], "site");
         assert_eq!(out["networks"]["rdockpanel"]["name"], "rdp_shop");
         assert_eq!(out["networks"]["rdockpanel"]["external"], true);
+        // What a service inherits (`<<`) is what it has.
+        let merged = prepare(
+            "x-net: &net\n  network_mode: host\nservices:\n  agent:\n    <<: *net\n    image: busybox\n",
+            "shop",
+            "site",
+        )
+        .unwrap();
+        let out: Value = serde_yaml_ng::from_str(&merged.yaml).unwrap();
+        assert!(
+            out["services"]["agent"]["networks"].is_null(),
+            "{}",
+            merged.yaml
+        );
+        assert!(merged.warnings[0].contains("network_mode"));
         for bad in [
             "",
             "services: []",

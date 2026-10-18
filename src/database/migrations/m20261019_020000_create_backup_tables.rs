@@ -116,6 +116,11 @@ impl MigrationTrait for Migration {
                         .not_null(),
                 )
                 .col(
+                    ColumnDef::new(DatabaseBackups::Volume)
+                        .string_len(255)
+                        .null(),
+                )
+                .col(
                     ColumnDef::new(DatabaseBackups::Enabled)
                         .boolean()
                         .not_null()
@@ -211,6 +216,7 @@ impl MigrationTrait for Migration {
                         .string_len(128)
                         .not_null(),
                 )
+                .col(ColumnDef::new(BackupRuns::Volume).string_len(255).null())
                 .col(ColumnDef::new(BackupRuns::File).string_len(1024).null())
                 .col(ColumnDef::new(BackupRuns::Size).big_integer().null())
                 .col(ColumnDef::new(BackupRuns::Retention).integer().null())
@@ -304,6 +310,7 @@ enum DatabaseBackups {
     ServiceId,
     StorageProviderId,
     DatabaseName,
+    Volume,
     Enabled,
     Schedule,
     Retention,
@@ -324,6 +331,7 @@ enum BackupRuns {
     Trigger,
     Status,
     DatabaseName,
+    Volume,
     File,
     Size,
     Retention,

@@ -202,11 +202,15 @@ again as `.rdockpanel-compose.yml`: each container also joins the project's netw
 `<project>_<service>_<container>` (what a domain naming that container leads to) and carries the
 panel's labels; `container_name`, `ports` and `network_mode` are warned about. The service's
 environment (placeholders resolved) is the Compose project's `.env` (`0600`), read by `${VAR}`.
-Deploy runs `up -d --build --remove-orphans`, Start `up -d`, Stop `stop`, Restart `restart`,
-Destroy `down --remove-orphans` (named volumes kept); Rollback is refused. A domain must name a
-service of the file.
+Deploy runs `up -d --build --remove-orphans` (`create` for a stopped service), Start `up -d`,
+Stop `stop`, Restart `restart`, Destroy `down --remove-orphans` (named volumes kept); Rollback is
+refused. Stop, Start, Restart and Destroy act where it was last deployed (recorded), and a Deploy
+from elsewhere takes the old containers down first. The repository is fetched without `--force`
+(tracked files reset, a commit that would overwrite an untracked file fails the deployment). The
+deployment's lock is renewed while `docker compose` runs. A domain must name a service of the
+file.
 
-### Database backups
+### Database and volume backups
 
 As EasyPanel's. A **storage provider** (Settings) is a local directory (absolute; in the
 installed panel under `/var/lib/rdockpanel/backups`, a host directory) or an S3-compatible bucket
@@ -214,6 +218,10 @@ installed panel under `/var/lib/rdockpanel/backups`, a host directory) or an S3-
 `storage_providers.secret_key`). A database service (PostgreSQL, MySQL, MariaDB, MongoDB; Redis
 keeps its append-only file) has **backup configurations**: a database, a five-field cron schedule
 (UTC), a provider, a path (folders of letters, digits, `.`, `_`, `-`) and a retention.
+
+A configuration may back up a **volume** of any service instead (its path in the container): a run
+then runs `tar -czf - -C <path> .` in the service's running container (so the image needs `tar`),
+writes `….tar.gz`, and a restore feeds an archive (checked whole first) to `tar -xzf - -C <path>`.
 
 A run (`backup_runs`, the `backup.run` job on the `backup` queue, one attempt, up to 3 hours) has
 its file, provider and retention fixed when it is asked for (a later edit changes later runs). One

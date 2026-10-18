@@ -4,7 +4,7 @@
 
 use rustcms::admin::*;
 use rustcms::{AppResult, ValidationErrors, async_trait};
-use sea_orm::{DatabaseTransaction, EntityTrait};
+use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
 
 use crate::admin::{int, is_set, text};
 use crate::models::{database_backup, service};
@@ -44,6 +44,7 @@ impl Resource for DatabaseBackupResource {
                 .required()
                 .sortable()
                 .max_length(64),
+            Field::column(database_backup::Column::Volume).max_length(255),
             Field::column(database_backup::Column::Enabled),
             Field::column(database_backup::Column::Schedule)
                 .required()
@@ -111,16 +112,40 @@ async fn check(
 ) -> AppResult<()> {
     let mut errors = ValidationErrors::new();
     let service_id = int(data, "service_id").or(record.map(|r| r.service_id));
+    // A volume of the service (its path in the container), or its database.
+    let volume = if data.contains_key("volume") {
+        text(data, "volume")
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    } else {
+        record.and_then(|r| r.volume.clone())
+    };
     if let Some(id) = service_id {
-        let engine = service::Entity::find_by_id(id)
-            .one(txn)
-            .await?
-            .and_then(|s| Engine::parse(&s.kind));
-        if !engine.is_some_and(supported) {
-            errors.add(
-                "service_id",
-                ctx.t("must be a PostgreSQL, MySQL, MariaDB or MongoDB service"),
-            );
+        match &volume {
+            Some(path) => {
+                let mounted = crate::models::service_mount::Entity::find()
+                    .filter(crate::models::service_mount::Column::ServiceId.eq(id))
+                    .filter(crate::models::service_mount::Column::Kind.eq("volume"))
+                    .filter(crate::models::service_mount::Column::Target.eq(path.as_str()))
+                    .one(txn)
+                    .await?;
+                if mounted.is_none() {
+                    errors.add("volume", ctx.t("is not a volume of this service"));
+                }
+            }
+            None => {
+                let engine = service::Entity::find_by_id(id)
+                    .one(txn)
+                    .await?
+                    .and_then(|s| Engine::parse(&s.kind));
+                if !engine.is_some_and(supported) {
+                    errors.add(
+                        "service_id",
+                        ctx.t("must be a PostgreSQL, MySQL, MariaDB or MongoDB service"),
+                    );
+                }
+            }
         }
     }
     if text(data, "database_name").is_some_and(|d| !valid_database(d.trim())) {

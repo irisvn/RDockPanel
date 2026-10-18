@@ -12,6 +12,7 @@ type Config = {
   id: number;
   storage_provider_id: number;
   database_name: string;
+  volume: string | null;
   enabled: boolean;
   schedule: string;
   retention: number;
@@ -31,7 +32,27 @@ type Run = {
   finished_at: string | null;
   log?: string;
 };
-type Tab = { supported: boolean; configs: Config[]; runs: Run[]; providers: Array<{ id: number; name: string; kind: string }> };
+type Tab = {
+  supported: boolean;
+  volumes: string[];
+  configs: Config[];
+  runs: Run[];
+  providers: Array<{ id: number; name: string; kind: string }>;
+};
+
+/** What a configuration backs up: "" (the database) or a volume's path. */
+function whatOptions(t: (s: string) => string, tab: Tab): Array<[string, string]> {
+  return [
+    ...(tab.supported ? ([["", t("The database")]] as Array<[string, string]>) : []),
+    ...tab.volumes.map((v) => [v, `${t("Volume")} ${v}`] as [string, string]),
+  ];
+}
+
+/** A label for a volume backup's files: the volume's last folder. */
+function volumeLabel(path: string): string {
+  const name = path.split("/").filter(Boolean).pop() ?? "volume";
+  return name.replace(/[^A-Za-z0-9_$-]/g, "-").replace(/^-+/, "") || "volume";
+}
 type Props = PageProps<unknown> & { d: ServiceDetail };
 
 const SCHEDULES: Array<[string, string]> = [
@@ -45,6 +66,8 @@ function ConfigForm(props: Props & { tab: Tab; config: Config | null; onClose: (
   const { t, d } = props;
   const c = props.config;
   const [provider, setProvider] = useState(String(c?.storage_provider_id ?? props.tab.providers[0]?.id ?? ""));
+  const options = whatOptions(t, props.tab);
+  const [what, setWhat] = useState(c ? (c.volume ?? "") : (options[0]?.[0] ?? ""));
   const [database, setDatabase] = useState(c?.database_name ?? d.database?.database ?? "");
   const [schedule, setSchedule] = useState(c?.schedule ?? "0 2 * * *");
   const [retention, setRetention] = useState(String(c?.retention ?? 7));
@@ -62,7 +85,8 @@ function ConfigForm(props: Props & { tab: Tab; config: Config | null; onClose: (
           setError(null);
           const data = {
             storage_provider_id: provider,
-            database_name: database.trim(),
+            volume: what || null,
+            database_name: what ? volumeLabel(what) : database.trim(),
             schedule: schedule.trim(),
             retention: Number(retention),
             path: path.trim(),
@@ -87,9 +111,20 @@ function ConfigForm(props: Props & { tab: Tab; config: Config | null; onClose: (
             ))}
           </NativeSelect>
         </Field>
-        <Field label={t("Database name")} error={fields.database_name}>
-          <Input value={database} onChange={(e) => setDatabase(e.target.value)} />
+        <Field label={t("Back up")} error={fields.volume}>
+          <NativeSelect value={what} onChange={(e) => setWhat(e.target.value)} disabled={!!c}>
+            {options.map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </NativeSelect>
         </Field>
+        {!what && (
+          <Field label={t("Database name")} error={fields.database_name}>
+            <Input value={database} onChange={(e) => setDatabase(e.target.value)} />
+          </Field>
+        )}
         <Field label={t("Schedule")} help={t("Cron, in UTC (minute hour day month weekday)")} error={fields.schedule}>
           <div className="rdp2-row">
             <NativeSelect value={SCHEDULES.some(([v]) => v === schedule) ? schedule : ""} onChange={(e) => e.target.value && setSchedule(e.target.value)}>
@@ -142,6 +177,8 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
   const [files, setFiles] = useState<Array<{ file: string; size: number }> | null>(null);
   const [file, setFile] = useState("");
   const [database, setDatabase] = useState(d.database?.database ?? "");
+  const options = whatOptions(t, props.tab);
+  const [what, setWhat] = useState(options[0]?.[0] ?? "");
   const [fields, setFields] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<unknown>(null);
   // The listing shown is the last asked for, of the provider and folder shown.
@@ -178,7 +215,8 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
             await props.api.post(`/apps/services/${d.service.id}/restore`, {
               storage_provider_id: Number(provider),
               file,
-              database: database.trim(),
+              database: what ? volumeLabel(what) : database.trim(),
+              volume: what || undefined,
             });
             props.onDone();
           } catch (err) {
@@ -232,9 +270,20 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
             )}
           </Field>
         )}
-        <Field label={t("Restore into database")} error={fields.database}>
-          <Input value={database} onChange={(e) => setDatabase(e.target.value)} />
+        <Field label={t("Restore")} error={fields.volume}>
+          <NativeSelect value={what} onChange={(e) => setWhat(e.target.value)}>
+            {options.map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </NativeSelect>
         </Field>
+        {!what && (
+          <Field label={t("Restore into database")} error={fields.database}>
+            <Input value={database} onChange={(e) => setDatabase(e.target.value)} />
+          </Field>
+        )}
         <ErrorNote error={error} />
         <div className="rdp2-row rdp2-end">
           <Button type="submit" variant="destructive" disabled={!file || !database.trim()}>
@@ -257,7 +306,7 @@ export function BackupsTab(props: Props) {
   if (tab.isLoading) return <Loading />;
   if (tab.error || !tab.data) return <ErrorState error={tab.error} />;
   const data = tab.data;
-  if (!data.supported)
+  if (!data.supported && data.volumes.length === 0)
     return <p className="rdp2-muted">{t("Redis keeps its data in its volume (append-only file): it has no database backups.")}</p>;
   const providerName = (id: number) => data.providers.find((p) => p.id === id)?.name ?? `#${id}`;
   const runNow = async (c: Config) => {
@@ -273,8 +322,8 @@ export function BackupsTab(props: Props) {
   return (
     <>
       <Section
-        title={t("Database backups")}
-        description={t("Dumps of the database (pg_dump, mysqldump, mariadb-dump, mongodump), gzipped, written to a storage provider on a schedule.")}
+        title={t("Backups")}
+        description={t("Dumps of the database (pg_dump, mysqldump, mariadb-dump, mongodump) or archives of its volumes, gzipped, written to a storage provider on a schedule.")}
         actions={
           <>
             {props.can("backups.restore") && data.providers.length > 0 && (
@@ -283,7 +332,7 @@ export function BackupsTab(props: Props) {
               </Button>
             )}
             {props.can("database_backups.create") && data.providers.length > 0 && (
-              <Button onClick={() => setEditing("new")}>{t("Create database backup")}</Button>
+              <Button onClick={() => setEditing("new")}>{t("Create backup")}</Button>
             )}
           </>
         }
@@ -301,7 +350,7 @@ export function BackupsTab(props: Props) {
           <table className="rdp2-table">
             <thead>
               <tr>
-                <th>{t("Database")}</th>
+                <th>{t("Backs up")}</th>
                 <th>{t("Schedule")}</th>
                 <th>{t("Storage provider")}</th>
                 <th>{t("Path")}</th>
@@ -312,7 +361,7 @@ export function BackupsTab(props: Props) {
             <tbody>
               {data.configs.map((c) => (
                 <tr key={c.id}>
-                  <td>{c.database_name}</td>
+                  <td>{c.volume ? `${t("Volume")} ${c.volume}` : c.database_name}</td>
                   <td className="rdp2-mono">
                     {c.schedule}
                     {!c.enabled && <span className="rdp2-muted"> · {t("off")}</span>}

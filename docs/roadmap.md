@@ -43,8 +43,8 @@ certificate status and drift checks (RustCMS W4). A deleted project's network is
 
 - Builds from uploads, Railpack and buildpacks; GitHub webhooks with signatures, a GitHub token
   (builds from Git with Dockerfile or Nixpacks, an inline Dockerfile and trigger URLs are done).
-- Volume backups (database backups to a local directory or S3, scheduled, with retention and
-  restore, are done).
+- (Database and volume backups to a local directory or S3, scheduled, with retention and restore,
+  are done.)
 - (Compose services, from the panel or EasyPanel templates, and one-click templates are done.)
 - Notifications of Docker prunes and panel updates (Discord, Slack, Telegram, email and webhooks
   for deployments, backups and a full disk are done).

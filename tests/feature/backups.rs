@@ -447,3 +447,104 @@ db_test!(
         }
     }
 );
+
+db_test!(
+    a_volume_is_backed_up_and_restored,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, _, provider, root) = setup(&app).await;
+        let project = rdockpanel::models::project::Entity::find()
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        // An app with a volume, deployed.
+        let web: i64 = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project.to_string(), "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await
+        .parse()
+        .unwrap();
+        create(
+            &app,
+            &admin,
+            "service_mounts",
+            json!({"service_id": web.to_string(), "kind": "volume", "name": "content", "target": "/usr/share/nginx/html"}),
+        )
+        .await;
+        action(&app, &admin, "services", "deploy", &web.to_string())
+            .await
+            .assert_status(StatusCode::OK);
+        let queued = last_deployment(&app, web).await;
+        deployment_service::run(app.state(), queued.id, FAST)
+            .await
+            .unwrap();
+
+        // Only one of its volumes.
+        let config = json!({"service_id": web.to_string(), "storage_provider_id": provider, "database_name": "content", "volume": "/etc", "schedule": "0 3 * * *", "retention": 3, "path": "volumes"});
+        admin
+            .post_json(&records(&app, "database_backups"), &config)
+            .await
+            .assert_validation_error("volume");
+        let mut config = config;
+        config["volume"] = json!("/usr/share/nginx/html");
+        let backup: i64 = create(&app, &admin, "database_backups", config)
+            .await
+            .parse()
+            .unwrap();
+        let tab = admin
+            .get(&app.admin_api(&format!("x/apps/services/{web}/backups")))
+            .await
+            .json();
+        assert_eq!(tab["volumes"], json!(["/usr/share/nginx/html"]));
+        assert_eq!(tab["supported"], false);
+
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/backups/{backup}/run")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        let done = run_last(&app, web).await;
+        assert_eq!(done.status, "succeeded", "{:?} {:?}", done.error, done.log);
+        let file = done.file.unwrap();
+        assert!(
+            file.starts_with("volumes/shop_web.content.") && file.ends_with(".tar.gz"),
+            "{file}"
+        );
+        let calls = fake.calls();
+        let tar = calls.iter().find(|c| c.contains("tar -czf")).unwrap();
+        assert!(tar.ends_with(" /usr/share/nginx/html"), "{tar}");
+
+        // A restore feeds the archive (checked whole first) to tar.
+        let archive = {
+            let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            std::io::Write::write_all(&mut gz, b"a tar").unwrap();
+            gz.finish().unwrap()
+        };
+        std::fs::write(root.join("volumes/site.tar.gz"), &archive).unwrap();
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{web}/restore")),
+                &json!({"storage_provider_id": provider.parse::<i64>().unwrap(), "file": "volumes/site.tar.gz", "database": "content", "volume": "/usr/share/nginx/html"}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        let restored = run_last(&app, web).await;
+        assert_eq!(
+            restored.status, "succeeded",
+            "{:?} {:?}",
+            restored.error, restored.log
+        );
+        assert_eq!(*fake.fed.lock().unwrap(), archive);
+        assert!(fake.calls().iter().any(|c| c.contains("tar -xzf")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+);

@@ -267,7 +267,21 @@ pub(crate) async fn sync_repo(
     };
     let at = checkout.to_string_lossy().into_owned();
     let reference = branch.unwrap_or("HEAD");
-    if checkout.join(".git").is_dir() {
+    // The first time an empty repository (any reference fetches then, a
+    // commit too); after, tracked files back as committed (`reset`), never
+    // an untracked file overwritten (no `--force`: a commit replacing
+    // `./data` fails the deployment rather than erase it).
+    if !checkout.join(".git").is_dir() {
+        log.line(format!("cloning {url} ({reference})")).await;
+        std::fs::create_dir_all(checkout).map_err(|e| failed(e.to_string()))?;
+        run(log, "git init", &mut git(&["init", "-q", &at])).await?;
+        run(
+            log,
+            "setting the URL",
+            &mut git(&["-C", &at, "remote", "add", "origin", "--", url]),
+        )
+        .await?;
+    } else {
         log.line(format!("fetching {url} ({reference})")).await;
         run(
             log,
@@ -277,30 +291,25 @@ pub(crate) async fn sync_repo(
         .await?;
         run(
             log,
-            "the fetch",
-            &mut git(&[
-                "-C", &at, "fetch", "--depth", "1", "origin", "--", reference,
-            ]),
+            "resetting tracked files",
+            &mut git(&["-C", &at, "reset", "-q", "--hard", "HEAD"]),
         )
         .await?;
-        run(
-            log,
-            "the checkout",
-            &mut git(&["-C", &at, "checkout", "--force", "--detach", "FETCH_HEAD"]),
-        )
-        .await?;
-    } else {
-        log.line(format!("cloning {url} ({reference})")).await;
-        if let Some(parent) = checkout.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| failed(e.to_string()))?;
-        }
-        let mut args = vec!["clone", "--depth", "1", "--single-branch"];
-        if let Some(branch) = branch {
-            args.extend(["--branch", branch]);
-        }
-        args.extend(["--", url, &at]);
-        run(log, "the clone", &mut git(&args)).await?;
     }
+    run(
+        log,
+        "the fetch",
+        &mut git(&[
+            "-C", &at, "fetch", "--depth", "1", "origin", "--", reference,
+        ]),
+    )
+    .await?;
+    run(
+        log,
+        "the checkout",
+        &mut git(&["-C", &at, "checkout", "-q", "--detach", "FETCH_HEAD"]),
+    )
+    .await?;
     let commit = run(
         log,
         "reading the commit",

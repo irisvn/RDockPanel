@@ -321,6 +321,13 @@ window.rustcms?.registerTranslations?.("vi", {
   "The Compose project's folder": "Thư mục của project Compose",
   "docker-compose.yml; a repository can be set later on its Source tab": "docker-compose.yml; có thể đổi sang repo Git ở tab Source",
   "${VAR} reads the Environment tab. Domains lead to one of its services.": "${VAR} lấy từ tab Environment. Domain trỏ tới một service trong file.",
+  // Volume backups.
+  "The database": "Database",
+  "Back up": "Backup",
+  "Backs up": "Nội dung",
+  "Create backup": "Tạo backup",
+  "Dumps of the database (pg_dump, mysqldump, mariadb-dump, mongodump) or archives of its volumes, gzipped, written to a storage provider on a schedule.":
+    "Bản dump database (pg_dump, mysqldump, mariadb-dump, mongodump) hoặc bản nén volume, ghi vào nơi lưu trữ theo lịch.",
 });
 
 export {};

@@ -97,7 +97,7 @@ export function ServicePage(props: Props) {
         tabs={[
           { id: "overview", label: t("Overview") },
           ...(d.database ? [{ id: "credentials", label: t("Credentials") }] : []),
-          ...(d.database ? [{ id: "backups", label: t("Backups") }] : []),
+          ...(d.database || d.mounts.some((m) => m.kind === "volume") ? [{ id: "backups", label: t("Backups") }] : []),
           { id: "deployments", label: t("Deployments") },
           { id: "environment", label: t("Environment") },
           { id: "domains", label: t("Domains") },
@@ -109,7 +109,7 @@ export function ServicePage(props: Props) {
       <div className="rdp2-tab-body">
         {tab === "overview" && <OverviewTab {...props} d={d} />}
         {tab === "credentials" && d.database && <CredentialsTab {...props} d={d} />}
-        {tab === "backups" && d.database && <BackupsTab {...props} d={d} />}
+        {tab === "backups" && <BackupsTab {...props} d={d} />}
         {tab === "deployments" && <DeploymentsTab {...props} d={d} onError={setError} refresh={refresh} />}
         {tab === "environment" && <EnvironmentTab {...props} d={d} onSaved={saved} />}
         {tab === "domains" && !d.can.domains.view && <p className="rdp2-muted">{t("You may not see domains.")}</p>}

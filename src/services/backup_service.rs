@@ -67,6 +67,64 @@ pub fn parse_schedule(expr: &str) -> Option<croner::Cron> {
         .ok()
 }
 
+/// What a run backs up: a database service's database, or a volume of a
+/// service (its path in the container: a tar of it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum What {
+    Database(Engine),
+    Volume(String),
+}
+
+impl What {
+    /// The file's extension, and whether the panel gzips the output.
+    fn format(&self) -> Option<(&'static str, bool)> {
+        match self {
+            Self::Database(engine) => format_of(*engine),
+            Self::Volume(_) => Some(("tar.gz", false)),
+        }
+    }
+
+    fn dump(&self, database: &str) -> Option<Vec<String>> {
+        match self {
+            Self::Database(engine) => dump_command(*engine, database),
+            Self::Volume(path) => Some(sh(r#"exec tar -czf - -C "$1" ."#, &[path])),
+        }
+    }
+
+    fn restore(&self, database: &str, source: Option<&str>) -> Option<Vec<String>> {
+        match self {
+            Self::Database(engine) => restore_command(*engine, database, source),
+            Self::Volume(path) => Some(sh(r#"exec tar -xzf - -C "$1""#, &[path])),
+        }
+    }
+
+    /// Whether `key` is a file this restores, and whether the panel
+    /// decompresses it first (SQL) or feeds it as it is.
+    fn restores(&self, key: &str) -> Option<bool> {
+        match self {
+            Self::Database(_) if key.ends_with(".sql.gz") => Some(true),
+            Self::Database(Engine::Mongo) if key.ends_with(".archive.gz") => Some(false),
+            Self::Volume(_) if key.ends_with(".tar.gz") => Some(false),
+            _ => None,
+        }
+    }
+}
+
+/// The volume mounted at `path` in `service` (a named volume), if any.
+async fn volume_at<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    service: i64,
+    path: &str,
+) -> AppResult<Option<crate::models::service_mount::Model>> {
+    use crate::models::service_mount;
+    Ok(service_mount::Entity::find()
+        .filter(service_mount::Column::ServiceId.eq(service))
+        .filter(service_mount::Column::Kind.eq("volume"))
+        .filter(service_mount::Column::Target.eq(path))
+        .one(db)
+        .await?)
+}
+
 /// A backup file's extension, and whether the panel gzips the dump
 /// (`mongodump` does it).
 fn format_of(engine: Engine) -> Option<(&'static str, bool)> {
@@ -175,9 +233,11 @@ pub async fn request(
     user_id: Option<i64>,
 ) -> AppResult<backup_run::Model> {
     let (service, owner) = owner_of(txn, backup.service_id).await?;
-    let (ext, _) = Engine::parse(&service.kind)
-        .and_then(format_of)
-        .ok_or_else(|| AppError::BadRequest("this service has no database to back up".into()))?;
+    let (ext, _) = match &backup.volume {
+        Some(path) => What::Volume(path.clone()).format(),
+        None => Engine::parse(&service.kind).and_then(format_of),
+    }
+    .ok_or_else(|| AppError::BadRequest("this service has no database to back up".into()))?;
     let now = Utc::now();
     let run = backup_run::ActiveModel {
         service_id: Set(backup.service_id),
@@ -187,6 +247,7 @@ pub async fn request(
         trigger: Set(trigger.to_owned()),
         status: Set("queued".to_owned()),
         database_name: Set(backup.database_name.clone()),
+        volume: Set(backup.volume.clone()),
         retention: Set(Some(backup.retention)),
         user_id: Set(user_id),
         created_at: Set(now),
@@ -214,6 +275,7 @@ pub async fn request_restore(
     provider: &storage_provider::Model,
     file: &str,
     database: &str,
+    volume: Option<&str>,
     user_id: Option<i64>,
 ) -> AppResult<backup_run::Model> {
     let now = Utc::now();
@@ -224,6 +286,7 @@ pub async fn request_restore(
         trigger: Set("manual".to_owned()),
         status: Set("queued".to_owned()),
         database_name: Set(database.to_owned()),
+        volume: Set(volume.map(str::to_owned)),
         file: Set(Some(file.to_owned())),
         user_id: Set(user_id),
         created_at: Set(now),
@@ -410,14 +473,28 @@ pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
             ("failed", Some(error), None)
         }
     };
-    let mut active = row.into_active_model();
-    active.status = Set(status.to_owned());
-    active.error = Set(error);
-    active.size = Set(size);
-    active.log = Set(Some(crate::models::action::tail(&log.text).to_owned()));
-    active.finished_at = Set(Some(Utc::now()));
-    active.updated_at = Set(Utc::now());
-    let done = active.update(db).await?;
+    // Only while still its own: a run taken for dead (`killing`) is the
+    // recovery's to end (once its command is known dead).
+    let ended = backup_run::Entity::update_many()
+        .col_expr(backup_run::Column::Status, Expr::value(status))
+        .col_expr(backup_run::Column::Error, Expr::value(error))
+        .col_expr(backup_run::Column::Size, Expr::value(size))
+        .col_expr(
+            backup_run::Column::Log,
+            Expr::value(crate::models::action::tail(&log.text).to_owned()),
+        )
+        .col_expr(backup_run::Column::FinishedAt, Expr::value(Utc::now()))
+        .col_expr(backup_run::Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(backup_run::Column::Id.eq(id))
+        .filter(backup_run::Column::Status.eq("running"))
+        .exec(db)
+        .await?;
+    if ended.rows_affected == 0 {
+        return Ok(());
+    }
+    let Some(done) = backup_run::Entity::find_by_id(id).one(db).await? else {
+        return Ok(());
+    };
     let notify = state.clone();
     tokio::spawn(async move {
         crate::services::notify_service::backup_finished(&notify, &done).await;
@@ -429,19 +506,32 @@ fn stale() -> chrono::Duration {
     chrono::Duration::from_std(STALE).unwrap_or_default()
 }
 
-/// The service, its engine, the provider (opened) and the running container.
+/// The service, what is backed up, the provider (opened) and the running
+/// container.
 async fn target(
     state: &AppState,
     run: &backup_run::Model,
     log: &mut Log<'_>,
-) -> Result<(Engine, Store, String, String), String> {
+) -> Result<(What, Store, String, String), String> {
     let db = state.db();
     let (service, owner) = owner_of(db, run.service_id)
         .await
         .map_err(|_| "the service is gone")?;
-    let engine = Engine::parse(&service.kind)
-        .filter(|e| supported(*e))
-        .ok_or("this service has no database to back up")?;
+    let what = match &run.volume {
+        // Still one of its volumes (checked again).
+        Some(path) => {
+            volume_at(db, service.id, path)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("the volume is no longer mounted in this service")?;
+            What::Volume(path.clone())
+        }
+        None => What::Database(
+            Engine::parse(&service.kind)
+                .filter(|e| supported(*e))
+                .ok_or("this service has no database to back up")?,
+        ),
+    };
     let provider = storage_provider::Entity::find_by_id(run.storage_provider_id.unwrap_or(0))
         .one(db)
         .await
@@ -465,14 +555,17 @@ async fn target(
                 .container_id
                 .clone()
         })
-        .ok_or("the database is not running (deploy it first)")?;
+        .ok_or("the service is not running (deploy it first)")?;
     log.line(format!(
         "{} {owner}, provider {}",
-        engine.kind(),
+        match &what {
+            What::Database(e) => e.kind().to_owned(),
+            What::Volume(p) => format!("volume {p} of"),
+        },
         provider.name
     ))
     .await;
-    Ok((engine, store, container, owner))
+    Ok((what, store, container, owner))
 }
 
 /// A mark for a run's command, recorded with the container before it runs
@@ -506,9 +599,11 @@ async fn backup(
     run: &backup_run::Model,
     log: &mut Log<'_>,
 ) -> Result<Done, String> {
-    let (engine, store, container, owner) = target(state, run, log).await?;
-    let (ext, gzip) = format_of(engine).ok_or("this engine is not backed up")?;
-    let cmd = dump_command(engine, &run.database_name).ok_or("this engine is not backed up")?;
+    let (what, store, container, owner) = target(state, run, log).await?;
+    let (ext, gzip) = what.format().ok_or("this engine is not backed up")?;
+    let cmd = what
+        .dump(&run.database_name)
+        .ok_or("this engine is not backed up")?;
     let key = run.file.clone().unwrap_or_default();
     if !valid_key(&key) {
         return Err(format!("{key} is not a valid path"));
@@ -612,21 +707,21 @@ async fn restore(
     run: &backup_run::Model,
     log: &mut Log<'_>,
 ) -> Result<Done, String> {
-    let (engine, store, container, _) = target(state, run, log).await?;
+    let (what, store, container, _) = target(state, run, log).await?;
     let key = run.file.clone().unwrap_or_default();
     if !valid_key(&key) {
         return Err(format!("{key} is not a valid path"));
     }
-    let gzip = key.ends_with(".sql.gz");
-    if !gzip && !(engine == Engine::Mongo && key.ends_with(".archive.gz")) {
-        return Err("the file is not a backup of this engine (.sql.gz, .archive.gz)".to_owned());
-    }
+    let gzip = what.restores(&key).ok_or(
+        "the file is not a backup of this (.sql.gz, .archive.gz for MongoDB, .tar.gz for a volume)",
+    )?;
     let scratch = Scratch::new()?;
     let path = scratch.file();
     let size = store.get(&key, &path).await?;
     log.line(format!("downloaded {key} ({} KB)", size / 1024))
         .await;
-    let cmd = restore_command(engine, &run.database_name, database_of(&key))
+    let cmd = what
+        .restore(&run.database_name, database_of(&key))
         .ok_or("this engine is not restored")?;
     // Checked whole before anything reaches the database: a corrupt file
     // changes nothing. SQL is decompressed to a file, Mongo's archive read
