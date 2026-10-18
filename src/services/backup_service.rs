@@ -287,7 +287,8 @@ pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
     active.log = Set(Some(crate::models::action::tail(&log.text).to_owned()));
     active.finished_at = Set(Some(Utc::now()));
     active.updated_at = Set(Utc::now());
-    active.update(db).await?;
+    let done = active.update(db).await?;
+    crate::services::notify_service::backup_finished(state, &done).await;
     Ok(())
 }
 

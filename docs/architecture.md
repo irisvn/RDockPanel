@@ -212,6 +212,17 @@ Schedules: every minute the `database-backups` tick (RustCMS W4) queues one run 
 configuration whose cron fired since its last slot (missed slots are not caught up), the slot
 claimed in the database. Runs cut by a stop are marked failed at boot.
 
+### Notifications
+
+As EasyPanel's (Settings → Notifications). A channel is Discord or Slack (their webhook URL), a
+Telegram bot (token and chat), email (SMTP: port 465 TLS, else STARTTLS required) or a webhook (a
+JSON `{event, ok, title, details, data}` POST). Its URL, token or SMTP password is sealed (context
+`notification_channels.secret`). Each channel picks its events: deployments (Deploy and Rollback
+that succeeded, and every failure), database backups and restores, and the server's disk at or over
+its threshold (checked every 5 minutes, said at most every 6 hours per channel). Sent in the
+background, 15 s per channel, never retried; a failure is logged (never the URL). "Send test
+notification" sends at once and answers why it failed.
+
 ### Secrets
 
 A service's environment variables (`services.env`) and registry password
@@ -301,4 +312,4 @@ MySQL 8.4 (`docker-compose.yml` for development). Besides the framework's tables
 sessions, audit log, jobs, schedule slots, …), the panel adds `actions`, then for Phase 2 `projects`,
 `services`, `service_domains`, `service_ports`, `service_mounts` and `deployments` (each with its
 configuration snapshot, pinned image, status and log), then `storage_providers`,
-`database_backups` and `backup_runs`.
+`database_backups`, `backup_runs` and `notification_channels`.

@@ -12,6 +12,7 @@ mod docker;
 mod docker_routes;
 mod health;
 mod live;
+mod notifications;
 mod projects;
 mod routing;
 mod templates;

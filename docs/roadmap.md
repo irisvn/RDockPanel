@@ -46,7 +46,8 @@ Deleting a project will also detach Traefik from its network and remove it.
 - Volume backups (database backups to a local directory or S3, scheduled, with retention and
   restore, are done).
 - Docker Compose, one-click templates.
-- Notifications (Discord, Slack, Telegram, email).
+- Notifications of Docker prunes and panel updates (Discord, Slack, Telegram, email and webhooks
+  for deployments, backups and a full disk are done).
 - Multiple servers (Swarm workers), placement.
 - Multiple users per project, two-factor authentication.
 - Public API with tokens, a CLI.

@@ -15,6 +15,7 @@ mod m20261018_163345_add_kind_to_services;
 mod m20261018_173253_seal_file_mounts;
 mod m20261018_180047_add_source_to_services;
 mod m20261019_020000_create_backup_tables;
+mod m20261019_040000_create_notification_channels_table;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -36,6 +37,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261018_173253_seal_file_mounts::Migration),
             Box::new(m20261018_180047_add_source_to_services::Migration),
             Box::new(m20261019_020000_create_backup_tables::Migration),
+            Box::new(m20261019_040000_create_notification_channels_table::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

@@ -1,12 +1,13 @@
 // The panel's Settings (`/admin/p/settings`), like EasyPanel's: storage
 // providers for backups (a local directory or an S3-compatible bucket),
-// each with a "Test" button. Written through the `storage_providers`
+// each with a "Test" button, and notification channels. Written through the `storage_providers`
 // resource (its secret key sealed, never shown again).
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field, Section } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
+import { Notifications } from "./Notifications";
 
 type Provider = {
   id: number;
@@ -235,6 +236,7 @@ export function Settings(props: PageProps<unknown>) {
       ) : (
         <Alert>{t("You may not see the storage providers.")}</Alert>
       )}
+      {props.can("notification_channels.view_any") && <Notifications {...props} />}
     </div>
   );
 }

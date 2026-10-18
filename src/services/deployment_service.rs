@@ -598,6 +598,7 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
         .ok_or(AppError::NotFound)?;
     let id = row.id;
     finish(db, row, outcome, image).await?;
+    crate::services::notify_service::deployment_finished(state, id).await;
     // Traefik follows what the service is now (this deployment's routes if
     // it succeeded, the previous ones otherwise).
     if let Some(traefik) = traefik {

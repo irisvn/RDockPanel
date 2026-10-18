@@ -8,8 +8,8 @@ feature is free: no project limits, no paid tiers.
 
 > **Status: early development.** Server monitoring, Docker management, apps and databases on
 > Docker Swarm with domains and HTTPS, builds from Git or a Dockerfile, EasyPanel templates,
-> database backups, and a one-command installer work. Still to come: notifications, Compose. Try it
-> on a test server first.
+> database backups, notifications, and a one-command installer work. Still to come: Compose, volume
+> backups. Try it on a test server first.
 
 ![Server dashboard](docs/images/server.png)
 
@@ -58,15 +58,16 @@ feature is free: no project limits, no paid tiers.
   Git host's webhook.
 - **Database backups**: scheduled dumps (cron) of PostgreSQL, MySQL, MariaDB and MongoDB to a local
   directory or an S3-compatible bucket, with retention, a log per run, "Run now" and Restore.
+- **Notifications**: Discord, Slack, Telegram, email (SMTP) and webhooks, for deployments, backups
+  and a full disk, with "Send test notification".
 - **Secrets**: environment variables and private registry credentials, encrypted with the app key;
   edited as `.env` text; values are shown only with the `services.secrets` permission (each read is
   audited). A rollback brings back the environment of then.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Volume backups, notifications, Compose services, per-service monitoring.
-- Phase 3: Compose, templates, notifications, multiple
-  nodes, two-factor authentication, an API and a CLI.
+- Volume backups, Compose services, per-service monitoring.
+- Later: multiple nodes, two-factor authentication, an API and a CLI.
 
 | Containers | Live logs | Terminal |
 |---|---|---|

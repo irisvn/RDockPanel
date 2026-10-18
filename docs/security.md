@@ -90,6 +90,13 @@ no absolute path) and a local provider's directory must be absolute and not `/`;
 the panel's user, so `storage_providers.*` is an administrator's permission. A restore replaces
 data in place: `backups.restore` is separate from `backups.run`.
 
+## Notifications
+
+A channel's URL, bot token or SMTP password is sealed and never shown again; errors never include
+the URL. The panel posts to the URL given (a webhook may point at a private address:
+`notification_channels.*` is an administrator's permission) without following redirects.
+Notifications carry project, service and database names and errors, never environment values.
+
 ## The terminal
 
 - Needs `docker.exec` (and `system.manage` for the panel's own containers).

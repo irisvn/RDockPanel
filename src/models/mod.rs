@@ -4,6 +4,7 @@ pub mod action;
 pub mod backup_run;
 pub mod database_backup;
 pub mod deployment;
+pub mod notification_channel;
 pub mod project;
 pub mod service;
 pub mod service_domain;

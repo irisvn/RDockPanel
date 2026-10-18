@@ -34,6 +34,10 @@ impl ServiceProvider for AppServiceProvider {
             crate::models::deployment::Column::Files,
             rustcms::crypto::Binding::Column,
         );
+        app.encrypted_column::<crate::models::notification_channel::Entity>(
+            crate::models::notification_channel::Column::Secret,
+            rustcms::crypto::Binding::Column,
+        );
         app.encrypted_column::<crate::models::storage_provider::Entity>(
             crate::models::storage_provider::Column::SecretKey,
             rustcms::crypto::Binding::Column,
@@ -79,6 +83,14 @@ impl ServiceProvider for AppServiceProvider {
                 }
                 Ok(())
             }),
+        );
+        // A full disk, said to the channels that asked (each at most every 6 h).
+        app.schedule(
+            rustcms::schedule::Schedule::every("disk-check", std::time::Duration::from_secs(300))
+                .run(|state| async move {
+                    crate::services::notify_service::check_disk(&state);
+                    Ok(())
+                }),
         );
         // rustcms:jobs
         // rustcms:commands
