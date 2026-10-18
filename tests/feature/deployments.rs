@@ -1727,3 +1727,62 @@ db_test!(
         assert_eq!(page["scripts"][0]["name"], "Migrate");
     }
 );
+
+db_test!(
+    capabilities_and_sysctls_reach_the_container,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        let url = format!("{}/{id}", records(&app, "services"));
+        // Adding: the panel's administrators only.
+        let editor =
+            support::user_with(&app, "editor", &["services.view", "services.update"]).await;
+        let editor = app.acting_as(&editor).await;
+        editor
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"cap_add": "NET_ADMIN"})),
+            )
+            .await
+            .assert_validation_error("cap_add");
+        editor
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"cap_drop": "NET_RAW"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"sysctls": "not a pair"})),
+            )
+            .await
+            .assert_validation_error("sysctls");
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"cap_add": "cap_net_admin, SYS_TIME", "sysctls": "net.ipv4.ip_forward=1"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let spec = fake.services.lock().unwrap()["shop_web"]
+            .spec
+            .clone()
+            .unwrap()
+            .task_template
+            .unwrap()
+            .container_spec
+            .unwrap();
+        assert_eq!(spec.capability_add.unwrap(), ["NET_ADMIN", "SYS_TIME"]);
+        assert_eq!(spec.capability_drop.unwrap(), ["NET_RAW"]);
+        assert_eq!(spec.sysctls.unwrap()["net.ipv4.ip_forward"], "1");
+    }
+);

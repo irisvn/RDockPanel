@@ -1044,6 +1044,9 @@ function AdvancedTab(props: {
   const [mem, setMem] = useState(str(s.mem_limit_mb));
   const [cpuR, setCpuR] = useState(str(s.cpu_reservation_millis));
   const [memR, setMemR] = useState(str(s.mem_reservation_mb));
+  const [capAdd, setCapAdd] = useState(s.cap_add ?? "");
+  const [capDrop, setCapDrop] = useState(s.cap_drop ?? "");
+  const [sysctls, setSysctls] = useState(s.sysctls ?? "");
   const { save, error, busy, fields } = useServiceSave(s.id, props.onSaved);
   const [published, setPublished] = useState("");
   const [targetPort, setTargetPort] = useState("");
@@ -1070,6 +1073,9 @@ function AdvancedTab(props: {
               mem_limit_mb: num(mem),
               cpu_reservation_millis: num(cpuR),
               mem_reservation_mb: num(memR),
+              ...(capAdd !== (s.cap_add ?? "") ? { cap_add: capAdd.trim() || null } : {}),
+              ...(capDrop !== (s.cap_drop ?? "") ? { cap_drop: capDrop.trim() || null } : {}),
+              ...(sysctls !== (s.sysctls ?? "") ? { sysctls: sysctls.trim() || null } : {}),
             });
           }}
         >
@@ -1117,6 +1123,23 @@ function AdvancedTab(props: {
               <Input type="number" value={memR} onChange={(e) => setMemR(e.target.value)} disabled={disabled} />
             </Field>
           </div>
+          {s.kind !== "compose" && (
+            <>
+              <h4 className="rdp2-subtitle">{t("Linux")}</h4>
+              <p className="rdp2-muted rdp2-small">{t("Tini runs as the containers' init. Adding capabilities or sysctls needs system.manage.")}</p>
+              <div className="rdp2-grid2">
+                <Field label={t("Add capabilities")} help="NET_ADMIN, SYS_TIME" error={fields.cap_add}>
+                  <Input className="rdp2-mono" value={capAdd} onChange={(e) => setCapAdd(e.target.value)} disabled={disabled} />
+                </Field>
+                <Field label={t("Drop capabilities")} help="NET_RAW" error={fields.cap_drop}>
+                  <Input className="rdp2-mono" value={capDrop} onChange={(e) => setCapDrop(e.target.value)} disabled={disabled} />
+                </Field>
+              </div>
+              <Field label={t("Sysctls")} help={t("One key=value a line, e.g. net.ipv4.ip_forward=1")} error={fields.sysctls}>
+                <Textarea className="rdp2-mono" rows={3} value={sysctls} onChange={(e) => setSysctls(e.target.value)} disabled={disabled} />
+              </Field>
+            </>
+          )}
           {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
           {d.can.update && (
             <div className="rdp2-row rdp2-end">

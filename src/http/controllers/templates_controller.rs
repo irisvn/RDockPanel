@@ -182,8 +182,13 @@ async fn apply(
             blocking.join("; ")
         )));
     }
-    // A Compose file runs anything on the host: the panel's administrators only.
-    if services.iter().any(|s| s.kind == "compose") && !compose_allowed {
+    // A Compose file runs anything on the host, as added capabilities and
+    // sysctls reach its kernel: the panel's administrators only.
+    if services
+        .iter()
+        .any(|s| s.kind == "compose" || !s.cap_add.is_empty() || !s.sysctls.is_empty())
+        && !compose_allowed
+    {
         return Err(AppError::Forbidden);
     }
     // The related records each need their own resource's permission.

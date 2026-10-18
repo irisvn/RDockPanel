@@ -283,6 +283,13 @@ its threshold (checked every 5 minutes, said at most every 6 hours per channel).
 background, 15 s per channel, never retried; a failure is logged (never the URL). "Send test
 notification" sends at once and answers why it failed.
 
+### Capabilities and sysctls
+
+As EasyPanel's Advanced → Deploy. Tini is every container's init. A service's added and dropped
+Linux capabilities (`CAP_` prefix optional) and sysctls (`key=value` lines) become its container
+spec's `CapabilityAdd`, `CapabilityDrop` and `Sysctls`. Adding capabilities or sysctls reaches the
+host's kernel: it needs `system.manage` (in the panel and for templates); dropping does not.
+
 ### Scripts
 
 As EasyPanel's Scripts. A service's scripts (`service_scripts`: a name, a shell command) run with

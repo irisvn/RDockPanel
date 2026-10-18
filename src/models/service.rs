@@ -55,6 +55,15 @@ pub struct Model {
     pub maintenance: bool,
     pub maintenance_title: Option<String>,
     pub maintenance_subtitle: Option<String>,
+    /// Linux capabilities added and dropped (`NET_ADMIN, SYS_TIME`), and
+    /// sysctls (`net.ipv4.ip_forward=1`, one a line): adding ones needs
+    /// `system.manage`.
+    #[sea_orm(column_type = "Text", nullable)]
+    pub cap_add: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub cap_drop: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub sysctls: Option<String>,
     /// Notes about the service (its Overview), for the team.
     #[sea_orm(column_type = "Text", nullable)]
     pub notes: Option<String>,

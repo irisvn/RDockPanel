@@ -209,8 +209,8 @@ db_test!(
             "{}",
             page.text()
         );
-        // What it needs but cannot get (capabilities): never deployed at once.
-        let capped = json!({"services": [{"type": "app", "data": {"serviceName": "vpn", "source": {"type": "image", "image": "wg:1"}, "deploy": {"capAdd": ["NET_ADMIN"]}}}]});
+        // What it needs but cannot get (supplemental groups): never deployed at once.
+        let capped = json!({"services": [{"type": "app", "data": {"serviceName": "vpn", "source": {"type": "image", "image": "wg:1"}, "deploy": {"groups": ["docker"]}}}]});
         let refused = admin
             .post_json(
                 &app.admin_api(&format!("x/apps/projects/{project}/schema")),
@@ -218,7 +218,7 @@ db_test!(
             )
             .await;
         refused.assert_status(StatusCode::BAD_REQUEST);
-        assert!(refused.text().contains("capAdd"), "{}", refused.text());
+        assert!(refused.text().contains("groups"), "{}", refused.text());
         // Domains need service_domains.create.
         let creator =
             support::user_with(&app, "creator", &["projects.view", "services.create"]).await;
@@ -228,6 +228,15 @@ db_test!(
             .post_json(
                 &app.admin_api(&format!("x/apps/projects/{project}/schema")),
                 &json!({"schema": routed}),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        // Added capabilities: the panel's administrators only.
+        let capable = json!({"services": [{"type": "app", "data": {"serviceName": "vpn2", "source": {"type": "image", "image": "wg:1"}, "deploy": {"capAdd": ["NET_ADMIN"]}}}]});
+        creator
+            .post_json(
+                &app.admin_api(&format!("x/apps/projects/{project}/schema")),
+                &json!({"schema": capable}),
             )
             .await
             .assert_status(StatusCode::FORBIDDEN);

@@ -71,6 +71,9 @@ impl Resource for ServiceResource {
                 .max_length(crate::services::compose_service::MAX_FILE),
             Field::column(service::Column::ComposeFile).max_length(255),
             Field::column(service::Column::Notes).max_length(20_000),
+            Field::column(service::Column::CapAdd).max_length(1000),
+            Field::column(service::Column::CapDrop).max_length(1000),
+            Field::column(service::Column::Sysctls).max_length(4000),
             Field::column(service::Column::Maintenance),
             Field::column(service::Column::MaintenanceTitle).max_length(200),
             Field::column(service::Column::MaintenanceSubtitle).max_length(1000),
@@ -285,6 +288,25 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
     };
     let source =
         after("source", record.map(|r| r.source.as_str())).unwrap_or_else(|| "image".to_owned());
+    // Capabilities and sysctls: added ones reach the host's kernel, for the
+    // panel's administrators only (dropping is anyone's).
+    let system = ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION);
+    for field in ["cap_add", "cap_drop"] {
+        if let Some(caps) = text(data, field) {
+            if !crate::services::deploy_service::valid_capabilities(caps) {
+                errors.add(field, ctx.t("must be capability names like NET_ADMIN"));
+            } else if field == "cap_add" && !caps.trim().is_empty() && !system {
+                errors.add(field, ctx.t("needs system.manage"));
+            }
+        }
+    }
+    if let Some(lines) = text(data, "sysctls") {
+        if crate::services::deploy_service::sysctls(Some(lines)).is_none() {
+            errors.add("sysctls", ctx.t("must be key=value lines"));
+        } else if !lines.trim().is_empty() && !system {
+            errors.add("sysctls", ctx.t("needs system.manage"));
+        }
+    }
     let compose = record.is_some_and(|r| r.kind == "compose");
     if compose {
         // Its file written here (`image`) or its repository's (`git`).

@@ -109,6 +109,10 @@ pub struct NewService {
     pub compose: Option<String>,
     /// …or its repository's.
     pub compose_git: Option<NewComposeGit>,
+    /// Linux capabilities added and dropped, and sysctls (`key=value` lines).
+    pub cap_add: Vec<String>,
+    pub cap_drop: Vec<String>,
+    pub sysctls: BTreeMap<String, String>,
     /// Its basic authentication: (user, password); hashed when made.
     pub basic_auth: Vec<(String, String)>,
     pub redirects: Vec<NewRedirect>,
@@ -134,6 +138,9 @@ impl NewService {
             compose_git: None,
             basic_auth: vec![],
             redirects: vec![],
+            cap_add: vec![],
+            cap_drop: vec![],
+            sysctls: BTreeMap::new(),
         }
     }
 
@@ -380,6 +387,19 @@ pub async fn create(
             errors.add("ports", "a protocol is tcp or udp");
         }
     }
+    for caps in [&new.cap_add, &new.cap_drop] {
+        if !crate::services::deploy_service::valid_capabilities(&caps.join(",")) {
+            errors.add("capabilities", "must be capability names like NET_ADMIN");
+        }
+    }
+    let lines: Vec<String> = new
+        .sysctls
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    if crate::services::deploy_service::sysctls(Some(&lines.join("\n"))).is_none() {
+        errors.add("sysctls", "must be key=value pairs");
+    }
     for (user, password) in &new.basic_auth {
         if !crate::services::deploy_service::valid_auth_user(user) {
             errors.add("basic_auth", format!("{user:?} is not a user name"));
@@ -442,6 +462,15 @@ pub async fn create(
         dockerfile_path: Set(new.build.as_ref().and_then(|b| b.dockerfile_path.clone())),
         dockerfile: Set(new.build.as_ref().and_then(|b| b.dockerfile.clone())),
         compose: Set(new.compose.clone().filter(|t| !t.trim().is_empty())),
+        cap_add: Set((!new.cap_add.is_empty()).then(|| new.cap_add.join(", "))),
+        cap_drop: Set((!new.cap_drop.is_empty()).then(|| new.cap_drop.join(", "))),
+        sysctls: Set((!new.sysctls.is_empty()).then(|| {
+            new.sysctls
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })),
         compose_file: Set(new.compose_git.as_ref().and_then(|g| g.file.clone())),
         command: Set(command),
         replicas: Set(replicas),

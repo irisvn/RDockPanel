@@ -31,7 +31,8 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Storage: volume, bind (system managers), file mounts | Done | file contents encrypted |
 | Storage: volume backups | Done | scheduled, retention, restore |
 | Advanced: ports, replicas, zero downtime, command, health check | Done | |
-| Advanced: Tini, capabilities, sysctls, groups | Missing | templates that need them are created but not deployed at once |
+| Advanced: Tini, capabilities, sysctls | Done | Tini always; adding capabilities or sysctls needs `system.manage` |
+| Advanced: supplemental groups | Missing | templates that need them are created but not deployed at once |
 
 ## Databases (PostgreSQL, MySQL, MariaDB, MongoDB, Redis)
 

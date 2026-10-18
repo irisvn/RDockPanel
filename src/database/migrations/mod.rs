@@ -21,6 +21,7 @@ mod m20261019_080000_create_redirects_and_basic_auth;
 mod m20261019_100000_add_notes_and_webhook_to_services;
 mod m20261019_120000_add_maintenance_to_services;
 mod m20261019_140000_create_service_scripts_table;
+mod m20261019_160000_add_capabilities_to_services;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -48,6 +49,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261019_100000_add_notes_and_webhook_to_services::Migration),
             Box::new(m20261019_120000_add_maintenance_to_services::Migration),
             Box::new(m20261019_140000_create_service_scripts_table::Migration),
+            Box::new(m20261019_160000_add_capabilities_to_services::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

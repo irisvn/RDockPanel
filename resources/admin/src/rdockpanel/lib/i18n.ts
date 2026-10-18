@@ -373,6 +373,14 @@ window.rustcms?.registerTranslations?.("vi", {
   "Running…": "Đang chạy…",
   "exit code": "mã thoát",
   Shell: "Shell",
+  // Linux.
+  Linux: "Linux",
+  "Tini runs as the containers' init. Adding capabilities or sysctls needs system.manage.":
+    "Tini chạy làm init của container. Thêm capability hoặc sysctl cần quyền system.manage.",
+  "Add capabilities": "Thêm capability",
+  "Drop capabilities": "Bỏ capability",
+  Sysctls: "Sysctl",
+  "One key=value a line, e.g. net.ipv4.ip_forward=1": "Mỗi dòng một key=value, ví dụ net.ipv4.ip_forward=1",
 });
 
 export {};

@@ -555,13 +555,34 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
         }
         // What it needs to be safe or to run: never deployed without.
         let mut needs = vec![];
-        for field in ["capAdd", "capDrop", "sysctls", "groups"] {
-            if deploy.get(field).is_some_and(|v| {
-                v.as_array().is_some_and(|a| !a.is_empty())
-                    || v.as_object().is_some_and(|o| !o.is_empty())
-            }) {
-                needs.push(field);
+        // Capabilities and sysctls, as EasyPanel's (for the panel's
+        // administrators: checked when the template is applied).
+        for (field, list) in [("capAdd", &mut new.cap_add), ("capDrop", &mut new.cap_drop)] {
+            for cap in deploy
+                .get(field)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                list.extend(crate::services::deploy_service::capabilities(Some(cap)));
             }
+        }
+        if let Some(map) = deploy.get("sysctls").and_then(Value::as_object) {
+            for (k, v) in map {
+                let value = v
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| v.to_string());
+                new.sysctls.insert(k.clone(), value);
+            }
+        }
+        if deploy
+            .get("groups")
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty())
+        {
+            needs.push("groups");
         }
         if !needs.is_empty() {
             let what = format!(
@@ -622,11 +643,11 @@ mod tests {
         assert!(plan.blocking.is_empty());
         let guarded = json!({"services": [{"type": "app", "data": {"serviceName": "registry", "source": {"type": "image", "image": "registry:2"}, "basicAuth": [{"username": "u", "password": "p"}], "deploy": {"capAdd": ["NET_ADMIN"]}}}]});
         let p = super::plan(&guarded, "p", None).unwrap();
-        assert!(
-            !p.blocking[0].contains("basic authentication") && p.blocking[0].contains("capAdd"),
-            "{:?}",
-            p.blocking
-        );
+        // Basic auth and capabilities are made with it; only groups block.
+        assert!(p.blocking.is_empty(), "{:?}", p.blocking);
+        assert_eq!(p.services[0].cap_add, ["NET_ADMIN"]);
+        let grouped = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "image", "image": "x:1"}, "deploy": {"groups": ["docker"]}}}]});
+        assert!(super::plan(&grouped, "p", None).unwrap().blocking[0].contains("groups"));
     }
 
     #[test]

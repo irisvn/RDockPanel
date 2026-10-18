@@ -58,6 +58,9 @@ export type ServiceDetail = {
     dockerfile: string | null;
     compose: string | null;
     notes: string | null;
+    cap_add: string | null;
+    cap_drop: string | null;
+    sysctls: string | null;
     maintenance: boolean;
     maintenance_title: string | null;
     maintenance_subtitle: string | null;

@@ -78,6 +78,13 @@ pub struct Snapshot {
     /// A Compose service: run by `docker compose`, not as a Swarm service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compose: Option<Compose>,
+    /// Linux capabilities added and dropped, and sysctls.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cap_add: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cap_drop: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sysctls: BTreeMap<String, String>,
     /// In maintenance: its domains lead to the panel's page for it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub maintenance: bool,
@@ -337,6 +344,9 @@ impl Snapshot {
             env_digest: None,
             primary_domain,
             maintenance: service.maintenance,
+            cap_add: capabilities(service.cap_add.as_deref()),
+            cap_drop: capabilities(service.cap_drop.as_deref()),
+            sysctls: sysctls(service.sysctls.as_deref()).unwrap_or_default(),
             // Set from their tables ([`Snapshot::with_access`]).
             redirects: vec![],
             basic_auth: vec![],
@@ -663,6 +673,15 @@ pub fn desired(
     if !configs.is_empty() {
         container["Configs"] = json!(configs);
     }
+    if !snapshot.cap_add.is_empty() {
+        container["CapabilityAdd"] = json!(snapshot.cap_add);
+    }
+    if !snapshot.cap_drop.is_empty() {
+        container["CapabilityDrop"] = json!(snapshot.cap_drop);
+    }
+    if !snapshot.sysctls.is_empty() {
+        container["Sysctls"] = json!(snapshot.sysctls);
+    }
     if let Some(args) = snapshot.command.as_deref().and_then(command_args) {
         container["Args"] = json!(args);
     }
@@ -822,6 +841,54 @@ impl TraefikFile {
     pub fn to_yaml(&self) -> String {
         serde_yaml_ng::to_string(self).expect("routes serialize")
     }
+}
+
+/// Capabilities as Docker takes them: `NET_ADMIN` (a `CAP_` prefix left
+/// out), upper case, sorted, once each. Others than letters, digits and `_`
+/// are dropped (checked when saved: [`valid_capabilities`]).
+pub fn capabilities(text: Option<&str>) -> Vec<String> {
+    let mut caps: Vec<String> = text
+        .unwrap_or_default()
+        .split([',', ' ', '\n'])
+        .map(|c| c.trim().to_ascii_uppercase())
+        .map(|c| c.strip_prefix("CAP_").map(str::to_owned).unwrap_or(c))
+        .filter(|c| !c.is_empty() && c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_'))
+        .collect();
+    caps.sort();
+    caps.dedup();
+    caps
+}
+
+/// Whether every word of `text` is a capability name.
+pub fn valid_capabilities(text: &str) -> bool {
+    text.split([',', ' ', '\n'])
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .all(|c| c.len() <= 40 && c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_'))
+}
+
+/// Sysctls, one `key=value` a line (`#` comments): `None` when one is not
+/// (keys of letters, digits, `.`, `_`, `-`; values on one line).
+pub fn sysctls(text: Option<&str>) -> Option<BTreeMap<String, String>> {
+    let mut map = BTreeMap::new();
+    for line in text.unwrap_or_default().lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (key, value) = line.split_once('=')?;
+        let (key, value) = (key.trim(), value.trim());
+        if key.is_empty()
+            || key.len() > 128
+            || !key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            || value.len() > 256
+        {
+            return None;
+        }
+        map.insert(key.to_owned(), value.to_owned());
+    }
+    Some(map)
 }
 
 /// A basic authentication user as a snapshot keeps it: `user:<digest of
@@ -1155,6 +1222,9 @@ mod tests {
             primary_domain: None,
             build: None,
             compose: None,
+            cap_add: vec![],
+            cap_drop: vec![],
+            sysctls: BTreeMap::new(),
             maintenance: false,
             redirects: vec![],
             basic_auth: vec![],
