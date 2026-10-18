@@ -1627,3 +1627,33 @@ db_test!(
         assert_eq!(last_deployment(&app, id).await.status, "queued");
     }
 );
+
+db_test!(
+    a_service_in_maintenance_shows_its_page,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let (admin, id) = shop(&app).await;
+        app.get("/api/v1/maintenance/shop_web")
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{}/{id}", records(&app, "services")),
+                Some(&json!({"maintenance": true, "maintenance_title": "<b>Back</b> soon", "maintenance_subtitle": "At 10:00"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let page = app.get("/api/v1/maintenance/shop_web").await;
+        page.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+        let html = page.text();
+        assert!(
+            html.contains("&lt;b&gt;Back&lt;/b&gt; soon") && html.contains("At 10:00"),
+            "{html}"
+        );
+        app.get("/api/v1/maintenance/shop_nothing")
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+    }
+);

@@ -184,3 +184,54 @@ export function SecurityTab(props: Props) {
     </Section>
   );
 }
+
+/** Maintenance mode: the domains show the panel's page (title, subtitle). */
+export function MaintenanceTab(props: Props) {
+  const { t, d } = props;
+  const s = d.service;
+  const [on, setOn] = useState(s.maintenance);
+  const [title, setTitle] = useState(s.maintenance_title ?? "");
+  const [subtitle, setSubtitle] = useState(s.maintenance_subtitle ?? "");
+  const [error, setError] = useState<unknown>(null);
+  const fields = error instanceof ResourceError ? error.fieldErrors : {};
+  return (
+    <Section
+      title={t("Maintenance")}
+      description={t("While on, the service's domains show this page (503) instead of the service. Deploy to apply.")}
+    >
+      <form
+        className="rdp2-form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setError(null);
+          try {
+            await resources.update("services", s.id, {
+              maintenance: on,
+              maintenance_title: title.trim() || null,
+              maintenance_subtitle: subtitle.trim() || null,
+            });
+            props.onSaved();
+          } catch (err) {
+            setError(err);
+          }
+        }}
+      >
+        <label className="rdp2-row">
+          <Switch checked={on} onCheckedChange={setOn} disabled={!d.can.update} /> {t("Maintenance mode")}
+        </label>
+        <Field label={t("Title")} error={fields.maintenance_title}>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Under maintenance")} disabled={!d.can.update} />
+        </Field>
+        <Field label={t("Subtitle")} error={fields.maintenance_subtitle}>
+          <Input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder={t("We will be back soon.")} disabled={!d.can.update} />
+        </Field>
+        {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+        {d.can.update && (
+          <div className="rdp2-row rdp2-end">
+            <Button type="submit">{t("Save")}</Button>
+          </div>
+        )}
+      </form>
+    </Section>
+  );
+}

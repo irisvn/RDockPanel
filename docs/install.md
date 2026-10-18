@@ -47,7 +47,8 @@ panel is reached over HTTPS only.
   - `rdockpanel`: the panel (port 3000 without a domain), with the Docker socket, the host's `/proc` (server
     metrics), the routes directory and `/var/lib/rdockpanel/backups` (the same path inside: what a
     "Local directory" storage provider under it writes lands on the host). Its entrypoint migrates
-    the database at each start.
+    the database at each start. It reaches itself at `http://rdockpanel:3000` from Traefik
+    (maintenance pages).
 
 ## Upgrading and changing options
 

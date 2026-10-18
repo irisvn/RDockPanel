@@ -355,6 +355,15 @@ window.rustcms?.registerTranslations?.("vi", {
   "New secret": "Secret mới",
   Enable: "Bật",
   "On (the secret was shown when it was made).": "Đang bật (secret chỉ hiện lúc tạo).",
+  // Maintenance.
+  Maintenance: "Bảo trì",
+  "Maintenance mode": "Chế độ bảo trì",
+  "While on, the service's domains show this page (503) instead of the service. Deploy to apply.":
+    "Khi bật, domain của service hiện trang này (503) thay cho service. Bấm Deploy để áp dụng.",
+  Title: "Tiêu đề",
+  Subtitle: "Mô tả",
+  "Under maintenance": "Đang bảo trì",
+  "We will be back soon.": "Chúng tôi sẽ sớm quay lại.",
 });
 
 export {};

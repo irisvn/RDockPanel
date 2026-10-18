@@ -42,6 +42,11 @@ public_ip = ""
 # /var/lib/rdockpanel/compose). Relative paths are from the working directory.
 compose_dir = "storage/compose"
 
+# The panel as Traefik reaches it: a service in maintenance mode is routed to
+# its page there (the installer: http://rdockpanel:3000). Empty: no
+# maintenance mode.
+internal_url = ""
+
 # Where EasyPanel's templates are fetched from when the catalog is opened
 # (raw files of their repository's templates/ folder; never bundled).
 templates_url = "https://raw.githubusercontent.com/easypanel-io/templates/main/templates"

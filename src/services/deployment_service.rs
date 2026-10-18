@@ -650,6 +650,7 @@ pub fn deploy_options(force_update: u64) -> DeployOptions {
         force_update,
         cert_resolver: cfg.cert_resolver.clone(),
         https_port: cfg.https_port,
+        internal_url: cfg.internal_url.clone(),
     }
 }
 

@@ -17,6 +17,12 @@ pub fn routes() -> ApiRoutes {
             Access::public(),
             controllers::trigger_controller::deploy,
         )
+        // A service's maintenance page (Traefik routes its domains here).
+        .get(
+            "/maintenance/{name}",
+            Access::public(),
+            controllers::trigger_controller::maintenance,
+        )
         // GitHub's webhook (auto deploy on push): its signature is the proof.
         .post(
             "/github/{id}",

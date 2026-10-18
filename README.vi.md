@@ -48,7 +48,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
   - rolling update: task mới chạy trước khi bật zero downtime, có healthcheck và không publish port kiểu host (nếu không thì task cũ dừng trước); Swarm tự rollback khi update lỗi;
   - mỗi lần deploy lưu lại cấu hình để xem lịch sử và rollback;
   - trang service báo khi có thay đổi chưa deploy.
-- **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS; có chuyển hướng (biểu thức chính quy) và xác thực cơ bản (basic auth).
+- **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS; có chuyển hướng (biểu thức chính quy) xác thực cơ bản (basic auth) và trang bảo trì.
 - **Database:** PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ với một cú bấm (chỉ cần đặt tên: mật khẩu tự sinh, dữ liệu trên volume, có healthcheck), kèm URL kết nối để copy.
 - **Template EasyPanel:** hơn 800 template của easypanel.io, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải từ repo của họ khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
 - **Build:** app từ repo Git (https, hoặc ssh với deploy key sinh sẵn; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo hoặc Nixpacks, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI, và webhook GitHub có chữ ký để tự deploy mỗi lần push.

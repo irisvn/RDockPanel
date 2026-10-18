@@ -41,6 +41,10 @@ pub struct PanelConfig {
     /// reads relative paths of a Compose file there: the same path on the
     /// host and in the panel (the installer: /var/lib/rdockpanel/compose).
     pub compose_dir: PathBuf,
+    /// The panel as Traefik reaches it (`http://rdockpanel:3000` installed):
+    /// a service in maintenance is routed to its page there. Empty: no
+    /// maintenance mode.
+    pub internal_url: String,
 }
 
 impl Default for PanelConfig {
@@ -57,6 +61,7 @@ impl Default for PanelConfig {
             templates_url:
                 "https://raw.githubusercontent.com/easypanel-io/templates/main/templates".to_owned(),
             compose_dir: PathBuf::from("storage/compose"),
+            internal_url: String::new(),
         }
     }
 }

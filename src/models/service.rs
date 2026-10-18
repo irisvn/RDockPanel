@@ -50,6 +50,11 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub compose: Option<String>,
     pub compose_file: Option<String>,
+    /// Maintenance mode: its domains show the panel's maintenance page
+    /// (this title and subtitle) instead of the service.
+    pub maintenance: bool,
+    pub maintenance_title: Option<String>,
+    pub maintenance_subtitle: Option<String>,
     /// Notes about the service (its Overview), for the team.
     #[sea_orm(column_type = "Text", nullable)]
     pub notes: Option<String>,

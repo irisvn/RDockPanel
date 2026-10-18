@@ -690,6 +690,7 @@ async fn desired_specs_run_on_a_real_swarm() {
         primary_domain: None,
         build: None,
         compose: None,
+        maintenance: false,
         redirects: vec![],
         basic_auth: vec![],
     };

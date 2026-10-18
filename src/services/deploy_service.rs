@@ -78,6 +78,9 @@ pub struct Snapshot {
     /// A Compose service: run by `docker compose`, not as a Swarm service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compose: Option<Compose>,
+    /// In maintenance: its domains lead to the panel's page for it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maintenance: bool,
     /// Redirects on its domains (those enabled, in order).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirects: Vec<Redirect>,
@@ -333,6 +336,7 @@ impl Snapshot {
             env_names: vec![],
             env_digest: None,
             primary_domain,
+            maintenance: service.maintenance,
             // Set from their tables ([`Snapshot::with_access`]).
             redirects: vec![],
             basic_auth: vec![],
@@ -558,6 +562,8 @@ pub struct DeployOptions {
     pub cert_resolver: String,
     /// The public HTTPS port redirects go to (443; 8443 in development).
     pub https_port: u16,
+    /// The panel as Traefik reaches it (maintenance pages); empty: none.
+    pub internal_url: String,
 }
 
 impl Default for DeployOptions {
@@ -566,6 +572,7 @@ impl Default for DeployOptions {
             force_update: 0,
             cert_resolver: String::new(),
             https_port: 443,
+            internal_url: String::new(),
         }
     }
 }
@@ -927,6 +934,45 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
     }
     for (index, domain) in snapshot.domains.iter().enumerate() {
         // A Compose service's container: its alias on the project network.
+        // In maintenance: the panel's page for it (`/api/v1/maintenance/<name>`).
+        if snapshot.maintenance && !options.internal_url.is_empty() {
+            let page = format!("{base}-maintenance");
+            http.services.entry(page.clone()).or_insert_with(|| LoadBalanced {
+                load_balancer: json!({"servers": [{"url": options.internal_url.trim_end_matches('/')}]}),
+            });
+            let path = format!("{base}-maintenance-path");
+            http.middlewares.entry(path.clone()).or_insert_with(
+                || json!({"replacePath": {"path": format!("/api/v1/maintenance/{base}")}}),
+            );
+            let mut rule = format!("Host(`{}`)", domain.host);
+            if domain.path != "/" {
+                rule.push_str(&format!(" && PathPrefix(`{}`)", domain.path));
+            }
+            let mut entry_points = vec![HTTP_ENTRYPOINT.to_owned()];
+            if domain.https {
+                entry_points.push(HTTPS_ENTRYPOINT.to_owned());
+            }
+            for entry in entry_points {
+                let https = entry == HTTPS_ENTRYPOINT;
+                http.routers.insert(
+                    format!("{base}-{index}{}", if https { "" } else { "-http" }),
+                    Router {
+                        rule: rule.clone(),
+                        entry_points: vec![entry],
+                        service: page.clone(),
+                        middlewares: vec![path.clone()],
+                        tls: https.then(|| {
+                            if options.cert_resolver.is_empty() {
+                                json!({})
+                            } else {
+                                json!({"certResolver": options.cert_resolver})
+                            }
+                        }),
+                    },
+                );
+            }
+            continue;
+        }
         let (target, host) = match (&snapshot.compose, &domain.compose_service) {
             (Some(_), Some(sub)) => (
                 format!("{base}-{sub}-{}", domain.port),
@@ -991,6 +1037,22 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maintenance_routes_to_the_panel() {
+        let mut s = snapshot();
+        s.maintenance = true;
+        let options = DeployOptions {
+            internal_url: "http://rdockpanel:3000".to_owned(),
+            ..DeployOptions::default()
+        };
+        let yaml = routes(&s, &options).unwrap().to_yaml();
+        assert!(yaml.contains("http://rdockpanel:3000"), "{yaml}");
+        assert!(yaml.contains("/api/v1/maintenance/shop_web"), "{yaml}");
+        // No panel URL: the service as usual.
+        let plain = routes(&s, &DeployOptions::default()).unwrap().to_yaml();
+        assert!(!plain.contains("maintenance"), "{plain}");
+    }
 
     #[test]
     fn redirects_traefik_takes() {
@@ -1093,6 +1155,7 @@ mod tests {
             primary_domain: None,
             build: None,
             compose: None,
+            maintenance: false,
             redirects: vec![],
             basic_auth: vec![],
         }
@@ -1107,6 +1170,7 @@ mod tests {
             force_update: 0,
             cert_resolver: "letsencrypt".to_owned(),
             https_port: 443,
+            internal_url: String::new(),
         }
     }
 

@@ -118,6 +118,11 @@ service is under way.
 the service: 202 `{"deployment"}`; 404 for an unknown service or a wrong token; 409 while another
 deployment of the service is under way. Audited as `services.deploy.trigger` (system actor).
 
+## Maintenance page (public)
+
+`GET /api/v1/maintenance/{project}_{service}`: the page of a service in maintenance (503, HTML);
+404 otherwise. Traefik routes the service's domains there while it is in maintenance.
+
 ## GitHub webhook (public)
 
 `POST /api/v1/github/{id}` (no session: `X-Hub-Signature-256` is the proof): a `push` to the

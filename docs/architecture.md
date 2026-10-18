@@ -283,6 +283,14 @@ its threshold (checked every 5 minutes, said at most every 6 hours per channel).
 background, 15 s per channel, never retried; a failure is logged (never the URL). "Send test
 notification" sends at once and answers why it failed.
 
+### Maintenance mode
+
+As EasyPanel's Maintenance tab. A service in maintenance (applied by its next deployment) has its
+domains routed to the panel (`[panel] internal_url`, `http://rdockpanel:3000` installed; empty: no
+maintenance mode) at `/api/v1/maintenance/<project>_<service>`, a public page of its title and
+subtitle (escaped), answered 503 with `Retry-After`. Its notes (Overview) are for the team only and
+never deployed.
+
 ### Auto deploy from GitHub
 
 A Git service may have a GitHub webhook (`/api/v1/github/{id}`): its secret (40 characters, shown
