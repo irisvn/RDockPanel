@@ -9,14 +9,20 @@ src/
   bootstrap/        the app from its providers, then its API and admin routes
   providers/        auth (permissions), admin panel (pages, scripts, styles), app (services, jobs, boot)
   routes/admin.rs   the panel's own routes under /admin/api/x (AdminRoutes)
-  http/controllers/ docker_controller (containers, images, volumes, networks, terminal), server_controller
-  services/         docker_service (+ bollard), system_stats_service, live_service, action_service
+  http/controllers/ docker_controller (containers, images, volumes, networks, terminal), server_controller,
+                    deploy_controller (a deployment's live log)
+  services/         docker_service (+ bollard), system_stats_service, live_service, action_service;
+                    deploy_rules_service (rules, [panel] config), deploy_service (spec and routes),
+                    deployment_service (running deployments), traefik_service (route files)
   models/           action (the actions log); project, service, service_domain/port/mount, deployment
-  jobs/             pull_image
+  jobs/             pull_image, run_deployment, publish_routes
   admin/pages/      Server, Containers, Images, Volumes, Networks (script pages)
   admin/resources/  Projects, Services, Domains, Ports, Mounts, Deployments (schema-driven resources)
+  admin/slots/      the service page's aside (state, actions, live deployment log)
 resources/admin/    the pages' JavaScript and CSS (+ vendored xterm.js)
-tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER
+scripts/            dev-swarm.sh (a development Swarm with Traefik)
+tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER and
+                    PANEL_TEST_SWARM
 ```
 
 ## Services
@@ -27,9 +33,12 @@ tests/              feature tests (MySQL), a FakeDocker, real-engine tests behin
 | `SystemStats` (`system_stats_service.rs`) | Samples the host every 2 s and keeps 150 samples (5 min) in memory. Reads sysinfo, or the host's `/proc` mounted at `HOST_PROC` when the panel runs in a container. Nothing is stored in the database. |
 | `Live` (`live_service.rs`) | Shared producers for live data through the framework's hub: one Docker stats stream per container and one host-sample feed for every viewer. Shapes log lines into events under 64 KiB and paces them. |
 | `action_service` | The actions log: a row per Docker operation (`queued`, `running`, `ok`, `failed`), audited when a user asked. Stale rows (no update for 1 h) are marked failed at boot. |
+| `Traefik` (`traefik_service.rs`) | Where Traefik's route files go and which Swarm service Traefik is (`[panel] traefik_dir`, `traefik_service`). Writes and removes route files, attaches Traefik to project networks (see [Routes](#routes-traefik)). |
+| `deployment_service`, `deploy_service`, `deploy_rules_service` | Deployments: asking for one, running it, what a service becomes in Swarm and Traefik, the rules (see [Projects and services](#projects-and-services-phase-2-in-progress)). |
 
-`Docker`, `SystemStats` and `Live` are bound in `providers/app_service_provider.rs` and read by
-handlers with `app.service::<T>()`.
+`Docker`, `SystemStats`, `Live` and `Traefik` are bound in `providers/app_service_provider.rs` and
+read by handlers and jobs with `app.service::<T>()`. Tests bind fakes over them (`FakeDocker`, a
+`Traefik` writing to a temporary directory).
 
 ## A request
 
@@ -82,9 +91,10 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
   image id, with a warning that only that node has it.
 - `desired(...)` gives the Swarm `ServiceSpec`: on the project network with the service's short name
   as alias, ownership labels on the service and its containers (the configuration hash on the service
-  only, so a new domain or more replicas restart no task), health check, limits and reservations, volumes
-  (`rdp_<project>_<service>_<name>`), ports, start-first updates with automatic rollback when a health
-  check makes that safe (stop-first otherwise), 0 replicas when stopped. And the Traefik routes: one
+  only, so a new domain or more replicas restart no task; the containers carry their task template's
+  hash, `rdockpanel.template`), health check, limits and reservations, volumes
+  (`rdp_<project>_<service>_<name>`), ports, start-first updates when zero downtime is on, the service
+  has a health check and no host-mode port (stop-first otherwise), automatic rollback, 0 replicas when stopped. And the Traefik routes: one
   router per domain (HTTPS routers with an HTTP router redirecting to them on `[panel] https_port`,
   `certResolver` from `[panel] cert_resolver`), one Traefik service per container port, reached as
   `http://<project>_<service>:<port>`.
@@ -110,15 +120,17 @@ generated spec on a real engine.
    reuse the running image, Rollback the recorded one), the spec is created or updated (Restart bumps
    `force_update`), and the job waits until Swarm converged: an update's status (a stale one from the
    previous update is ignored; paused is a failure, rollback completed is `rolled_back`, the service
-   then running or stopped as the restored spec says), else the tasks: as many running (and healthy)
-   as wanted, all of the new task template (its hash is the containers' `rdockpanel.template` label,
+   then running or stopped as the restored spec says), else the tasks: as many in Swarm's `running` state (which,
+   with a health check, a task reaches once healthy) as wanted, all of the new task template (its hash is the containers' `rdockpanel.template` label,
    so a restart or a new command is told apart from the old tasks), or, when stopped, every task
    ended. Steps go to the deployment's log, saved about every second.
 3. **Finish** (one transaction): the deployment's status and pinned image, the service's status, and
    the lock released only if still its own.
 
-At boot, then every minute (RustCMS scheduler: `reap-deployments`, run in the process), deployments whose lease expired (their run died, or its job timed out)
-become `interrupted` and free their service.
+At boot, then every minute (the RustCMS scheduler's `reap-deployments`, run in the process),
+deployments whose lease expired (their run died, or its job timed out) become `interrupted` and free
+their service.
+
 The service page's aside (`ServiceLiveSlot`, `service-live.js`) shows the state, pending changes, the
 action buttons and the latest deployment, its log followed live over SSE.
 
@@ -127,9 +139,9 @@ action buttons and the latest deployment, its log followed live over SSE.
 `services/traefik_service.rs`. Traefik reads one file per service, `<project>_<service>.yml`, from
 `[panel] traefik_dir` (its file provider; `storage/traefik/dynamic` in development). The panel
 writes it whole (a hidden temporary file, then renamed) after each deployment, from the deployment
-that made the
-service what it is (its configuration hash): a new domain is routed once deployed, a failed
-deployment leaves the routes of what still runs, Stop and Destroy remove the file before the tasks go.
+that made the service what it is (its configuration hash): a new domain is routed once deployed, a
+failed deployment leaves the routes of what still runs, Stop and Destroy remove the file before the
+tasks go.
 Whether the write worked is the deployment's `published`; the service's **Republish routes** action
 (a `deploy.publish` job) writes it again. At boot every file is written again from the database, and
 files of services that no longer exist are removed.
@@ -139,12 +151,13 @@ the first deployment with a domain, the panel attaches `[panel] traefik_service`
 `rdp_<project>` (Swarm restarts Traefik then: a few seconds without routing); when it cannot, the
 deployment fails rather than publish domains that lead nowhere. Writes are serialized (one lock in
 the panel's process, workers included), each reading the database at that moment, so the last one
-written is always the latest state. Projects share no
-network, so a project's services cannot reach another's. Deleting a project does not yet detach
-Traefik from its network nor remove the network (see the [roadmap](roadmap.md)).
+written is always the latest state. Projects share no network, so a project's services cannot call
+another's directly (domains and published ports remain public). Deleting a project does not yet detach Traefik from its network nor remove the network
+(see the [roadmap](roadmap.md)).
 
 ## Data
 
 MySQL 8.4 (`docker-compose.yml` for development). Besides the framework's tables (users, roles,
-sessions, audit log, jobs, …), the panel adds `actions`. Phase 2 adds projects, services and
-deployments.
+sessions, audit log, jobs, schedule slots, …), the panel adds `actions`, then for Phase 2 `projects`,
+`services`, `service_domains`, `service_ports`, `service_mounts` and `deployments` (each with its
+configuration snapshot, pinned image, status and log).

@@ -1,14 +1,15 @@
 # RDockPanel
 
 **A free, self-hosted server panel in the spirit of [EasyPanel](https://easypanel.io), built in Rust.**
-Watch your server, manage Docker, and (soon) deploy apps to Docker Swarm with domains and SSL. Every
+Watch your server, manage Docker, and deploy apps to Docker Swarm with domains and HTTPS. Every
 feature is free: no project limits, no paid tiers.
 
 [Tiếng Việt](README.vi.md) · [Docs](docs/) · [Roadmap](docs/roadmap.md)
 
-> **Status: early development.** Phase 1 (server monitoring and Docker management) works. Deploying
-> apps (Phase 2) is in progress. There is no installer yet: run it from source as below. Not for
-> production use.
+> **Status: early development.** Phase 1 (server monitoring and Docker management) works. Phase 2
+> (deploying apps) works from source: projects, services, deployments and domains. Still to come in
+> Phase 2: encrypted environment variables, private registries and the installer. Not for production
+> use.
 
 ![Server dashboard](docs/images/server.png)
 
@@ -28,12 +29,28 @@ feature is free: no project limits, no paid tiers.
 - **Accountability**: every change to Docker is recorded in an actions log and the audit log, with
   who did it.
 - **Users and roles**: fine-grained permissions (`docker.view`, `docker.manage`, `docker.logs`,
-  `docker.exec`, `server.view`, `system.manage`), built on RustCMS's roles.
+  `docker.exec`, `server.view`, `system.manage`, plus one set per resource such as `services.deploy`),
+  built on RustCMS's roles.
+
+**Available now (Phase 2, from source)**
+
+- **Projects and services**: a service runs a Docker image on **Docker Swarm** with replicas, CPU and
+  memory limits, a health check, named volumes, published ports and a command. Each project has its
+  own network: a project's services cannot call another project's services directly (what is public,
+  through a domain or a published port, stays public).
+- **Deployments**: Deploy, Start, Stop, Restart, Destroy and Rollback from the service page, one at a
+  time per service, with a live log. Images are pinned to their digest. Updates are rolling
+  (start-first when zero downtime is on, the service has a health check and publishes no host-mode
+  port; stop-first otherwise) and Swarm rolls back a failed one. Every
+  deployment keeps its configuration, for history and rollback, and the page shows changes not
+  deployed yet.
+- **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
+  redirects its HTTP to HTTPS.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Phase 2: projects and services deployed to **Docker Swarm** from an image, rolling updates with
-  rollback, domains and HTTPS through **Traefik**, a one-command installer.
+- Phase 2: encrypted environment variables, private registries, Let's Encrypt in production, a
+  one-command installer.
 - Phase 3: builds from Git, databases with backups, Compose, templates, notifications, multiple
   nodes, two-factor authentication, an API and a CLI.
 
@@ -53,11 +70,17 @@ docker compose up -d                            # MySQL 8.4 on 127.0.0.1:3306
 rustcms migrate
 rustcms permission:sync
 rustcms make:user --email admin@example.com --name Admin --super-admin
+sh scripts/dev-swarm.sh                         # a one-node Swarm, Traefik on :8080 and :8443
 rustcms serve                                   # http://localhost:8000/admin
 ```
 
+Open the panel at `localhost` (the `APP_URL` of `.env`), not `127.0.0.1`: sign-in checks the origin.
+A service with the domain `app.localhost` is then at http://app.localhost:8080 (and at
+https://app.localhost:8443 with Traefik's self-signed certificate, when the domain has HTTPS on).
+
 The panel talks to the local Docker daemon (`/var/run/docker.sock` or `DOCKER_HOST`): **it manages
-the real containers on your machine**.
+the real containers on your machine**. `dev-swarm.sh` turns it into a Swarm manager
+(`docker swarm leave --force` undoes it).
 
 ## Tests
 
@@ -65,18 +88,23 @@ the real containers on your machine**.
 export RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_BACKENDS=mysql
 cargo test                       # unit and feature tests against MySQL, Docker faked
 PANEL_TEST_DOCKER=1 cargo test   # also against the real Docker engine (runs an alpine container)
+PANEL_TEST_SWARM=1 cargo test    # also deploys on the real Swarm and routes through Traefik
+                                 # (after scripts/dev-swarm.sh)
 ```
 
 CI runs formatting, `clippy -D warnings` and the tests on MySQL 8.4 on pushes to `main` and pull
-requests (the real-Docker tests are not part of CI).
+requests, and a second job on a real Docker engine and Swarm with Traefik. That job deploys, makes
+rolling updates under load, and checks HTTPS and project isolation.
 
 ## How it is built
 
 - **[RustCMS](https://github.com/irisvn/RustCMS-Core)**, a Laravel/Filament-like framework on axum and
   SeaORM: authentication, roles, audit log, job queue, the admin panel, server-sent events and
   WebSocket admin routes.
-- **[bollard](https://github.com/fussybeaver/bollard)** for the Docker Engine API, **sysinfo** and
-  `/proc` for host metrics, **MySQL 8.4** for the panel's data.
+- **[bollard](https://github.com/fussybeaver/bollard)** for the Docker Engine API (Swarm services,
+  tasks, networks), **sysinfo** and `/proc` for host metrics, **MySQL 8.4** for the panel's data.
+- **Docker Swarm** runs the apps; **[Traefik](https://traefik.io)** v3 routes their domains, from
+  files the panel writes.
 - The admin pages are scripts loaded by the RustCMS panel; the terminal uses
   [xterm.js](https://xtermjs.org) (vendored, MIT).
 

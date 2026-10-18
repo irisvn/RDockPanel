@@ -27,6 +27,22 @@ symlinks when saved, and is checked again before each deployment. Docker resolve
 when the task starts, so **only list roots that no service and no untrusted user can write**: someone
 who can replace a directory there with a symlink could point a later start elsewhere.
 
+## Deployments and routes
+
+- Deploying needs `services.deploy`, destroying `services.destroy`; a deployment's log, error and
+  image need `deployments.view` (also on the service page).
+- The configuration snapshot kept with each deployment has no secret values (environment variables
+  and registry credentials will be encrypted columns, RustCMS W8).
+- Services run on their project's own overlay network: a project cannot call another project's
+  services directly, nor the panel's MySQL. What a service makes public (a domain, a published
+  port) stays reachable by anyone, other projects included. Traefik joins every project's network to
+  route to them.
+- Hostnames and paths are checked before they become Traefik rules (no backticks or other rule
+  syntax), and route files are named after checked service names only. The panel owns
+  `[panel] traefik_dir`: at boot it removes route files of services it does not have.
+- Docker objects of a service are labelled `rdockpanel.managed=true` with their project and service;
+  the panel refuses to touch a service of that name it did not create.
+
 ## The terminal
 
 - Needs `docker.exec` (and `system.manage` for the panel's own containers).
@@ -50,8 +66,9 @@ untouched, so injected HTML still cannot add styles. The policy itself is unchan
 ## Live data limits
 
 Log lines are cut to 16 KiB, a log request stops reading after about 2 MiB of text, live log events
-are paced (about 2 MB/s), and a terminal whose output outruns the browser by 8 MiB is closed. The framework limits streams and sockets
-per user and per instance.
+are paced (about 2 MB/s). The framework queues at most 1 MiB (64 events) per stream and closes one
+whose browser falls behind (`lagging`); a socket send that takes over 10 s ends it. It also limits
+streams and sockets per user and per instance.
 
 ## Reporting a vulnerability
 

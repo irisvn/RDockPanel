@@ -36,11 +36,12 @@ for the panel's own pages, not for scripts: token-authenticated API routes come 
 
 | Method | Path | Permission | |
 |---|---|---|---|
-| GET (SSE) | `/deployments/{id}/log` | deployments.view | `log` events (`{"append": "…"}`, or `{"reset": "…"}` with the whole log), `status` events (the deployment without its log) when it changes; ends once the deployment finished |
+| GET (SSE) | `/deployments/{id}/log` | deployments.view | `log` events (`{"append": "…"}`, or `{"reset": "…"}` with the whole log), `status` events (the deployment without its log) about every second; ends once the deployment finished |
 
 Deploy, Start, Stop, Restart, Destroy, Republish routes (`republish`) and Rollback are resource
-actions (`POST /admin/api/resources/services/actions/{name}`, `…/deployments/actions/rollback`). A service
-with a deployment under way answers 409 `deployment_in_progress`.
+actions (`POST /admin/api/resources/services/actions/{name}`, `…/deployments/actions/rollback`). The actions
+that run a deployment (all but Republish) answer 409 `deployment_in_progress` while another one of the
+service is under way.
 
 ## Server (`/server`)
 
@@ -52,7 +53,8 @@ with a deployment under way answers 409 `deployment_in_progress`.
 
 ## Streams and sockets
 
-Event streams end with `event: closed` (`signed_out`, `forbidden`, `shutdown`, `lagging`, `error`).
+Event streams cut short end with `event: closed` (`signed_out`, `forbidden`, `shutdown`, `lagging`,
+`error`); a stream that is over (a finished deployment's log) just ends.
 WebSockets close with 1000 (the session ended), 4401 (signed out), 4403 (forbidden), 1001 (shutdown),
 4008 (lagging), 1009 (message too big) or 1011 (error). Pages use the panel's
 `ctx.realtime.events(...)`, which reconnects with backoff, and `ctx.realtime.socket(...)`, which the

@@ -10,8 +10,12 @@
 ```sh
 docker compose up -d && rustcms migrate && rustcms permission:sync
 rustcms make:user --email admin@example.com --name Admin --super-admin
+sh scripts/dev-swarm.sh
 rustcms serve
 ```
+
+Open the panel at http://localhost:8000/admin, the `APP_URL` host: sign-in checks the request's
+origin, so `127.0.0.1` is refused.
 
 Settings beyond `.env` use `RUSTCMS_<SECTION>__<KEY>`, e.g. `RUSTCMS_APP__LISTEN=127.0.0.1:8001`.
 
@@ -19,7 +23,9 @@ Settings beyond `.env` use `RUSTCMS_<SECTION>__<KEY>`, e.g. `RUSTCMS_APP__LISTEN
 
 `scripts/dev-swarm.sh` (run it again any time) makes the local engine a single-node Swarm and runs
 Traefik as the service `rdp-traefik` on ports 8080 and 8443, reading routes from
-`storage/traefik/dynamic`. `docker swarm leave --force` undoes it; other containers keep running.
+`storage/traefik/dynamic` (the panel's `[panel] traefik_dir`). `.env` sets
+`RUSTCMS_PANEL__HTTPS_PORT=8443` so HTTP is redirected there. `docker swarm leave --force` undoes it;
+other containers keep running.
 
 ## Tests
 
@@ -32,7 +38,14 @@ Traefik as the service `rdp-traefik` on ports 8080 and 8443, reading routes from
 
 - Feature tests (`tests/feature/`) drive the app through HTTP with a `FakeDocker`
   (`tests/support/fake_docker.rs`): containers and networks whose ids differ from their names, as on a
-  real engine. Use `support::app_with_docker(db, fake)` and `support::user_with(&app, name, perms)`.
+  real engine, and a Traefik service. Use `support::app_with_docker(db, fake)` and
+  `support::user_with(&app, name, perms)`. Every test app writes its routes to a temporary directory
+  of its own (`support::scratch_traefik`): an app's boot rewrites its route directory from its
+  database, so tests must never use `storage/traefik/dynamic` with pruning on. The one exception is
+the real routing test (`routing.rs`), which writes there for the development Traefik, pruning off.
+- Deployments run in tests by calling `deployment_service::run(state, id, FAST)` with short timings.
+- Tests that change a real Swarm's networks hold `support::swarm_lock()`: Swarm's address allocator
+  rejects tasks for a moment when networks come and go in parallel.
 - Every admin route must have a case in `docker_routes::every_route_checks_its_permission`
   (`assert_access` fails otherwise).
 - Live streams and the terminal are tested through a real listener (`tests/feature/live.rs`,
@@ -54,9 +67,13 @@ xterm.js is vendored in `resources/admin/js/rdockpanel/vendor/` (see its README 
 
 ## RustCMS dependency
 
-`Cargo.toml` pins RustCMS-Core by git rev. Never use a plain path dependency on a working checkout:
-it picks up unfinished framework changes. For unpushed framework commits, pin a `file://` git rev
-and switch back to GitHub once pushed.
+`Cargo.toml` pins RustCMS-Core by a release tag (`v0.4.1`), or by git rev between releases. Never
+use a plain path dependency on a working checkout: it picks up unfinished framework changes. For
+unpushed framework commits, pin a `file://` git rev and switch back to GitHub once pushed. After an
+upgrade, run `rustcms migrate` (framework tables) and `rustcms permission:sync`.
+
+The RustCMS scheduler (`app.schedule`) runs only in `serve`; `rustcms schedule:list` shows the
+panel's schedules.
 
 ## Conventions
 

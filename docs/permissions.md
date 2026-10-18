@@ -29,16 +29,17 @@ The Deploy group's resources use the panel's standard permissions, one set per r
   `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, the
   Docker socket, `/proc`, `/sys`, `/dev`, Docker's and the panel's own files, and any directory above
   them (`/run`, `/etc`, `/var`), are always refused;
-- a service, once deployed (from its first deployment on, even a failed one), keeps its name and
-  project, and cannot be deleted before it is destroyed; a project with services cannot be deleted,
-  nor renamed once one of them was deployed;
+- a service, once deployed (from its first deployment on, even a failed one) and until a successful
+  Destroy, keeps its name and project and cannot be deleted; a project with services cannot be
+  deleted, nor renamed while one of them is deployed;
 - the ports in `[panel] reserved_ports` (the proxy's and the panel's) cannot be published.
 
 ## The panel's own objects
 
 Objects labelled `rdockpanel.system=true` are the panel's own. The installer (Phase 2, not written
 yet) will put that label on the panel, its MySQL and Traefik (services, containers, volumes, networks,
-secrets); until then only objects you label yourself are protected (the development MySQL from
+secrets); until then only the development Traefik (`scripts/dev-swarm.sh` labels its service and
+containers) and objects you label yourself are protected (the development MySQL from
 `docker-compose.yml` is not). Without `system.manage`:
 
 - they are left out of every list;

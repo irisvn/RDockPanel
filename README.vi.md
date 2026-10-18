@@ -1,15 +1,15 @@
 # RDockPanel
 
 **Panel quản trị server tự host, miễn phí, theo tinh thần [EasyPanel](https://easypanel.io), viết bằng Rust.**
-Theo dõi server, quản lý Docker, và sắp tới là deploy app lên Docker Swarm kèm domain và SSL. Mọi tính
-năng đều miễn phí: không giới hạn số project, không có gói trả phí.
+Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domain và HTTPS. Mọi tính năng
+đều miễn phí: không giới hạn số project, không có gói trả phí.
 
 [English](README.md) · [Tài liệu (tiếng Anh)](docs/) · [Lộ trình](docs/roadmap.md)
 
 > **Trạng thái: đang phát triển.**
 > - Phase 1 (giám sát server, quản lý Docker) đã chạy được.
-> - Phase 2 (deploy app) đang làm.
-> - Chưa có installer: hiện chạy từ mã nguồn như hướng dẫn bên dưới.
+> - Phase 2 (deploy app) đã chạy được từ mã nguồn: project, service, deploy, domain.
+> - Phase 2 còn lại: mã hoá biến môi trường, registry riêng, installer (hiện chạy từ mã nguồn như hướng dẫn bên dưới).
 > - Chưa dùng được cho production.
 
 ![Bảng điều khiển server](docs/images/server.png)
@@ -33,15 +33,25 @@ năng đều miễn phí: không giới hạn số project, không có gói tr�
   - container, volume, network của chính panel (label `rdockpanel.system=true`) bị ẩn và không thao tác được nếu không có quyền `system.manage`;
   - lệnh dọn dẹp luôn bỏ qua chúng.
 - **Truy vết:** mọi thay đổi lên Docker được ghi vào nhật ký thao tác (Actions) và audit log, kèm người thực hiện.
-- **Người dùng và vai trò:** phân quyền chi tiết (`docker.view`, `docker.manage`, `docker.logs`, `docker.exec`, `server.view`, `system.manage`), dựa trên hệ thống role của RustCMS.
+- **Người dùng và vai trò:** phân quyền chi tiết (`docker.view`, `docker.manage`, `docker.logs`, `docker.exec`, `server.view`, `system.manage`, và mỗi resource một bộ quyền như `services.deploy`), dựa trên hệ thống role của RustCMS.
+
+**Đã có (Phase 2, chạy từ mã nguồn)**
+
+- **Project và service:**
+  - service chạy một Docker image trên **Docker Swarm**;
+  - có replicas, giới hạn CPU và RAM, healthcheck, volume, port và command;
+  - mỗi project có network riêng: service của project này không gọi thẳng được service của project khác (những gì đã public qua domain hoặc port thì vẫn public).
+- **Deploy:**
+  - Deploy, Start, Stop, Restart, Destroy và Rollback ngay trên trang service, có log trực tiếp; mỗi service chỉ chạy một lần deploy tại một thời điểm;
+  - image được ghim theo digest;
+  - rolling update: task mới chạy trước khi bật zero downtime, có healthcheck và không publish port kiểu host (nếu không thì task cũ dừng trước); Swarm tự rollback khi update lỗi;
+  - mỗi lần deploy lưu lại cấu hình để xem lịch sử và rollback;
+  - trang service báo khi có thay đổi chưa deploy.
+- **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS.
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- **Phase 2:**
-  - project và service deploy lên **Docker Swarm** từ image;
-  - rolling update có rollback;
-  - domain và HTTPS qua **Traefik**;
-  - installer cài bằng một lệnh.
+- **Phase 2:** mã hoá biến môi trường, registry riêng, Let's Encrypt khi chạy thật, installer cài bằng một lệnh.
 - **Phase 3:** build từ Git, database kèm backup, Compose, template, thông báo, nhiều node, xác thực 2 lớp, API và CLI.
 
 | Container | Log trực tiếp | Terminal |
@@ -62,11 +72,15 @@ docker compose up -d                            # MySQL 8.4 tại 127.0.0.1:3306
 rustcms migrate
 rustcms permission:sync
 rustcms make:user --email admin@example.com --name Admin --super-admin
+sh scripts/dev-swarm.sh                         # Swarm một node, Traefik ở :8080 và :8443
 rustcms serve                                   # http://localhost:8000/admin
 ```
 
+Mở panel bằng `localhost` (đúng `APP_URL` trong `.env`), không dùng `127.0.0.1`: đăng nhập có kiểm tra origin.
+Service có domain `app.localhost` sẽ mở được ở http://app.localhost:8080, và ở https://app.localhost:8443 nếu domain bật HTTPS (chứng chỉ tự ký của Traefik).
+
 Panel nói chuyện với Docker daemon trên máy (`/var/run/docker.sock` hoặc `DOCKER_HOST`): **nó quản lý
-các container thật trên máy bạn**.
+các container thật trên máy bạn**. `dev-swarm.sh` biến Docker trên máy thành Swarm manager (gỡ bằng `docker swarm leave --force`).
 
 ## Test
 
@@ -74,15 +88,18 @@ các container thật trên máy bạn**.
 export RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_BACKENDS=mysql
 cargo test                       # unit và feature test trên MySQL, Docker giả lập
 PANEL_TEST_DOCKER=1 cargo test   # chạy thêm với Docker thật (tạo một container alpine)
+PANEL_TEST_SWARM=1 cargo test    # chạy thêm deploy trên Swarm thật và route qua Traefik
+                                 # (sau khi chạy scripts/dev-swarm.sh)
 ```
 
-CI kiểm tra format, `clippy -D warnings` và chạy test trên MySQL 8.4 khi push lên `main` và khi có pull request (test với Docker thật không chạy trong CI).
+CI kiểm tra format, `clippy -D warnings` và chạy test trên MySQL 8.4 khi push lên `main` và khi có pull request. Một job thứ hai chạy với Docker và Swarm thật, có Traefik: deploy, rolling update khi đang có tải, kiểm tra HTTPS và việc cô lập giữa các project.
 
 ## Kiến trúc
 
 - **[RustCMS](https://github.com/irisvn/RustCMS-Core):** framework giống Laravel/Filament, xây trên axum và SeaORM. Cung cấp đăng nhập, phân quyền, audit log, hàng đợi job, trang admin, cùng các route admin dạng server-sent events và WebSocket.
 - **Thư viện và dữ liệu:**
-  - **[bollard](https://github.com/fussybeaver/bollard)** cho Docker Engine API;
+  - **[bollard](https://github.com/fussybeaver/bollard)** cho Docker Engine API (gồm service, task, network của Swarm);
+  - **Docker Swarm** chạy các app; **[Traefik](https://traefik.io)** v3 route domain cho chúng, từ các file do panel ghi;
   - **sysinfo** và `/proc` cho số liệu máy;
   - **MySQL 8.4** lưu dữ liệu của panel.
 - **Giao diện:** các trang admin là script do panel RustCMS nạp. Terminal dùng [xterm.js](https://xtermjs.org) (đi kèm trong repo, license MIT).
