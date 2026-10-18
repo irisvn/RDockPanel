@@ -17,6 +17,7 @@ mod m20261018_180047_add_source_to_services;
 mod m20261019_020000_create_backup_tables;
 mod m20261019_040000_create_notification_channels_table;
 mod m20261019_060000_add_compose_to_services;
+mod m20261019_080000_create_redirects_and_basic_auth;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -40,6 +41,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261019_020000_create_backup_tables::Migration),
             Box::new(m20261019_040000_create_notification_channels_table::Migration),
             Box::new(m20261019_060000_add_compose_to_services::Migration),
+            Box::new(m20261019_080000_create_redirects_and_basic_auth::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

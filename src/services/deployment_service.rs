@@ -187,7 +187,17 @@ pub async fn snapshot_without_env<C: ConnectionTrait>(
         .filter(service_mount::Column::ServiceId.eq(service.id))
         .all(db)
         .await?;
-    Ok(Snapshot::of(&project, service, &domains, &ports, &mounts))
+    use sea_orm::QueryOrder;
+    let redirects = crate::models::service_redirect::Entity::find()
+        .filter(crate::models::service_redirect::Column::ServiceId.eq(service.id))
+        .order_by_asc(crate::models::service_redirect::Column::Id)
+        .all(db)
+        .await?;
+    let users = crate::models::service_basic_auth::Entity::find()
+        .filter(crate::models::service_basic_auth::Column::ServiceId.eq(service.id))
+        .all(db)
+        .await?;
+    Ok(Snapshot::of(&project, service, &domains, &ports, &mounts).with_access(&redirects, &users))
 }
 
 /// Whether the configuration changed since the last successful deployment.

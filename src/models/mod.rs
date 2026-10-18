@@ -7,8 +7,10 @@ pub mod deployment;
 pub mod notification_channel;
 pub mod project;
 pub mod service;
+pub mod service_basic_auth;
 pub mod service_domain;
 pub mod service_mount;
 pub mod service_port;
+pub mod service_redirect;
 pub mod storage_provider;
 // rustcms:models

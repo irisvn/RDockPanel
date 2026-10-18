@@ -46,7 +46,7 @@ feature is free: no project limits, no paid tiers.
   port; stop-first otherwise) and Swarm rolls back a failed one. Every deployment keeps its
   configuration, for history and rollback, and the page shows changes not deployed yet.
 - **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
-  redirects its HTTP to HTTPS.
+  redirects its HTTP to HTTPS; redirects (regular expressions) and HTTP basic authentication.
 - **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:
   credentials generated, data on a volume, health-checked), with their connection URL to copy.
 - **EasyPanel templates**: the 800+ templates of easypanel.io in one click (searched, filled in by

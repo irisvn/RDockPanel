@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::services::creation_service::{
-    DatabaseOptions, NewBuild, NewComposeGit, NewDomain, NewMount, NewPort, NewService,
+    DatabaseOptions, NewBuild, NewComposeGit, NewDomain, NewMount, NewPort, NewRedirect, NewService,
 };
 use crate::services::database_service::Engine;
 use crate::services::placeholders::{self, Vars};
@@ -521,20 +521,40 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 protocol: text(port, "protocol").unwrap_or_else(|| "tcp".to_owned()),
             });
         }
-        for unsupported in ["redirects", "resources", "maintenance", "scripts"] {
+        // Basic authentication and redirects, as EasyPanel's.
+        for user in data
+            .get("basicAuth")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            new.basic_auth.push((
+                text(user, "username").unwrap_or_default(),
+                text(user, "password").unwrap_or_default(),
+            ));
+        }
+        for redirect in data
+            .get("redirects")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            new.redirects.push(NewRedirect {
+                regex: text(redirect, "regex").unwrap_or_default(),
+                replacement: text(redirect, "replacement").unwrap_or_default(),
+                permanent: redirect
+                    .get("permanent")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            });
+        }
+        for unsupported in ["resources", "maintenance", "scripts"] {
             if data.get(unsupported).is_some_and(|v| !v.is_null()) {
                 warn(&mut plan, &format!("{unsupported} left out"));
             }
         }
         // What it needs to be safe or to run: never deployed without.
         let mut needs = vec![];
-        if data
-            .get("basicAuth")
-            .and_then(Value::as_array)
-            .is_some_and(|a| !a.is_empty())
-        {
-            needs.push("basic authentication");
-        }
         for field in ["capAdd", "capDrop", "sysctls", "groups"] {
             if deploy.get(field).is_some_and(|v| {
                 v.as_array().is_some_and(|a| !a.is_empty())
@@ -603,7 +623,7 @@ mod tests {
         let guarded = json!({"services": [{"type": "app", "data": {"serviceName": "registry", "source": {"type": "image", "image": "registry:2"}, "basicAuth": [{"username": "u", "password": "p"}], "deploy": {"capAdd": ["NET_ADMIN"]}}}]});
         let p = super::plan(&guarded, "p", None).unwrap();
         assert!(
-            p.blocking[0].contains("basic authentication") && p.blocking[0].contains("capAdd"),
+            !p.blocking[0].contains("basic authentication") && p.blocking[0].contains("capAdd"),
             "{:?}",
             p.blocking
         );

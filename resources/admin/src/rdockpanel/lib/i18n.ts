@@ -328,6 +328,23 @@ window.rustcms?.registerTranslations?.("vi", {
   "Create backup": "Tạo backup",
   "Dumps of the database (pg_dump, mysqldump, mariadb-dump, mongodump) or archives of its volumes, gzipped, written to a storage provider on a schedule.":
     "Bản dump database (pg_dump, mysqldump, mariadb-dump, mongodump) hoặc bản nén volume, ghi vào nơi lưu trữ theo lịch.",
+  // Redirects and security.
+  Redirects: "Chuyển hướng",
+  Security: "Bảo mật",
+  "No redirect.": "Chưa có chuyển hướng.",
+  "A regular expression over the request's URL and its replacement (${1} for its first group), on every domain of the service.":
+    "Biểu thức chính quy trên URL của request và URL thay thế (${1} là nhóm đầu tiên), áp dụng cho mọi domain của service.",
+  "Regular expression": "Biểu thức chính quy",
+  Replacement: "Thay bằng",
+  "Permanent (301)": "Vĩnh viễn (301)",
+  permanent: "vĩnh viễn",
+  temporary: "tạm thời",
+  "Basic authentication": "Xác thực cơ bản",
+  "Visitors of the service's domains sign in with one of these users. Passwords are stored hashed.":
+    "Người truy cập domain của service phải đăng nhập bằng một trong các user này. Mật khẩu được lưu dạng băm.",
+  "Open to everyone.": "Ai cũng truy cập được.",
+  "8 characters or more": "Từ 8 ký tự",
+  "Add user": "Thêm user",
 });
 
 export {};

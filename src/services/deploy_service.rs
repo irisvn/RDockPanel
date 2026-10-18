@@ -78,6 +78,20 @@ pub struct Snapshot {
     /// A Compose service: run by `docker compose`, not as a Swarm service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compose: Option<Compose>,
+    /// Redirects on its domains (those enabled, in order).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirects: Vec<Redirect>,
+    /// HTTP basic authentication on its domains: `user:bcrypt-hash`, by user.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub basic_auth: Vec<String>,
+}
+
+/// A redirect: Traefik's `redirectRegex`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Redirect {
+    pub regex: String,
+    pub replacement: String,
+    pub permanent: bool,
 }
 
 /// A Compose service's file: written in the panel, or of its repository.
@@ -317,6 +331,9 @@ impl Snapshot {
             env_names: vec![],
             env_digest: None,
             primary_domain,
+            // Set from their tables ([`Snapshot::with_access`]).
+            redirects: vec![],
+            basic_auth: vec![],
             compose: (service.kind == "compose").then(|| Compose {
                 inline: (service.source != "git")
                     .then(|| service.compose.clone())
@@ -376,6 +393,30 @@ impl Snapshot {
                 env_digest(&BTreeMap::from([(String::new(), content.clone())]), key)
             });
         }
+        self
+    }
+
+    /// With its redirects (enabled ones, in order) and basic authentication.
+    pub fn with_access(
+        mut self,
+        redirects: &[crate::models::service_redirect::Model],
+        users: &[crate::models::service_basic_auth::Model],
+    ) -> Self {
+        self.redirects = redirects
+            .iter()
+            .filter(|r| r.enabled)
+            .map(|r| Redirect {
+                regex: r.regex.clone(),
+                replacement: r.replacement.clone(),
+                permanent: r.permanent,
+            })
+            .collect();
+        let mut users: Vec<String> = users
+            .iter()
+            .map(|u| format!("{}:{}", u.username, u.password_hash))
+            .collect();
+        users.sort();
+        self.basic_auth = users;
         self
     }
 
@@ -805,6 +846,24 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
         middlewares: BTreeMap::new(),
     };
     let redirect = format!("{base}-https");
+    // Its redirects, then its authentication: on every router serving it.
+    let mut access = vec![];
+    for (index, r) in snapshot.redirects.iter().enumerate() {
+        let name = format!("{base}-redirect-{index}");
+        http.middlewares.insert(
+            name.clone(),
+            json!({"redirectRegex": {"regex": r.regex, "replacement": r.replacement, "permanent": r.permanent}}),
+        );
+        access.push(name);
+    }
+    if !snapshot.basic_auth.is_empty() {
+        let name = format!("{base}-auth");
+        http.middlewares.insert(
+            name.clone(),
+            json!({"basicAuth": {"users": snapshot.basic_auth}}),
+        );
+        access.push(name);
+    }
     for (index, domain) in snapshot.domains.iter().enumerate() {
         // A Compose service's container: its alias on the project network.
         let (target, host) = match (&snapshot.compose, &domain.compose_service) {
@@ -835,7 +894,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                     rule: rule.clone(),
                     entry_points: vec![HTTPS_ENTRYPOINT.to_owned()],
                     service: target.clone(),
-                    middlewares: vec![],
+                    middlewares: access.clone(),
                     tls: Some(tls),
                 },
             );
@@ -859,7 +918,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                     rule,
                     entry_points: vec![HTTP_ENTRYPOINT.to_owned()],
                     service: target,
-                    middlewares: vec![],
+                    middlewares: access.clone(),
                     tls: None,
                 },
             );
@@ -952,6 +1011,8 @@ mod tests {
             primary_domain: None,
             build: None,
             compose: None,
+            redirects: vec![],
+            basic_auth: vec![],
         }
     }
 

@@ -189,6 +189,15 @@ A service's trigger URL (`/api/v1/deploy/{id}?token={token}`) deploys it without
 (40 characters) is shown once, only its SHA-256 is stored and compared in constant time; a new
 one replaces it. Unknown, wrong or malformed answers 404 the same; a deployment under way, 409.
 
+### Redirects and basic authentication
+
+As EasyPanel's Redirects and Security tabs. A service's redirects (`service_redirects`: a regular
+expression over the request's URL, its replacement, permanent or not, on or off) and the users of
+its HTTP basic authentication (`service_basic_auth`: bcrypt hashes, never shown) become Traefik
+middlewares (`redirectRegex`, then `basicAuth`) on every router of its domains. They are part of
+the deployment's snapshot (the hashes too: the routes of a rollback are those of then) and apply on
+the next deployment. EasyPanel templates' `basicAuth` and `redirects` are created with the service.
+
 ### Compose services
 
 As EasyPanel's. A service of kind `compose` (made by the panel's administrators only:

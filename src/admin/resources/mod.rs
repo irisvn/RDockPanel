@@ -7,6 +7,7 @@ pub mod project_resource;
 pub mod service_domain_resource;
 pub mod service_mount_resource;
 pub mod service_port_resource;
+pub mod service_redirect_resource;
 pub mod service_resource;
 pub mod storage_provider_resource;
 // rustcms:resource-mods

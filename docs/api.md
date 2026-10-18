@@ -47,6 +47,8 @@ their actions), so the resources' policies, validation and audit apply.
 | POST | `/projects/{id}/services` | services.create | `{"name","kind","image"?,"database"?:{database,user,password,root_password}}`: an app (`kind` `app`, `image` required) or a database (`postgres`, `mysql`, `mariadb`, `mongo`, `redis`: credentials generated when left out); 422 on bad names, images, taken names; audited (`services.create`) |
 | POST | `/services/{id}/deploy-key` | services.update | a new SSH deploy key (ed25519): `{"public_key"}`, the private half sealed; audited |
 | POST | `/services/{id}/trigger` | services.deploy | a new deployment trigger URL, shown once: `{"url"}`; the old one stops working; audited |
+| POST | `/services/{id}/basic-auth` | services.update | `{"username","password"}`: a user of its basic authentication (bcrypt; the same user replaced); audited |
+| DELETE | `/services/{id}/basic-auth/{user}` | services.update | removes one; audited |
 | GET | `/services/{id}/credentials` | services.secrets | a database's passwords and internal URL; audited first |
 | GET | `/services/{id}/env` | services.secrets | `{"text","revision"}`: the environment as `.env` text, in clear; audited first (`services.env.read`, names only: no audit, no values) |
 | PUT | `/services/{id}/env` | services.update | `{"text","revision"?}` replaces the environment (sealed); with the revision read, 409 `env_stale` when it changed meanwhile; 422 names the bad line; audited (`services.env.update`, names only) |

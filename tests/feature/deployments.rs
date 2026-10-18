@@ -1496,3 +1496,73 @@ db_test!(
         );
     }
 );
+
+db_test!(
+    domains_carry_their_redirects_and_authentication,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        let auth = app.admin_api(&format!("x/apps/services/{id}/basic-auth"));
+        admin
+            .post_json(&auth, &json!({"username": "a b", "password": "short"}))
+            .await
+            .assert_validation_error("password");
+        admin
+            .post_json(
+                &auth,
+                &json!({"username": "ops", "password": "correct horse"}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        admin
+            .post_json(
+                &records(&app, "service_redirects"),
+                &json!({"service_id": id.to_string(), "regex": "([", "replacement": "x"}),
+            )
+            .await
+            .assert_validation_error("regex");
+        create(
+            &app,
+            &admin,
+            "service_redirects",
+            json!({"service_id": id.to_string(), "regex": "^http://shop.localhost/old/(.*)", "replacement": "http://shop.localhost/new/${1}", "permanent": true, "enabled": true}),
+        )
+        .await;
+        // A change waiting for Deploy.
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let routes =
+            std::fs::read_to_string(support::traefik_dir(&app).join("shop_web.yml")).unwrap();
+        assert!(
+            routes.contains("basicAuth") && routes.contains("ops:$2"),
+            "{routes}"
+        );
+        assert!(
+            routes.contains("redirectRegex") && routes.contains("permanent: true"),
+            "{routes}"
+        );
+        assert!(
+            routes.contains("shop_web-redirect-0") && routes.contains("shop_web-auth"),
+            "{routes}"
+        );
+        // Removed: gone at the next deployment.
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        let user = page["basic_auth"][0]["id"].as_i64().unwrap();
+        admin
+            .send(
+                rustcms::axum::http::Method::DELETE,
+                &format!("{auth}/{user}"),
+                None,
+            )
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let routes =
+            std::fs::read_to_string(support::traefik_dir(&app).join("shop_web.yml")).unwrap();
+        assert!(!routes.contains("basicAuth"), "{routes}");
+    }
+);

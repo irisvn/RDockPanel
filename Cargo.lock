@@ -3919,6 +3919,7 @@ dependencies = [
  "log",
  "oxc",
  "percent-encoding",
+ "regex",
  "reqwest",
  "rquickjs",
  "rustcms",

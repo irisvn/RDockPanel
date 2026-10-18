@@ -42,6 +42,14 @@ pub struct NewDomain {
     pub compose_service: Option<String>,
 }
 
+/// A redirect of a new service (Traefik's `redirectRegex`).
+#[derive(Debug, Clone)]
+pub struct NewRedirect {
+    pub regex: String,
+    pub replacement: String,
+    pub permanent: bool,
+}
+
 /// A Compose service's repository: its URL, branch, the Compose project's
 /// folder and file.
 #[derive(Debug, Clone)]
@@ -101,6 +109,9 @@ pub struct NewService {
     pub compose: Option<String>,
     /// …or its repository's.
     pub compose_git: Option<NewComposeGit>,
+    /// Its basic authentication: (user, password); hashed when made.
+    pub basic_auth: Vec<(String, String)>,
+    pub redirects: Vec<NewRedirect>,
 }
 
 impl NewService {
@@ -121,6 +132,8 @@ impl NewService {
             build: None,
             compose: None,
             compose_git: None,
+            basic_auth: vec![],
+            redirects: vec![],
         }
     }
 
@@ -371,6 +384,22 @@ pub async fn create(
         return Err(errors.into());
     }
 
+    for (user, password) in &new.basic_auth {
+        if user.is_empty() || user.len() > 64 || user.contains(':') {
+            errors.add("basic_auth", format!("{user:?} is not a user name"));
+        }
+        if password.is_empty() || password.len() > 72 {
+            errors.add(
+                "basic_auth",
+                format!("{user}: a password is 1-72 characters"),
+            );
+        }
+    }
+    for redirect in &new.redirects {
+        if regex::Regex::new(&redirect.regex).is_err() || redirect.replacement.trim().is_empty() {
+            errors.add("redirects", format!("{} is not a redirect", redirect.regex));
+        }
+    }
     let now = Utc::now();
     let sealed = (!env.is_empty())
         .then(|| Encrypted::seal(keyring, &service::env_context(), &env))
@@ -443,6 +472,34 @@ pub async fn create(
         .insert(txn)
         .await
         .map_err(|e| taken(e, "domains", format!("{} is already routed", domain.host)))?;
+    }
+    for (user, password) in &new.basic_auth {
+        let hash = bcrypt::hash(password, 10).map_err(AppError::internal)?;
+        crate::models::service_basic_auth::ActiveModel {
+            service_id: Set(row.id),
+            username: Set(user.clone()),
+            password_hash: Set(hash),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        }
+        .insert(txn)
+        .await
+        .map_err(|e| taken(e, "basic_auth", format!("{user} is given twice")))?;
+    }
+    for redirect in &new.redirects {
+        crate::models::service_redirect::ActiveModel {
+            service_id: Set(row.id),
+            regex: Set(redirect.regex.clone()),
+            replacement: Set(redirect.replacement.clone()),
+            permanent: Set(redirect.permanent),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        }
+        .insert(txn)
+        .await?;
     }
     for mount in &mounts {
         let (kind, name, content, target) = match mount {

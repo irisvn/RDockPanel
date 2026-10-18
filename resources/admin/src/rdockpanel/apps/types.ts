@@ -83,6 +83,8 @@ export type ServiceDetail = {
   env_names: string[];
   env_readable: boolean;
   domains: Domain[];
+  redirects: Array<{ id: number; regex: string; replacement: string; permanent: boolean; enabled: boolean }>;
+  basic_auth: Array<{ id: number; username: string }>;
   ports: Port[];
   mounts: Mount[];
   latest: Deployment | null;

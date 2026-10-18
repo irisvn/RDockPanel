@@ -129,6 +129,24 @@ pub async fn service(
     } else {
         vec![]
     };
+    let redirects = if principal.can("service_redirects.view_any") {
+        crate::models::service_redirect::Entity::find()
+            .filter(crate::models::service_redirect::Column::ServiceId.eq(id))
+            .order_by_asc(crate::models::service_redirect::Column::Id)
+            .all(db)
+            .await?
+    } else {
+        vec![]
+    };
+    // Users of its basic authentication: their names (never a hash).
+    let auth_users: Vec<Value> = crate::models::service_basic_auth::Entity::find()
+        .filter(crate::models::service_basic_auth::Column::ServiceId.eq(id))
+        .order_by_asc(crate::models::service_basic_auth::Column::Username)
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|u| json!({ "id": u.id, "username": u.username }))
+        .collect();
     let ports = if principal.can("service_ports.view_any") {
         service_port::Entity::find()
             .filter(service_port::Column::ServiceId.eq(id))
@@ -228,6 +246,8 @@ pub async fn service(
         "database": database_facts(&app, &row, &snapshot.service_name()),
         "env_readable": env_readable,
         "domains": domains,
+        "redirects": redirects,
+        "basic_auth": auth_users,
         "ports": ports,
         "mounts": mounts,
         "latest": latest,
@@ -664,4 +684,95 @@ pub async fn stats(State(app): State<AppState>, Path(id): Path<i64>) -> AppResul
     Ok(Json(
         json!({ "cpu_percent": cpu, "mem_used": mem, "tasks": tasks, "missing": missing }),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BasicAuthBody {
+    pub username: String,
+    pub password: String,
+}
+
+/// A user of the service's basic authentication (its Security tab): the
+/// password bcrypt-hashed, never shown again; the same user replaced.
+/// Applied on the next deployment. Audited.
+pub async fn add_basic_auth(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+    Json(body): Json<BasicAuthBody>,
+) -> AppResult<Json<Value>> {
+    use crate::models::service_basic_auth;
+    let row = service_of(&app, id).await?;
+    let username = body.username.trim().to_owned();
+    let mut errors = ValidationErrors::new();
+    if username.is_empty()
+        || username.len() > 64
+        || !username
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '@'))
+    {
+        errors.add("username", "must be 1-64 letters, digits, _ - . @");
+    }
+    if body.password.len() < 8 || body.password.len() > 72 {
+        errors.add("password", "must be 8-72 characters");
+    }
+    if !errors.is_empty() {
+        return Err(errors.into());
+    }
+    let password = body.password.clone();
+    let hash = tokio::task::spawn_blocking(move || bcrypt::hash(password, 10))
+        .await
+        .map_err(AppError::internal)?
+        .map_err(AppError::internal)?;
+    let txn = app.db().begin().await?;
+    service_basic_auth::Entity::delete_many()
+        .filter(service_basic_auth::Column::ServiceId.eq(row.id))
+        .filter(service_basic_auth::Column::Username.eq(username.as_str()))
+        .exec(&txn)
+        .await?;
+    let now = chrono::Utc::now();
+    sea_orm::ActiveModelTrait::insert(
+        service_basic_auth::ActiveModel {
+            service_id: sea_orm::Set(row.id),
+            username: sea_orm::Set(username.clone()),
+            password_hash: sea_orm::Set(hash),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+            ..Default::default()
+        },
+        &txn,
+    )
+    .await?;
+    let entry = AuditEntry::new("services.basic_auth.set", "services")
+        .key(id.to_string())
+        .meta(json!({ "username": username }));
+    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    txn.commit().await?;
+    Ok(Json(json!({ "username": username })))
+}
+
+/// Removes a user of the service's basic authentication. Audited.
+pub async fn remove_basic_auth(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path((id, user)): Path<(i64, i64)>,
+) -> AppResult<StatusCode> {
+    use crate::models::service_basic_auth;
+    let row = service_of(&app, id).await?;
+    let txn = app.db().begin().await?;
+    let removed = service_basic_auth::Entity::delete_many()
+        .filter(service_basic_auth::Column::ServiceId.eq(row.id))
+        .filter(service_basic_auth::Column::Id.eq(user))
+        .exec(&txn)
+        .await?;
+    if removed.rows_affected == 0 {
+        return Err(AppError::NotFound);
+    }
+    let entry = AuditEntry::new("services.basic_auth.remove", "services").key(id.to_string());
+    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    txn.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }

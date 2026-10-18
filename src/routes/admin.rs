@@ -168,6 +168,16 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("services.view"),
                     apps::stats,
                 )
+                .post(
+                    "/services/{id}/basic-auth",
+                    AdminAccess::can("services.update"),
+                    apps::add_basic_auth,
+                )
+                .delete(
+                    "/services/{id}/basic-auth/{user}",
+                    AdminAccess::can("services.update"),
+                    apps::remove_basic_auth,
+                )
                 .get(
                     "/actions",
                     AdminAccess::can("projects.view_any"),

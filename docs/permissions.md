@@ -33,6 +33,7 @@ The Deploy group's resources use the panel's standard permissions, one set per r
   `backups.restore` (restore one, replacing the database's data; lists a provider's files);
 
 - notifications: `notification_channels.*` (Settings);
+- redirects: `service_redirects.*`; basic authentication users: `services.update`;
 
 - a **host directory** (bind mount) needs `system.manage`, and a source under one of the
   `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, `/proc`,

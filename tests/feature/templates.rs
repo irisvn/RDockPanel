@@ -189,20 +189,36 @@ db_test!(
             )
             .await
             .assert_status(StatusCode::OK);
-        // What it needs but cannot get (authentication): never deployed at once.
-        let guarded = json!({"services": [{"type": "app", "data": {"serviceName": "registry", "source": {"type": "image", "image": "registry:2"}, "basicAuth": [{"username": "u", "password": "p"}]}}]});
-        let refused = admin
+        // Basic authentication, as EasyPanel's: made with it (hashed), deployed.
+        let guarded = json!({"services": [{"type": "app", "data": {"serviceName": "registry", "source": {"type": "image", "image": "registry:2"}, "basicAuth": [{"username": "u", "password": "p4ssword"}], "redirects": [{"regex": "^http://old/(.*)", "replacement": "http://new/${1}", "permanent": true}]}}]});
+        let made = admin
             .post_json(
                 &app.admin_api(&format!("x/apps/projects/{project}/schema")),
                 &json!({"schema": guarded, "deploy": true}),
             )
             .await;
-        refused.assert_status(StatusCode::BAD_REQUEST);
+        made.assert_status(StatusCode::OK);
+        let registry = made.json()["services"][0]["id"].as_i64().unwrap();
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{registry}")))
+            .await;
+        assert_eq!(page.json()["basic_auth"][0]["username"], "u");
+        assert_eq!(page.json()["redirects"][0]["permanent"], true);
         assert!(
-            refused.text().contains("basic authentication"),
+            !page.text().contains("p4ssword") && !page.text().contains("$2"),
             "{}",
-            refused.text()
+            page.text()
         );
+        // What it needs but cannot get (capabilities): never deployed at once.
+        let capped = json!({"services": [{"type": "app", "data": {"serviceName": "vpn", "source": {"type": "image", "image": "wg:1"}, "deploy": {"capAdd": ["NET_ADMIN"]}}}]});
+        let refused = admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/projects/{project}/schema")),
+                &json!({"schema": capped, "deploy": true}),
+            )
+            .await;
+        refused.assert_status(StatusCode::BAD_REQUEST);
+        assert!(refused.text().contains("capAdd"), "{}", refused.text());
         // Domains need service_domains.create.
         let creator =
             support::user_with(&app, "creator", &["projects.view", "services.create"]).await;
