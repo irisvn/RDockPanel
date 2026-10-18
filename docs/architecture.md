@@ -283,6 +283,14 @@ its threshold (checked every 5 minutes, said at most every 6 hours per channel).
 background, 15 s per channel, never retried; a failure is logged (never the URL). "Send test
 notification" sends at once and answers why it failed.
 
+### Auto deploy from GitHub
+
+A Git service may have a GitHub webhook (`/api/v1/github/{id}`): its secret (40 characters, shown
+once, sealed: context `services.webhook_secret`) signs each delivery (`X-Hub-Signature-256`,
+HMAC-SHA256, compared in constant time). A `push` to the service's branch (`main` when none is set)
+queues a Deploy; a `ping` answers; other events and branches are ignored. A missing or wrong
+signature answers 404, as an unknown service.
+
 ### Secrets
 
 A service's environment variables (`services.env`) and registry password

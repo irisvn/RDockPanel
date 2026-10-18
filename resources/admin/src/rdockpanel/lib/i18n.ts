@@ -345,6 +345,16 @@ window.rustcms?.registerTranslations?.("vi", {
   "Open to everyone.": "Ai cũng truy cập được.",
   "8 characters or more": "Từ 8 ký tự",
   "Add user": "Thêm user",
+  // Notes and auto deploy.
+  Notes: "Ghi chú",
+  "What the team should know about this service": "Điều nhóm cần biết về service này",
+  "Auto deploy (GitHub)": "Tự deploy (GitHub)",
+  "A push to the branch deploys the service. In the repository: Settings → Webhooks → Add webhook, content type application/json, this URL and secret, the push event.":
+    "Mỗi lần push lên branch sẽ deploy service. Trong repo: Settings → Webhooks → Add webhook, content type application/json, nhập URL và secret này, chọn sự kiện push.",
+  "Make a new secret? The old one stops working.": "Tạo secret mới? Secret cũ sẽ hết hiệu lực.",
+  "New secret": "Secret mới",
+  Enable: "Bật",
+  "On (the secret was shown when it was made).": "Đang bật (secret chỉ hiện lúc tạo).",
 });
 
 export {};

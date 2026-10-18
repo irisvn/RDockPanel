@@ -68,6 +68,12 @@ template needing authentication or capabilities the panel cannot give yet is nev
 once. Their images and what they configure are as trusted as
 the template: read a template's page before using it.
 
+## GitHub webhooks
+
+A webhook's secret is sealed and shown once; each delivery is checked against its HMAC-SHA256
+signature in constant time, and an unsigned or wrongly signed one is answered as if the service did
+not exist. Only a push to the service's own branch deploys.
+
 ## Builds
 
 A build runs the repository's Dockerfile (or Nixpacks') on this node's Docker: it is as trusted as

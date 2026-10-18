@@ -225,6 +225,8 @@ pub async fn service(
             "dockerfile_path": row.dockerfile_path,
             "dockerfile": row.dockerfile,
             "compose": row.compose,
+            "notes": row.notes,
+            "webhook_set": row.webhook_secret.is_some(),
             "compose_file": row.compose_file,
             "deploy_key_public": row.deploy_key_public,
             "trigger_set": row.trigger_hash.is_some(),
@@ -770,4 +772,35 @@ pub async fn remove_basic_auth(
     audit::record(&txn, &audit_context(&auth, request), entry).await?;
     txn.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A new GitHub webhook for the service (auto deploy on a push to its
+/// branch): its URL and secret, shown once (the old one stops working).
+/// Audited.
+pub async fn github_webhook(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    let row = service_of(&app, id).await?;
+    let secret = crate::services::database_service::random_string(40);
+    let sealed = Encrypted::seal(app.keyring(), &service::webhook_secret_context(), &secret)?;
+    let txn = app.db().begin().await?;
+    service::Entity::update_many()
+        .col_expr(
+            service::Column::WebhookSecret,
+            sea_orm::sea_query::Expr::value(Some(sealed)),
+        )
+        .filter(service::Column::Id.eq(row.id))
+        .exec(&txn)
+        .await?;
+    let entry = AuditEntry::new("services.github_webhook", "services").key(id.to_string());
+    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    txn.commit().await?;
+    let base = app.config().app.url.trim_end_matches('/').to_owned();
+    Ok(Json(json!({
+        "url": format!("{base}/api/v1/github/{id}"),
+        "secret": secret,
+    })))
 }

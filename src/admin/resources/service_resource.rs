@@ -70,6 +70,7 @@ impl Resource for ServiceResource {
             Field::column(service::Column::Compose)
                 .max_length(crate::services::compose_service::MAX_FILE),
             Field::column(service::Column::ComposeFile).max_length(255),
+            Field::column(service::Column::Notes).max_length(20_000),
             Field::column(service::Column::Command).max_length(1000),
             Field::column(service::Column::Replicas).required(),
             Field::column(service::Column::CpuLimitMillis),

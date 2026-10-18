@@ -50,6 +50,13 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub compose: Option<String>,
     pub compose_file: Option<String>,
+    /// Notes about the service (its Overview), for the team.
+    #[sea_orm(column_type = "Text", nullable)]
+    pub notes: Option<String>,
+    /// The GitHub webhook's secret (it checks the signature of a push),
+    /// sealed (context `services.webhook_secret`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub webhook_secret: Option<Encrypted<String>>,
     pub command: Option<String>,
     pub replicas: i32,
     pub cpu_limit_millis: Option<i32>,
@@ -90,6 +97,11 @@ impl ActiveModelBehavior for ActiveModel {}
 /// Where `env` is sealed.
 pub fn env_context() -> Context {
     Context::column("services", "env")
+}
+
+/// Where `webhook_secret` is sealed.
+pub fn webhook_secret_context() -> Context {
+    Context::column("services", "webhook_secret")
 }
 
 /// Where `deploy_key` is sealed.

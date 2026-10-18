@@ -118,6 +118,13 @@ service is under way.
 the service: 202 `{"deployment"}`; 404 for an unknown service or a wrong token; 409 while another
 deployment of the service is under way. Audited as `services.deploy.trigger` (system actor).
 
+## GitHub webhook (public)
+
+`POST /api/v1/github/{id}` (no session: `X-Hub-Signature-256` is the proof): a `push` to the
+service's branch queues a Deploy (202 `{"deployment"}`); `ping` answers 200; other events or
+branches 200 `{"ignored"}`; a bad signature 404. Made by `POST /apps/services/{id}/github-webhook`
+(services.deploy): `{"url","secret"}`, shown once, audited.
+
 ## Server (`/server`)
 
 | Method | Path | Permission | |

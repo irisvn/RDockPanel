@@ -1566,3 +1566,64 @@ db_test!(
         assert!(!routes.contains("basicAuth"), "{routes}");
     }
 );
+
+db_test!(
+    a_signed_github_push_deploys,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::http::controllers::trigger_controller::signed;
+        use rustcms::axum::body::Body;
+        use rustcms::axum::http::Request;
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let (admin, id) = shop(&app).await;
+        let made = admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{id}/github-webhook")),
+                &json!({}),
+            )
+            .await;
+        made.assert_status(StatusCode::OK);
+        let secret = made.json()["secret"].as_str().unwrap().to_owned();
+        let url = format!("/api/v1/github/{id}");
+        let sign = |body: &[u8]| {
+            use hmac::{KeyInit, Mac};
+            let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+            mac.update(body);
+            let hex: String = mac
+                .finalize()
+                .into_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            format!("sha256={hex}")
+        };
+        let send = |event: &str, body: &str, signature: String| {
+            Request::post(url.as_str())
+                .header("content-type", "application/json")
+                .header("x-github-event", event)
+                .header("x-hub-signature-256", signature)
+                .body(Body::from(body.to_owned()))
+                .unwrap()
+        };
+        assert!(signed(&secret, b"x", &sign(b"x")) && !signed(&secret, b"x", "sha256=00"));
+        // Unsigned or wrongly signed: as if it did not exist.
+        let push = r#"{"ref": "refs/heads/main", "after": "abc"}"#;
+        app.request(send("push", push, "sha256=00".into()))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        app.request(send("ping", "{}", sign(b"{}")))
+            .await
+            .assert_status(StatusCode::OK);
+        // Another branch: ignored.
+        let other = r#"{"ref": "refs/heads/dev"}"#;
+        let ignored = app
+            .request(send("push", other, sign(other.as_bytes())))
+            .await;
+        ignored.assert_status(StatusCode::OK);
+        assert!(ignored.text().contains("ignored"));
+        // Its branch (main by default): deployed.
+        let fired = app.request(send("push", push, sign(push.as_bytes()))).await;
+        fired.assert_status(StatusCode::ACCEPTED);
+        assert_eq!(last_deployment(&app, id).await.status, "queued");
+    }
+);

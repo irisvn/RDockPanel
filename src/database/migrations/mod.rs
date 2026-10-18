@@ -18,6 +18,7 @@ mod m20261019_020000_create_backup_tables;
 mod m20261019_040000_create_notification_channels_table;
 mod m20261019_060000_add_compose_to_services;
 mod m20261019_080000_create_redirects_and_basic_auth;
+mod m20261019_100000_add_notes_and_webhook_to_services;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -42,6 +43,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261019_040000_create_notification_channels_table::Migration),
             Box::new(m20261019_060000_add_compose_to_services::Migration),
             Box::new(m20261019_080000_create_redirects_and_basic_auth::Migration),
+            Box::new(m20261019_100000_add_notes_and_webhook_to_services::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

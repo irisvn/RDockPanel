@@ -43,6 +43,10 @@ impl ServiceProvider for AppServiceProvider {
             rustcms::crypto::Binding::Column,
         );
         app.encrypted_column::<crate::models::service::Entity>(
+            crate::models::service::Column::WebhookSecret,
+            rustcms::crypto::Binding::Column,
+        );
+        app.encrypted_column::<crate::models::service::Entity>(
             crate::models::service::Column::DeployKey,
             rustcms::crypto::Binding::Column,
         );

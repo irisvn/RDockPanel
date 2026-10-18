@@ -17,6 +17,12 @@ pub fn routes() -> ApiRoutes {
             Access::public(),
             controllers::trigger_controller::deploy,
         )
+        // GitHub's webhook (auto deploy on push): its signature is the proof.
+        .post(
+            "/github/{id}",
+            Access::public(),
+            controllers::trigger_controller::github,
+        )
     // rustcms:api-routes
 }
 

@@ -178,6 +178,11 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("services.update"),
                     apps::remove_basic_auth,
                 )
+                .post(
+                    "/services/{id}/github-webhook",
+                    AdminAccess::can("services.deploy"),
+                    apps::github_webhook,
+                )
                 .get(
                     "/actions",
                     AdminAccess::can("projects.view_any"),

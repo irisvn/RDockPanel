@@ -191,6 +191,7 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
         />
       </Section>
       {s.status === "running" && <Monitor {...props} />}
+      <Notes {...props} d={d} />
       {d.latest && (
         <Section
           title={`${t("Deployment")} #${d.latest.id} · ${t(d.latest.trigger)}`}
@@ -202,6 +203,38 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
       )}
       {!d.latest && d.can.deployments && <p className="rdp2-muted">{t("Not deployed yet: press Deploy.")}</p>}
     </div>
+  );
+}
+
+/** Notes about the service, for the team (saved, never deployed). */
+function Notes(props: Props & { d: ServiceDetail }) {
+  const { d, t } = props;
+  const [text, setText] = useState(d.service.notes ?? "");
+  const [saved, setSaved] = useState(d.service.notes ?? "");
+  const [error, setError] = useState<unknown>(null);
+  if (!d.can.update && !saved) return null;
+  return (
+    <Section title={t("Notes")}>
+      <Textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} disabled={!d.can.update} placeholder={t("What the team should know about this service")} />
+      <ErrorNote error={error} />
+      {d.can.update && text !== saved && (
+        <div className="rdp2-row rdp2-end">
+          <Button
+            size="sm"
+            onClick={async () => {
+              try {
+                await resources.update("services", d.service.id, { notes: text });
+                setSaved(text);
+              } catch (err) {
+                setError(err);
+              }
+            }}
+          >
+            {t("Save")}
+          </Button>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -608,6 +641,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
   const [composeFile, setComposeFile] = useState(s.compose_file ?? "docker-compose.yml");
   const isCompose = s.kind === "compose";
   const [trigger, setTrigger] = useState<string | null>(null);
+  const [webhook, setWebhook] = useState<{ url: string; secret: string } | null>(null);
   const [extra, setExtra] = useState<unknown>(null);
   const { save, error, busy, fields } = useServiceSave(s.id, () => {
     setPassword("");
@@ -802,6 +836,42 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
             </span>
           )}
           {!trigger && s.trigger_set && <p className="rdp2-muted rdp2-small">{t("A URL is set (shown when it was made).")}</p>}
+        </Section>
+      )}
+      {s.source === "git" && d.can.deploy && (
+        <Section
+          title={t("Auto deploy (GitHub)")}
+          description={t("A push to the branch deploys the service. In the repository: Settings → Webhooks → Add webhook, content type application/json, this URL and secret, the push event.")}
+          actions={
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (s.webhook_set && !window.confirm(t("Make a new secret? The old one stops working."))) return;
+                try {
+                  setWebhook(await props.api.post<{ url: string; secret: string }>(`/apps/services/${s.id}/github-webhook`));
+                  props.onSaved();
+                } catch (err) {
+                  setExtra(err);
+                }
+              }}
+            >
+              {s.webhook_set ? t("New secret") : t("Enable")}
+            </Button>
+          }
+        >
+          {webhook && (
+            <div className="rdp2-stack">
+              <span className="rdp2-row">
+                <code className="rdp2-ellipsis">{webhook.url}</code>
+                <CopyButton text={webhook.url} label={t("Copy")} copied={t("Copied")} />
+              </span>
+              <span className="rdp2-row">
+                <code className="rdp2-ellipsis">{webhook.secret}</code>
+                <CopyButton text={webhook.secret} label={t("Copy")} copied={t("Copied")} />
+              </span>
+            </div>
+          )}
+          {!webhook && s.webhook_set && <p className="rdp2-muted rdp2-small">{t("On (the secret was shown when it was made).")}</p>}
         </Section>
       )}
       <ErrorNote error={extra} />

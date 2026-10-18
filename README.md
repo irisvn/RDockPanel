@@ -54,8 +54,8 @@ feature is free: no project limits, no paid tiers.
   catalog; or paste a template's output ("Create from Schema").
 - **Builds**: an app from a Git repository (https, or ssh with a generated deploy key; a branch, tag
   or commit; a sub-directory), built with its Dockerfile or Nixpacks, or from a Dockerfile written in
-  the panel; the build's log is the deployment's. A deployment trigger URL deploys from a CI or a
-  Git host's webhook.
+  the panel; the build's log is the deployment's. A deployment trigger URL deploys from a CI, and a
+  signed GitHub webhook deploys on each push (auto deploy).
 - **Compose services**: a Compose file (written in the panel or from Git) run with `docker compose`
   on the project's network, its domains leading to one of its services.
 - **Backups**: scheduled dumps (cron) of PostgreSQL, MySQL, MariaDB and MongoDB, and archives of

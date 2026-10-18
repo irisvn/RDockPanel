@@ -57,6 +57,8 @@ export type ServiceDetail = {
     dockerfile_path: string | null;
     dockerfile: string | null;
     compose: string | null;
+    notes: string | null;
+    webhook_set: boolean;
     compose_file: string | null;
     deploy_key_public: string | null;
     trigger_set: boolean;
