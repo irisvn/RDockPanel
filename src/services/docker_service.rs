@@ -185,6 +185,52 @@ pub struct ContainerStats {
     pub blk_write: u64,
 }
 
+pub use ::bollard::models::{
+    NetworkAttachmentConfig, ObjectVersion, Service as SwarmService, ServiceSpec,
+    Task as SwarmTask, TaskState, TaskStatus,
+};
+
+/// Marks the Swarm services, networks and volumes the panel deploys (with
+/// `rdockpanel.project` and `rdockpanel.service`): it never touches a
+/// service without it.
+pub const MANAGED_LABEL: &str = "rdockpanel.managed";
+
+/// Registry credentials for pulling a private image (sent with service
+/// create/update so every node can pull it).
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct RegistryAuth {
+    pub server: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for RegistryAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegistryAuth")
+            .field("server", &self.server)
+            .field("username", &self.username)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What the panel needs of an image: its id and the registry digests it was
+/// pulled as (`repo@sha256:…`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImageDetails {
+    pub id: String,
+    pub repo_digests: Vec<String>,
+}
+
+/// A network the panel creates (with its labels).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NetworkRequest {
+    pub name: String,
+    pub driver: String,
+    pub labels: HashMap<String, String>,
+    pub attachable: bool,
+    pub internal: bool,
+}
+
 /// An interactive shell in a container (a TTY): its output, its input, and
 /// the exec's id for resizing. Dropping it does not end the shell (Docker
 /// keeps exec processes after their connection closes): [`Shell`] does.
@@ -243,6 +289,34 @@ pub trait DockerApi: Send + Sync {
     async fn networks(&self) -> DockerResult<Vec<NetworkItem>>;
     async fn create_network(&self, name: &str, driver: &str) -> DockerResult<NetworkItem>;
     async fn remove_network(&self, id: &str) -> DockerResult<()>;
+    /// Creates the network unless one of that name exists; the network as it
+    /// is (callers check it: [`Docker::ensure_network`]).
+    async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem>;
+    async fn inspect_image(&self, reference: &str) -> DockerResult<ImageDetails>;
+    /// The Swarm service of that name, if any.
+    async fn inspect_service(&self, name: &str) -> DockerResult<Option<SwarmService>>;
+    /// Creates a service; its id.
+    async fn create_service(
+        &self,
+        spec: ServiceSpec,
+        auth: Option<RegistryAuth>,
+    ) -> DockerResult<String>;
+    /// Updates a service at `version` (from its inspect); Docker's warnings.
+    async fn update_service(
+        &self,
+        name: &str,
+        version: u64,
+        spec: ServiceSpec,
+        auth: Option<RegistryAuth>,
+    ) -> DockerResult<Vec<String>>;
+    async fn delete_service(&self, name: &str) -> DockerResult<()>;
+    /// The service's tasks (every slot, current and past).
+    async fn list_tasks(&self, service: &str) -> DockerResult<Vec<SwarmTask>>;
+    fn service_logs(
+        &self,
+        service: &str,
+        query: LogQuery,
+    ) -> BoxStream<'static, DockerResult<LogLine>>;
     /// A shell (bash when present, else sh) on a TTY of `size`, its
     /// processes marked with the environment variable [`SESSION_ENV`]`=token`.
     async fn exec(&self, container: &str, size: TermSize, token: &str)
@@ -480,6 +554,68 @@ impl Docker {
         self.resolve_container(id, scope).await.map(|(id, _)| id)
     }
 
+    /// The network `request` describes: created, or the existing one of that
+    /// name if it is exactly that (driver, and every requested label). A
+    /// network of that name made by something else is a conflict: services
+    /// are never attached to it.
+    pub async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
+        checked_name(&request.name)?;
+        let network = self.0.ensure_network(request.clone()).await?;
+        let same = network.driver == request.driver
+            && request
+                .labels
+                .iter()
+                .all(|(k, v)| network.labels.get(k) == Some(v));
+        if same {
+            Ok(network)
+        } else {
+            Err(DockerError::Conflict(format!(
+                "network {} is not this panel's",
+                request.name
+            )))
+        }
+    }
+
+    /// The Swarm service `name` if it is the panel's for `project`/`service`
+    /// (`None`: no such service). A service of that name the panel did not
+    /// deploy is a conflict: it is never taken over.
+    pub async fn managed_service(
+        &self,
+        name: &str,
+        project: &str,
+        service: &str,
+    ) -> DockerResult<Option<SwarmService>> {
+        checked_name(name)?;
+        let Some(found) = self.0.inspect_service(name).await? else {
+            return Ok(None);
+        };
+        let labels = found
+            .spec
+            .as_ref()
+            .and_then(|s| s.labels.clone())
+            .unwrap_or_default();
+        let ours = labels.get(MANAGED_LABEL).is_some_and(|v| v == "true")
+            && labels
+                .get("rdockpanel.project")
+                .is_some_and(|v| v == project)
+            && labels
+                .get("rdockpanel.service")
+                .is_some_and(|v| v == service);
+        if ours {
+            Ok(Some(found))
+        } else {
+            Err(DockerError::Conflict(format!(
+                "{name} is not deployed by this panel"
+            )))
+        }
+    }
+
+    /// Engine access for the deployment code, which checks ownership with
+    /// [`Self::managed_service`] first.
+    pub fn engine(&self) -> &dyn DockerApi {
+        self.0.as_ref()
+    }
+
     /// The container `id` names (id, short id or name), checked against
     /// `scope`: its full id, which every later call uses so a rename can't
     /// swap the target, and its inspect document.
@@ -633,6 +769,40 @@ impl DockerApi for Unavailable {
     }
     async fn remove_network(&self, _: &str) -> DockerResult<()> {
         Err(self.err())
+    }
+    async fn ensure_network(&self, _: NetworkRequest) -> DockerResult<NetworkItem> {
+        Err(self.err())
+    }
+    async fn inspect_image(&self, _: &str) -> DockerResult<ImageDetails> {
+        Err(self.err())
+    }
+    async fn inspect_service(&self, _: &str) -> DockerResult<Option<SwarmService>> {
+        Err(self.err())
+    }
+    async fn create_service(
+        &self,
+        _: ServiceSpec,
+        _: Option<RegistryAuth>,
+    ) -> DockerResult<String> {
+        Err(self.err())
+    }
+    async fn update_service(
+        &self,
+        _: &str,
+        _: u64,
+        _: ServiceSpec,
+        _: Option<RegistryAuth>,
+    ) -> DockerResult<Vec<String>> {
+        Err(self.err())
+    }
+    async fn delete_service(&self, _: &str) -> DockerResult<()> {
+        Err(self.err())
+    }
+    async fn list_tasks(&self, _: &str) -> DockerResult<Vec<SwarmTask>> {
+        Err(self.err())
+    }
+    fn service_logs(&self, _: &str, _: LogQuery) -> BoxStream<'static, DockerResult<LogLine>> {
+        futures_util::stream::iter([Err(self.err())]).boxed()
     }
     async fn exec(&self, _: &str, _: TermSize, _: &str) -> DockerResult<ExecSession> {
         Err(self.err())

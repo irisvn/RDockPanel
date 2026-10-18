@@ -8,6 +8,12 @@ pub fn provider() -> AdminProvider {
         .brand("RDockPanel")
         // Labels in Vietnamese (`rustcms lang:missing vi` lists what is missing).
         .translations("vi", include_str!("../../lang/vi.toml"))
+        .resource::<crate::admin::resources::project_resource::ProjectResource>()
+        .resource::<crate::admin::resources::service_resource::ServiceResource>()
+        .resource::<crate::admin::resources::service_domain_resource::ServiceDomainResource>()
+        .resource::<crate::admin::resources::service_port_resource::ServicePortResource>()
+        .resource::<crate::admin::resources::service_mount_resource::ServiceMountResource>()
+        .resource::<crate::admin::resources::deployment_resource::DeploymentResource>()
         // rustcms:resources
         .page::<crate::admin::pages::server_page::ServerPage>()
         .page::<crate::admin::pages::containers_page::ContainersPage>()

@@ -8,8 +8,9 @@ use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
 use rdockpanel::services::docker_service::{
     ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ExecSession, ImageItem, LogLine, LogQuery, LogStream, NetworkItem, PruneReport,
-    SYSTEM_LABEL, SwarmRole, TermSize, VolumeItem,
+    DockerResult, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream, NetworkItem,
+    NetworkRequest, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec, SwarmRole, SwarmService,
+    SwarmTask, TermSize, VolumeItem,
 };
 use rustcms::async_trait;
 use serde_json::{Value, json};
@@ -20,6 +21,8 @@ pub struct FakeDocker {
     pub volumes: Arc<Mutex<Vec<VolumeItem>>>,
     pub networks: Arc<Mutex<Vec<NetworkItem>>>,
     pub images: Arc<Mutex<Vec<ImageItem>>>,
+    /// Swarm services by name.
+    pub services: Arc<Mutex<HashMap<String, SwarmService>>>,
     /// `"restart web"`, `"remove web"`, `"prune rdockpanel.system"`, …
     pub calls: Arc<Mutex<Vec<String>>>,
 }
@@ -252,5 +255,124 @@ impl DockerApi for FakeDocker {
     async fn resize_exec(&self, exec_id: &str, size: TermSize) -> DockerResult<()> {
         self.record(format!("resize {exec_id} {}x{}", size.cols, size.rows));
         Ok(())
+    }
+    async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
+        let mut networks = self.networks.lock().unwrap();
+        if let Some(found) = networks.iter().find(|n| n.name == request.name) {
+            return Ok(found.clone());
+        }
+        self.record(format!(
+            "create network {} {}",
+            request.name, request.driver
+        ));
+        let network = NetworkItem {
+            id: format!("netid-{}", request.name),
+            name: request.name,
+            driver: request.driver,
+            scope: "swarm".to_owned(),
+            labels: request.labels,
+        };
+        networks.push(network.clone());
+        Ok(network)
+    }
+    async fn inspect_image(&self, reference: &str) -> DockerResult<ImageDetails> {
+        let repo = reference.split(['@', ':']).next().unwrap_or(reference);
+        Ok(ImageDetails {
+            id: format!("sha256:id-{repo}"),
+            repo_digests: vec![format!("{repo}@sha256:fake")],
+        })
+    }
+    async fn inspect_service(&self, name: &str) -> DockerResult<Option<SwarmService>> {
+        Ok(self.services.lock().unwrap().get(name).cloned())
+    }
+    async fn create_service(
+        &self,
+        spec: ServiceSpec,
+        _auth: Option<RegistryAuth>,
+    ) -> DockerResult<String> {
+        let name = spec.name.clone().unwrap_or_default();
+        let mut services = self.services.lock().unwrap();
+        if services.contains_key(&name) {
+            return Err(DockerError::Conflict(format!("service {name} exists")));
+        }
+        self.record(format!("create service {name}"));
+        let id = format!("svc-{name}");
+        services.insert(
+            name,
+            SwarmService {
+                id: Some(id.clone()),
+                version: Some(rdockpanel::services::docker_service::ObjectVersion {
+                    index: Some(1),
+                }),
+                spec: Some(spec),
+                ..Default::default()
+            },
+        );
+        Ok(id)
+    }
+    async fn update_service(
+        &self,
+        name: &str,
+        version: u64,
+        spec: ServiceSpec,
+        _auth: Option<RegistryAuth>,
+    ) -> DockerResult<Vec<String>> {
+        let mut services = self.services.lock().unwrap();
+        let service = services.get_mut(name).ok_or(DockerError::NotFound)?;
+        let current = service.version.as_ref().and_then(|v| v.index).unwrap_or(0);
+        if current != version {
+            return Err(DockerError::Conflict("update out of sequence".to_owned()));
+        }
+        self.record(format!("update service {name}"));
+        service.version = Some(rdockpanel::services::docker_service::ObjectVersion {
+            index: Some(current + 1),
+        });
+        service.spec = Some(spec);
+        Ok(vec![])
+    }
+    async fn delete_service(&self, name: &str) -> DockerResult<()> {
+        self.services
+            .lock()
+            .unwrap()
+            .remove(name)
+            .ok_or(DockerError::NotFound)?;
+        self.record(format!("delete service {name}"));
+        Ok(())
+    }
+    /// One running task per replica.
+    async fn list_tasks(&self, service: &str) -> DockerResult<Vec<SwarmTask>> {
+        let services = self.services.lock().unwrap();
+        let Some(found) = services.get(service) else {
+            return Ok(vec![]);
+        };
+        let replicas = found
+            .spec
+            .as_ref()
+            .and_then(|s| s.mode.as_ref())
+            .and_then(|m| m.replicated.as_ref())
+            .and_then(|r| r.replicas)
+            .unwrap_or(1);
+        Ok((1..=replicas)
+            .map(|slot| SwarmTask {
+                id: Some(format!("task-{service}-{slot}")),
+                slot: Some(slot),
+                status: Some(rdockpanel::services::docker_service::TaskStatus {
+                    state: Some(rdockpanel::services::docker_service::TaskState::RUNNING),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .collect())
+    }
+    fn service_logs(
+        &self,
+        service: &str,
+        _query: LogQuery,
+    ) -> BoxStream<'static, DockerResult<LogLine>> {
+        let line = LogLine {
+            stream: LogStream::Stdout,
+            text: format!("{service} ready\n"),
+        };
+        stream::iter([Ok(line)]).boxed()
     }
 }

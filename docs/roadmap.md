@@ -11,6 +11,9 @@ RDockPanel aims at EasyPanel's features, all free.
 
 ## Phase 2: deploy apps to Docker Swarm (in progress)
 
+Done so far: projects, services, domains, ports, mounts and deployments in the panel with their rules;
+the Swarm API (services, tasks, networks, images); a development Swarm script; CI on a real Swarm.
+
 - Projects and services from a Docker image: replicas, resources, health checks, volumes, ports.
 - Deployments as Swarm services: rolling updates (start-first), automatic rollback, deployment history
   and manual rollback, live deployment logs.

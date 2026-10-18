@@ -11,9 +11,10 @@ src/
   routes/admin.rs   the panel's own routes under /admin/api/x (AdminRoutes)
   http/controllers/ docker_controller (containers, images, volumes, networks, terminal), server_controller
   services/         docker_service (+ bollard), system_stats_service, live_service, action_service
-  models/           action (the actions log)
+  models/           action (the actions log); project, service, service_domain/port/mount, deployment
   jobs/             pull_image
   admin/pages/      Server, Containers, Images, Volumes, Networks (script pages)
+  admin/resources/  Projects, Services, Domains, Ports, Mounts, Deployments (schema-driven resources)
 resources/admin/    the pages' JavaScript and CSS (+ vendored xterm.js)
 tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER
 ```
@@ -60,6 +61,16 @@ ended at the next boot (its token is kept in its action row). Each session is an
 
 The RustCMS queue (database-backed). Workers in `serve` take jobs from `default`, `docker` (image
 pulls) and `deploy` (Phase 2), configured in `config/queue.toml`.
+
+## Projects and services (Phase 2, in progress)
+
+Projects and services are RustCMS resources (forms, lists, relations, validation, audit come with the
+framework). Their rules (names, hostnames, paths, ports, images, bind mounts) are pure functions in
+`services/deploy_rules_service.rs`, with the `[panel]` configuration (`config/panel.toml`). A service
+becomes the Swarm service `<project>_<service>`, labelled `rdockpanel.managed=true` with its project
+and service: `Docker::managed_service` refuses any service of that name the panel did not deploy, and
+Swarm updates go at the version just read, retried when Swarm moved it meanwhile. Deploying comes next
+(see the [roadmap](roadmap.md)).
 
 ## Data
 

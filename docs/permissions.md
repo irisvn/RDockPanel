@@ -12,6 +12,21 @@ Permissions live in the `admin` guard and are granted through roles (System → 
 | `docker.exec` | the container terminal (a root shell in most images: grant carefully) |
 | `system.manage` | the panel's own objects (labelled `rdockpanel.system=true`): see them, inspect them, read their logs, open a terminal in them, act on them; force-remove images in use; read every user's actions |
 
+## Projects and services (Phase 2)
+
+The Deploy group's resources use the panel's standard permissions, one set per resource
+(`view_any`, `view`, `create`, `update`, `delete`): `projects.*`, `services.*`,
+`service_domains.*`, `service_ports.*`, `service_mounts.*`, and `deployments.view_any` /
+`deployments.view` (deployments are written by the panel only). Besides:
+
+- a **host directory** (bind mount) needs `system.manage`, and a source under one of the
+  `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, the
+  Docker socket, `/proc`, `/sys`, `/dev`, Docker's and the panel's own files, and any directory above
+  them (`/run`, `/etc`, `/var`), are always refused;
+- a service, once deployed, keeps its name and project, and cannot be deleted before it is destroyed;
+  a project with services cannot be deleted, nor renamed once one of them was deployed;
+- the ports in `[panel] reserved_ports` (the proxy's and the panel's) cannot be published.
+
 ## The panel's own objects
 
 Objects labelled `rdockpanel.system=true` are the panel's own. The installer (Phase 2, not written

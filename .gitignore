@@ -3,3 +3,4 @@
 *.sqlite
 *.sqlite-*
 /.idea
+/storage/

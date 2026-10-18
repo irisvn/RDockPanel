@@ -1,4 +1,4 @@
-# Checks every push and pull request: formatting, lints, and the tests on MySQL 8.4
+# On pushes to main and pull requests: formatting, lints, the tests on MySQL 8.4
 # (the panel's only database: `RUSTCMS_TEST_BACKENDS=mysql` runs no other).
 # `Cargo.lock` is committed: CI builds exactly the versions you tested.
 name: CI
@@ -41,3 +41,23 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+
+  # The Docker and Swarm code against the runner's real engine, made a
+  # single-node Swarm (the Docker tests need no database).
+  docker:
+    runs-on: ubuntu-latest
+    env:
+      PANEL_TEST_DOCKER: "1"
+      PANEL_TEST_SWARM: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - run: docker swarm init --advertise-addr 127.0.0.1
+      - run: cargo test --locked --test feature docker::

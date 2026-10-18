@@ -20,6 +20,13 @@ protected object. Images are removed only by an id or a tag exactly as Docker li
 (`PASSWORD`, `TOKEN`, `KEY`, `SECRET`, `AUTH`, …) and the password in URLs
 (`DATABASE_URL=mysql://user:******@host`).
 
+## Bind mounts
+
+Off by default. A host directory must sit under one of `[panel] bind_roots`, is resolved with its
+symlinks when saved, and is checked again before each deployment. Docker resolves the path once more
+when the task starts, so **only list roots that no service and no untrusted user can write**: someone
+who can replace a directory there with a symlink could point a later start elsewhere.
+
 ## The terminal
 
 - Needs `docker.exec` (and `system.manage` for the panel's own containers).

@@ -26,8 +26,9 @@ use ::bollard::query_parameters::ResizeExecOptionsBuilder;
 
 use super::{
     ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ExecSession, ImageItem, LogLine, LogQuery, LogStream, NetworkItem, PruneReport,
-    SESSION_ENV, SwarmRole, TermSize, VolumeItem,
+    DockerResult, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream, NetworkItem,
+    NetworkRequest, PruneReport, RegistryAuth, SESSION_ENV, ServiceSpec, SwarmRole, SwarmService,
+    SwarmTask, TermSize, VolumeItem,
 };
 
 /// bash when the image has it, else sh.
@@ -60,6 +61,11 @@ fn map_err(err: Error) -> DockerError {
             status_code: 304 | 409,
             message,
         } => DockerError::Conflict(message),
+        // Swarm bumps a service's version on its own (endpoints, tasks): an
+        // update at a version read earlier is a conflict to retry, not a failure.
+        Error::DockerResponseServerError { message, .. } if message.contains("out of sequence") => {
+            DockerError::Conflict(message)
+        }
         Error::DockerResponseServerError { message, .. } => DockerError::Other(message),
         Error::IOError { err } => DockerError::Unavailable(err.to_string()),
         Error::HyperResponseError { err } => DockerError::Unavailable(err.to_string()),
@@ -486,6 +492,151 @@ impl DockerApi for BollardDocker {
         Ok(ExecSession { id, output, input })
     }
 
+    async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
+        if let Some(found) = self
+            .networks()
+            .await?
+            .into_iter()
+            .find(|n| n.name == request.name)
+        {
+            return Ok(found);
+        }
+        let create = NetworkCreateRequest {
+            name: request.name.clone(),
+            driver: Some(request.driver.clone()),
+            attachable: Some(request.attachable),
+            internal: Some(request.internal),
+            labels: Some(request.labels.clone()),
+            ..Default::default()
+        };
+        let created = self.client.create_network(create).await.map_err(map_err)?;
+        Ok(NetworkItem {
+            id: created.id,
+            name: request.name,
+            driver: request.driver.clone(),
+            scope: if request.driver == "overlay" {
+                "swarm"
+            } else {
+                "local"
+            }
+            .to_owned(),
+            labels: request.labels,
+        })
+    }
+
+    async fn inspect_image(&self, reference: &str) -> DockerResult<ImageDetails> {
+        let image = self
+            .client
+            .inspect_image(reference)
+            .await
+            .map_err(map_err)?;
+        Ok(ImageDetails {
+            id: image.id.unwrap_or_default(),
+            repo_digests: image.repo_digests.unwrap_or_default(),
+        })
+    }
+
+    async fn inspect_service(&self, name: &str) -> DockerResult<Option<SwarmService>> {
+        match self
+            .client
+            .inspect_service(
+                name,
+                None::<::bollard::query_parameters::InspectServiceOptions>,
+            )
+            .await
+        {
+            Ok(service) => Ok(Some(service)),
+            Err(Error::DockerResponseServerError {
+                status_code: 404, ..
+            }) => Ok(None),
+            Err(err) => Err(map_err(err)),
+        }
+    }
+
+    async fn create_service(
+        &self,
+        spec: ServiceSpec,
+        auth: Option<RegistryAuth>,
+    ) -> DockerResult<String> {
+        let created = self
+            .client
+            .create_service(spec, auth.map(credentials))
+            .await
+            .map_err(map_err)?;
+        Ok(created.id.unwrap_or_default())
+    }
+
+    async fn update_service(
+        &self,
+        name: &str,
+        version: u64,
+        spec: ServiceSpec,
+        auth: Option<RegistryAuth>,
+    ) -> DockerResult<Vec<String>> {
+        let version = i32::try_from(version)
+            .map_err(|_| DockerError::Other("service version out of range".to_owned()))?;
+        let mut options =
+            ::bollard::query_parameters::UpdateServiceOptionsBuilder::new().version(version);
+        if auth.is_none() {
+            // Keep the credentials of the current spec ("previous-spec"
+            // fails on a service updated for the first time).
+            options = options.registry_auth_from("spec");
+        }
+        let updated = self
+            .client
+            .update_service(name, spec, options.build(), auth.map(credentials))
+            .await
+            .map_err(map_err)?;
+        Ok(updated.warnings.unwrap_or_default())
+    }
+
+    async fn delete_service(&self, name: &str) -> DockerResult<()> {
+        self.client.delete_service(name).await.map_err(map_err)
+    }
+
+    async fn list_tasks(&self, service: &str) -> DockerResult<Vec<SwarmTask>> {
+        let filters = HashMap::from([("service", vec![service.to_owned()])]);
+        let options = ::bollard::query_parameters::ListTasksOptionsBuilder::new()
+            .filters(&filters)
+            .build();
+        self.client.list_tasks(Some(options)).await.map_err(map_err)
+    }
+
+    fn service_logs(
+        &self,
+        service: &str,
+        query: LogQuery,
+    ) -> BoxStream<'static, DockerResult<LogLine>> {
+        let mut options = LogsOptionsBuilder::new()
+            .follow(query.follow)
+            .stdout(true)
+            .stderr(true)
+            .timestamps(query.timestamps)
+            .tail(
+                &query
+                    .tail
+                    .map_or_else(|| "all".to_owned(), |n| n.to_string()),
+            );
+        if let Some(since) = query.since {
+            options = options.since(i32::try_from(since).unwrap_or(i32::MAX));
+        }
+        self.client
+            .service_logs(service, Some(options.build()))
+            .map(|item| {
+                let (stream, message) = match item.map_err(map_err)? {
+                    LogOutput::StdErr { message } => (LogStream::Stderr, message),
+                    LogOutput::StdOut { message }
+                    | LogOutput::Console { message }
+                    | LogOutput::StdIn { message } => (LogStream::Stdout, message),
+                };
+                Ok(LogLine {
+                    stream,
+                    text: String::from_utf8_lossy(&message).into_owned(),
+                })
+            })
+            .boxed()
+    }
+
     async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()> {
         // The sessions (TTY sessions: the shell and everything it started,
         // even with a cleared environment) of the processes carrying the
@@ -558,6 +709,16 @@ fn split_reference(image: &str) -> (&str, &str) {
     match image.rsplit_once(':') {
         Some((name, tag)) if !tag.contains('/') => (name, tag),
         _ => (image, "latest"),
+    }
+}
+
+/// Registry credentials as Docker takes them (`X-Registry-Auth`).
+fn credentials(auth: RegistryAuth) -> ::bollard::auth::DockerCredentials {
+    ::bollard::auth::DockerCredentials {
+        username: Some(auth.username),
+        password: Some(auth.password),
+        serveraddress: Some(auth.server),
+        ..Default::default()
     }
 }
 

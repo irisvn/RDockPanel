@@ -15,12 +15,19 @@ rustcms serve
 
 Settings beyond `.env` use `RUSTCMS_<SECTION>__<KEY>`, e.g. `RUSTCMS_APP__LISTEN=127.0.0.1:8001`.
 
+## A development Swarm
+
+`scripts/dev-swarm.sh` (run it again any time) makes the local engine a single-node Swarm and runs
+Traefik as the service `rdp-traefik` on ports 8080 and 8443, reading routes from
+`storage/traefik/dynamic`. `docker swarm leave --force` undoes it; other containers keep running.
+
 ## Tests
 
 | Variable | Effect |
 |---|---|
 | `RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql` | the test database server |
 | `RUSTCMS_TEST_BACKENDS=mysql` | run database tests on MySQL only (required) |
+| `PANEL_TEST_SWARM=1` | also run the Swarm tests (needs a Swarm manager: `scripts/dev-swarm.sh`): an overlay network and a service created, updated, removed |
 | `PANEL_TEST_DOCKER=1` | also run against the real Docker engine: pulls `alpine:3.20`, runs a container labelled `rdockpanel.test=1`, removes it |
 
 - Feature tests (`tests/feature/`) drive the app through HTTP with a `FakeDocker`

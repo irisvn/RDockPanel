@@ -8,5 +8,6 @@ mod docker;
 mod docker_routes;
 mod health;
 mod live;
+mod projects;
 mod terminal;
 // rustcms:tests

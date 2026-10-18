@@ -10,6 +10,9 @@ pub struct AppServiceProvider;
 impl ServiceProvider for AppServiceProvider {
     fn register(&self, app: &mut AppBuilder) {
         // Tests bind fakes over these (`bind` replaces by type).
+        crate::services::deploy_rules_service::configure(
+            crate::services::deploy_rules_service::PanelConfig::from_config(app.config()),
+        );
         app.bind(crate::services::docker_service::Docker::from_env());
         app.bind(crate::services::system_stats_service::SystemStats::from_env());
         let shutdown = app.shutdown();

@@ -1,0 +1,161 @@
+//! A service's storage: a named volume (`rdp_<project>_<service>_<name>`), or
+//! a host directory (bind mount). Bind mounts need `system.manage` and a
+//! source under one of the configured roots (`[panel] bind_roots`), resolved
+//! with its symlinks: never `/`, the Docker socket, `/proc`, the panel's own
+//! files.
+
+use rustcms::admin::*;
+use rustcms::{AppResult, ValidationErrors, async_trait};
+use sea_orm::DatabaseTransaction;
+use serde_json::Value;
+
+use crate::admin::text;
+use crate::http::controllers::docker_controller::SYSTEM_PERMISSION;
+use crate::models::service_mount;
+use crate::services::deploy_rules_service::{
+    bind_source, config, valid_container_path, valid_volume_name,
+};
+
+pub struct ServiceMountResource;
+
+#[async_trait]
+impl Resource for ServiceMountResource {
+    type Entity = service_mount::Entity;
+    const SLUG: &'static str = "service_mounts";
+
+    fn meta() -> ResourceMeta {
+        ResourceMeta::new("Mount")
+            .plural("Mounts")
+            .title("target")
+            .icon("folder")
+            .group("Deploy")
+            .lock_parent("service_id", "services")
+            .unique(
+                "service_mounts_service_target_unique",
+                &["service_id", "target"],
+                "is already mounted",
+            )
+    }
+
+    fn fields() -> Vec<Field> {
+        vec![
+            Field::column(service_mount::Column::ServiceId)
+                .belongs_to("services")
+                .required()
+                .filterable(),
+            Field::column(service_mount::Column::Kind).required(),
+            Field::column(service_mount::Column::Name).max_length(40),
+            Field::column(service_mount::Column::Source).max_length(512),
+            Field::column(service_mount::Column::Target)
+                .required()
+                .sortable()
+                .max_length(512),
+            Field::column(service_mount::Column::ReadOnly),
+        ]
+    }
+
+    fn form() -> Form {
+        Form::new().columns(2).schema(components![
+            SelectInput::make("service_id"),
+            SelectInput::make("kind")
+                .options([("volume", "Volume"), ("bind", "Host directory (bind)")]),
+            TextInput::make("name").help("Volume: its name, e.g. data"),
+            TextInput::make("source").help("Bind: a host directory under an allowed root"),
+            TextInput::make("target").help("Path inside the container, e.g. /var/lib/app"),
+            Toggle::make("read_only"),
+        ])
+    }
+
+    fn table() -> Table {
+        Table::new()
+            .columns(vec![
+                TextColumn::make("kind"),
+                TextColumn::make("name"),
+                TextColumn::make("source"),
+                TextColumn::make("target"),
+                BooleanColumn::make("read_only"),
+            ])
+            .default_sort("target")
+    }
+
+    async fn mutate_before_create(
+        ctx: &Ctx,
+        _txn: &DatabaseTransaction,
+        data: Data,
+    ) -> AppResult<Data> {
+        check(ctx, data, None)
+    }
+
+    async fn mutate_before_update(
+        ctx: &Ctx,
+        _txn: &DatabaseTransaction,
+        record: &service_mount::Model,
+        data: Data,
+    ) -> AppResult<Data> {
+        check(ctx, data, Some(record))
+    }
+}
+
+/// Checks the mount as it will be after this write; a bind's source is
+/// stored resolved.
+fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> AppResult<Data> {
+    let after = |field: &str, old: Option<&str>| -> Option<String> {
+        if data.contains_key(field) {
+            text(&data, field).map(str::to_owned)
+        } else {
+            old.map(str::to_owned)
+        }
+    };
+    let kind = after("kind", record.map(|r| r.kind.as_str())).unwrap_or_default();
+    let name = after("name", record.and_then(|r| r.name.as_deref())).filter(|s| !s.is_empty());
+    let source =
+        after("source", record.and_then(|r| r.source.as_deref())).filter(|s| !s.is_empty());
+    let target = after("target", record.map(|r| r.target.as_str()));
+    let mut errors = ValidationErrors::new();
+    match kind.as_str() {
+        "volume" => {
+            if !name.as_deref().is_some_and(valid_volume_name) {
+                errors.add(
+                    "name",
+                    ctx.t("must be 1-40 lowercase letters, digits, - and _"),
+                );
+            }
+            if source.is_some() {
+                errors.add("source", ctx.t("is only for host directories"));
+            }
+        }
+        "bind" => {
+            if !ctx.can(SYSTEM_PERMISSION) {
+                errors.add(
+                    "kind",
+                    ctx.t("host directories need the system.manage permission"),
+                );
+            } else if name.is_some() {
+                errors.add("name", ctx.t("is only for volumes"));
+            } else {
+                match source
+                    .as_deref()
+                    .map(|s| bind_source(s, &config().bind_roots))
+                {
+                    None => errors.add("source", ctx.t("is required")),
+                    Some(Err(refusal)) => errors.add("source", ctx.t(refusal.message())),
+                    Some(Ok(resolved)) => {
+                        data.insert(
+                            "source".to_owned(),
+                            Value::String(resolved.to_string_lossy().into_owned()),
+                        );
+                    }
+                }
+            }
+        }
+        _ => errors.add("kind", ctx.t("must be volume or bind")),
+    }
+    if !target.as_deref().is_some_and(valid_container_path) {
+        errors.add("target", ctx.t("must be an absolute path other than /"));
+    }
+    if errors.is_empty() {
+        Ok(data)
+    } else {
+        Err(errors.into())
+    }
+}

@@ -410,3 +410,224 @@ async fn against_the_real_engine() {
         std::panic::resume_unwind(panic);
     }
 }
+
+fn managed_spec(
+    name: &str,
+    project: &str,
+    service: &str,
+    managed: bool,
+) -> rdockpanel::services::docker_service::ServiceSpec {
+    let mut labels = std::collections::HashMap::new();
+    if managed {
+        labels.insert("rdockpanel.managed".to_owned(), "true".to_owned());
+        labels.insert("rdockpanel.project".to_owned(), project.to_owned());
+        labels.insert("rdockpanel.service".to_owned(), service.to_owned());
+    }
+    serde_json::from_value(serde_json::json!({
+        "Name": name,
+        "Labels": labels,
+        "TaskTemplate": {"ContainerSpec": {"Image": "alpine:3.20", "Command": ["sleep", "300"]}},
+        "Mode": {"Replicated": {"Replicas": 1}}
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn services_the_panel_did_not_deploy_are_never_taken_over() {
+    let (docker, _) = docker();
+    assert!(
+        docker
+            .managed_service("shop_web", "shop", "web")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    docker
+        .engine()
+        .create_service(managed_spec("shop_web", "shop", "web", true), None)
+        .await
+        .unwrap();
+    assert!(
+        docker
+            .managed_service("shop_web", "shop", "web")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    // Another project's, or nobody's: a conflict, whatever the name says.
+    assert!(matches!(
+        docker.managed_service("shop_web", "other", "web").await,
+        Err(DockerError::Conflict(_))
+    ));
+    docker
+        .engine()
+        .create_service(managed_spec("shop_api", "", "", false), None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        docker.managed_service("shop_api", "shop", "api").await,
+        Err(DockerError::Conflict(_))
+    ));
+    assert!(matches!(
+        docker.managed_service("../x", "shop", "x").await,
+        Err(DockerError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn foreign_networks_are_not_joined() {
+    use rdockpanel::services::docker_service::NetworkRequest;
+    let (docker, _) = docker();
+    let ours = |name: &str| NetworkRequest {
+        name: name.to_owned(),
+        driver: "overlay".to_owned(),
+        labels: [("rdockpanel.managed".to_owned(), "true".to_owned())].into(),
+        attachable: true,
+        internal: false,
+    };
+    // `web-net` exists, without the panel's labels.
+    assert!(matches!(
+        docker.ensure_network(ours("web-net")).await,
+        Err(DockerError::Conflict(_))
+    ));
+    let created = docker.ensure_network(ours("rdp_shop")).await.unwrap();
+    assert_eq!(
+        docker.ensure_network(ours("rdp_shop")).await.unwrap().id,
+        created.id
+    );
+    assert!(matches!(
+        docker.ensure_network(ours("../x")).await,
+        Err(DockerError::NotFound)
+    ));
+}
+
+/// With `PANEL_TEST_SWARM=1` (a Swarm manager): an overlay network and a
+/// service created, updated at its version, and removed.
+#[tokio::test]
+async fn against_a_real_swarm() {
+    if std::env::var_os("PANEL_TEST_SWARM").is_none() {
+        return;
+    }
+    use rdockpanel::services::docker_service::{NetworkRequest, SwarmRole};
+    let docker = Docker::new(BollardDocker::connect().expect("docker client"));
+    assert_eq!(docker.info().await.unwrap().swarm, SwarmRole::Manager);
+    let suffix = std::process::id();
+    let (project, network, name) = (
+        format!("t{suffix}"),
+        format!("rdp_t{suffix}"),
+        format!("t{suffix}_web"),
+    );
+    let api = docker.engine();
+
+    let request = NetworkRequest {
+        name: network.clone(),
+        driver: "overlay".to_owned(),
+        labels: [("rdockpanel.managed".to_owned(), "true".to_owned())].into(),
+        attachable: true,
+        internal: false,
+    };
+    let created = docker.ensure_network(request.clone()).await.unwrap();
+    assert_eq!(
+        docker.ensure_network(request).await.unwrap().id,
+        created.id,
+        "an existing network is kept"
+    );
+
+    let checks = std::panic::AssertUnwindSafe(async {
+        let mut spec = managed_spec(&name, &project, "web", true);
+        spec.task_template.as_mut().unwrap().networks = Some(vec![
+            rdockpanel::services::docker_service::NetworkAttachmentConfig {
+                target: Some(network.clone()),
+                ..Default::default()
+            },
+        ]);
+        api.create_service(spec.clone(), None).await.unwrap();
+        let service = docker
+            .managed_service(&name, &project, "web")
+            .await
+            .unwrap()
+            .expect("created");
+        let version = service.version.and_then(|v| v.index).unwrap();
+
+        // Running within a minute.
+        let mut running = false;
+        for _ in 0..60 {
+            let tasks = api.list_tasks(&name).await.unwrap();
+            if tasks.iter().any(|t| {
+                t.status.as_ref().and_then(|s| s.state)
+                    == Some(rdockpanel::services::docker_service::TaskState::RUNNING)
+            }) {
+                running = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        assert!(running, "no running task");
+
+        // An update needs the current version.
+        spec.mode =
+            serde_json::from_value(serde_json::json!({"Replicated": {"Replicas": 2}})).unwrap();
+        assert!(matches!(
+            api.update_service(&name, version + 99, spec.clone(), None)
+                .await,
+            Err(DockerError::Conflict(_))
+        ));
+        // At the version it has now (Swarm bumps it on its own), retried
+        // when it moved meanwhile.
+        let mut updated = false;
+        for _ in 0..5 {
+            let current = api
+                .inspect_service(&name)
+                .await
+                .unwrap()
+                .and_then(|s| s.version)
+                .and_then(|v| v.index)
+                .unwrap();
+            match api.update_service(&name, current, spec.clone(), None).await {
+                Ok(_) => {
+                    updated = true;
+                    break;
+                }
+                Err(DockerError::Conflict(_)) => continue,
+                Err(err) => panic!("{err}"),
+            }
+        }
+        assert!(updated);
+        // Scaled to two running replicas.
+        let mut running = 0;
+        for _ in 0..60 {
+            let tasks = api.list_tasks(&name).await.unwrap();
+            running = tasks
+                .iter()
+                .filter(|t| {
+                    t.desired_state
+                        == Some(rdockpanel::services::docker_service::TaskState::RUNNING)
+                })
+                .filter(|t| {
+                    t.status.as_ref().and_then(|s| s.state)
+                        == Some(rdockpanel::services::docker_service::TaskState::RUNNING)
+                })
+                .count();
+            if running == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        assert_eq!(running, 2);
+        let details = api.inspect_image("alpine:3.20").await.unwrap();
+        assert!(details.id.starts_with("sha256:"));
+    });
+    let outcome = futures_util::FutureExt::catch_unwind(checks).await;
+    let _ = api.delete_service(&name).await;
+    // The network goes once the service's tasks have left it.
+    for _ in 0..30 {
+        if api.remove_network(&network).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+    assert!(api.inspect_service(&name).await.unwrap().is_none());
+}

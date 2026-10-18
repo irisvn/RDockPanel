@@ -1,0 +1,11 @@
+# RDockPanel's own settings (`[panel]`; override with RUSTCMS_PANEL__<KEY>).
+
+# Host directories services may bind-mount, for users with `system.manage`.
+# Empty: no bind mounts (named volumes only). Each root must also be visible
+# to the panel at the same path (the installer mounts it read-only), so
+# sources are resolved (symlinks included) before they are allowed. Only list
+# directories no service and no untrusted user can write (see docs/security.md).
+bind_roots = []
+
+# Ports services may not publish: the proxy's, the panel's.
+reserved_ports = [80, 443, 3000, 8000, 8080, 8443]
