@@ -49,5 +49,5 @@ Deleting a project will also detach Traefik from its network and remove it.
 | 0.4.0: admin routes, server-sent events, hub, WebSocket, `*_FILE` secrets | Phase 1 | done |
 | 0.4.1 W8: encrypted columns, key rotation | Phase 2 environment variables, registry credentials | released, next |
 | 0.4.1 W4: scheduler | the deployment lease reaper (every minute); reconcile/drift, periodic prune, backups | released, in use |
-| W5: React extension host | richer pages | planned |
+| 0.5.0: React extension host (API v2) | the Phase 3 interface (dashboard, service pages, templates) | released, next |
 | TOTP | two-factor authentication | planned |
