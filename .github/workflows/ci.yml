@@ -60,4 +60,4 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
       - run: docker swarm init --advertise-addr 127.0.0.1
-      - run: cargo test --locked --test feature docker::
+      - run: "cargo test --locked --test feature docker::"
