@@ -11,6 +11,7 @@ import { ServicePage } from "./apps/ServicePage";
 import { Templates } from "./apps/Templates";
 import { Settings } from "./settings/Settings";
 import { Actions } from "./actions/Actions";
+import { Palette } from "./lib/Palette";
 import type { Overview } from "./apps/types";
 import { StatusDot } from "./lib/ui";
 import { bindSession } from "./lib/resources";
@@ -105,23 +106,44 @@ function ServiceRoute(props: PageProps<unknown> & { project: string; service: st
 function Apps(props: PageProps<{ user?: string | number }>) {
   bindSession(String(props.data.user ?? ""));
   const [project, service, tab] = props.path ? props.path.split("/") : [];
-  if (project && service) return <ServiceRoute {...props} project={project} service={service} tab={tab ?? "overview"} />;
-  if (project) return <ProjectPage {...props} project={project} />;
-  return <Dashboard {...props} />;
+  const page =
+    project && service ? (
+      <ServiceRoute {...props} project={project} service={service} tab={tab ?? "overview"} />
+    ) : project ? (
+      <ProjectPage {...props} project={project} />
+    ) : (
+      <Dashboard {...props} />
+    );
+  return (
+    <>
+      {page}
+      <Palette {...props} />
+    </>
+  );
 }
 
 registerPage("rdockpanel/dashboard", Apps as (p: PageProps<unknown>) => ReturnType<typeof Apps>);
 
 function SettingsRoute(props: PageProps<{ user?: string | number }>) {
   bindSession(String(props.data.user ?? ""));
-  return <Settings {...props} />;
+  return (
+    <>
+      <Settings {...props} />
+      <Palette {...props} />
+    </>
+  );
 }
 
 registerPage("rdockpanel/settings", SettingsRoute as (p: PageProps<unknown>) => ReturnType<typeof SettingsRoute>);
 
 function ActionsRoute(props: PageProps<{ user?: string | number }>) {
   bindSession(String(props.data.user ?? ""));
-  return <Actions {...props} />;
+  return (
+    <>
+      <Actions {...props} />
+      <Palette {...props} />
+    </>
+  );
 }
 
 registerPage("rdockpanel/actions", ActionsRoute as (p: PageProps<unknown>) => ReturnType<typeof ActionsRoute>);

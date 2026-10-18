@@ -306,6 +306,10 @@ window.rustcms?.registerTranslations?.("vi", {
   Where: "Ở đâu",
   ok: "xong",
   Monitor: "Giám sát",
+  "Go to…": "Đi tới…",
+  "Search projects, services, pages": "Tìm project, service, trang",
+  Page: "Trang",
+  Project: "Project",
 });
 
 export {};
