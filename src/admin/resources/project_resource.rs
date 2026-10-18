@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use rustcms::admin::*;
 use rustcms::{AppResult, ValidationErrors, async_trait};
-use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect,
+};
 
 use crate::admin::{int, text};
 use crate::models::{project, service};
@@ -82,6 +84,11 @@ impl Resource for ProjectResource {
         data: Data,
     ) -> AppResult<Data> {
         check_name(ctx, &data)?;
+        // Locked: deployments asked for meanwhile (they lock it shared) wait.
+        project::Entity::find_by_id(record.id)
+            .lock_exclusive()
+            .one(txn)
+            .await?;
         if text(&data, "name").is_some_and(|name| name != record.name)
             && deployed_services(txn, record.id).await? > 0
         {
@@ -109,7 +116,7 @@ fn check_name(ctx: &Ctx, data: &Data) -> AppResult<()> {
 async fn deployed_services(txn: &DatabaseTransaction, project: i64) -> AppResult<u64> {
     Ok(service::Entity::find()
         .filter(service::Column::ProjectId.eq(project))
-        .filter(service::Column::DeployedAt.is_not_null())
+        .filter(service::Column::Status.ne(service::NEW))
         .count(txn)
         .await?)
 }

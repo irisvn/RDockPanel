@@ -90,7 +90,37 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
   `http://<project>_<service>:<port>`.
 
 Snapshot tests (`src/services/snapshots/`, insta) pin the generated spec and routes; a Swarm test runs a
-generated spec on a real engine. Deploying comes next (see the [roadmap](roadmap.md)).
+generated spec on a real engine.
+
+### Deployments
+
+`services/deployment_service.rs` runs them:
+
+1. **Request** (in the action's transaction): the deployment row is written `queued` with its snapshot,
+   and the service's lock is taken with one conditional `UPDATE` (free, or its lease expired: an hour
+   while queued, 5 minutes once running and not renewed), the service and project rows locked so a
+   rename waits or goes first. Taken already: the action answers 409 `deployment_in_progress`; a
+   deployment whose expired lock is taken over is marked `interrupted`. Then the `RunDeployment`
+   job is dispatched (queue `deploy`, one attempt, 15 minutes). A rollback applies the earlier
+   configuration and image under the service's names now.
+2. **Run** (the job): it goes on only while the service's lock is still its own and unexpired
+   (fencing by deployment id), renewing the lease before each change to Docker, while pulling and at
+   each look at Swarm. Destroy removes the service. Otherwise: the bind mounts are checked again,
+   the project network is ensured, the image is pulled and pinned (Deploy and Restart; Start and Stop
+   reuse the running image, Rollback the recorded one), the spec is created or updated (Restart bumps
+   `force_update`), and the job waits until Swarm converged: an update's status (a stale one from the
+   previous update is ignored; paused is a failure, rollback completed is `rolled_back`, the service
+   then running or stopped as the restored spec says), else the tasks: as many running (and healthy)
+   as wanted, all of the new task template (its hash is the containers' `rdockpanel.template` label,
+   so a restart or a new command is told apart from the old tasks), or, when stopped, every task
+   ended. Steps go to the deployment's log, saved about every second.
+3. **Finish** (one transaction): the deployment's status and pinned image, the service's status, and
+   the lock released only if still its own.
+
+At boot, then every minute, deployments whose lease expired (their run died, or its job timed out)
+become `interrupted` and free their service.
+The service page's aside (`ServiceLiveSlot`, `service-live.js`) shows the state, pending changes, the
+action buttons and the latest deployment, its log followed live over SSE.
 
 ## Data
 

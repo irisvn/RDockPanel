@@ -184,9 +184,7 @@ impl Snapshot {
     /// Tells configurations apart (`services.deployed_spec_hash`): SHA-256 of
     /// the snapshot's JSON (fields in declaration order, lists sorted).
     pub fn hash(&self) -> String {
-        let json = serde_json::to_vec(self).expect("a snapshot serializes");
-        let digest = Sha256::digest(json);
-        digest.iter().map(|b| format!("{b:02x}")).collect()
+        sha256_hex(&serde_json::to_vec(self).expect("a snapshot serializes"))
     }
 
     pub fn service_name(&self) -> String {
@@ -331,6 +329,19 @@ pub struct Desired {
     /// `None` when the service has no domain or is stopped (no file).
     pub routes: Option<TraefikFile>,
     pub hash: String,
+    /// The task template's own hash, also a container label
+    /// ([`TEMPLATE_LABEL`]): which tasks run this spec.
+    pub template: String,
+}
+
+/// The container label naming the task template a task runs.
+pub const TEMPLATE_LABEL: &str = "rdockpanel.template";
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// The Swarm service and Traefik routes of `snapshot`, running `image`.
@@ -382,16 +393,21 @@ pub fn desired(snapshot: &Snapshot, image: &PinnedImage, options: &DeployOptions
     } else {
         "stop-first"
     };
+    let mut template = json!({
+        "ContainerSpec": container,
+        "Resources": resources,
+        "RestartPolicy": {"Condition": "any", "Delay": 5 * NANOS, "MaxAttempts": 0},
+        "Networks": [{"Target": network_name(&snapshot.project), "Aliases": [snapshot.service]}],
+        "ForceUpdate": options.force_update,
+    });
+    // Tasks tell which template they run (a restart, a new command or mount
+    // with the same image are told apart from the previous tasks).
+    let template_hash = sha256_hex(&serde_json::to_vec(&template).expect("a template serializes"));
+    template["ContainerSpec"]["Labels"][TEMPLATE_LABEL] = json!(template_hash);
     let spec = json!({
         "Name": name,
         "Labels": labels,
-        "TaskTemplate": {
-            "ContainerSpec": container,
-            "Resources": resources,
-            "RestartPolicy": {"Condition": "any", "Delay": 5 * NANOS, "MaxAttempts": 0},
-            "Networks": [{"Target": network_name(&snapshot.project), "Aliases": [snapshot.service]}],
-            "ForceUpdate": options.force_update,
-        },
+        "TaskTemplate": template,
         "Mode": {"Replicated": {"Replicas": if snapshot.running { snapshot.replicas } else { 0 }}},
         "UpdateConfig": {
             "Parallelism": 1,
@@ -416,7 +432,12 @@ pub fn desired(snapshot: &Snapshot, image: &PinnedImage, options: &DeployOptions
     } else {
         None
     };
-    Desired { spec, routes, hash }
+    Desired {
+        spec,
+        routes,
+        hash,
+        template: template_hash,
+    }
 }
 
 fn limits(cpu_millis: Option<u32>, mem_mb: Option<u32>) -> Value {
@@ -736,6 +757,38 @@ mod tests {
         let after = desired(&changed, &pinned(), &production());
         assert_ne!(after.hash, base.hash);
         assert_eq!(after.spec.task_template, base.spec.task_template);
+    }
+
+    #[test]
+    fn the_template_follows_what_tasks_run() {
+        let options = DeployOptions::default();
+        let template = |s: &Snapshot, o: &DeployOptions| desired(s, &pinned(), o).template;
+        let base = template(&snapshot(), &options);
+        // More replicas, another domain: the same tasks.
+        let mut scaled = snapshot();
+        scaled.replicas += 3;
+        scaled.domains.pop();
+        assert_eq!(template(&scaled, &options), base);
+        // A restart, another command: new tasks.
+        let restarted = DeployOptions {
+            force_update: 1,
+            ..DeployOptions::default()
+        };
+        assert_ne!(template(&snapshot(), &restarted), base);
+        let mut command = snapshot();
+        command.command = Some("nginx -g 'daemon off;'".to_owned());
+        assert_ne!(template(&command, &options), base);
+        // Carried by the containers.
+        let out = desired(&snapshot(), &pinned(), &options);
+        let labels = out
+            .spec
+            .task_template
+            .unwrap()
+            .container_spec
+            .unwrap()
+            .labels
+            .unwrap();
+        assert_eq!(labels[TEMPLATE_LABEL], base);
     }
 
     #[test]

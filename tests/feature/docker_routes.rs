@@ -57,6 +57,10 @@ db_test!(
                 read("/server/live"),
                 read("/docker/containers/web/stats"),
                 read("/docker/containers/web/logs/follow"),
+                // A deployment's log needs deployments.view, which none of these has.
+                Case::new(Method::GET, "/deploy/deployments/1/log")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
                 // The terminal needs docker.exec, which none of these has (its
                 // own tests open it: tests/feature/terminal.rs).
                 Case::new(Method::GET, "/docker/containers/web/exec")

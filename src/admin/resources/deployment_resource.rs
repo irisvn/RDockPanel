@@ -4,9 +4,12 @@
 use std::sync::Arc;
 
 use rustcms::admin::*;
-use rustcms::async_trait;
+use rustcms::{AppError, async_trait};
+use sea_orm::EntityTrait;
 
-use crate::models::deployment;
+use crate::jobs::run_deployment::RunDeployment;
+use crate::models::{deployment, service};
+use crate::services::deployment_service::{self, SUCCEEDED, Trigger};
 
 pub struct DeploymentResource;
 
@@ -85,15 +88,68 @@ impl Resource for DeploymentResource {
     fn policy() -> Arc<dyn Policy> {
         Arc::new(ReadOnly)
     }
+
+    /// "Roll back to this": deploys a succeeded deployment's configuration
+    /// and image again (`services.deploy`).
+    fn actions() -> Vec<Action<deployment::Entity>> {
+        vec![
+            Action::<deployment::Entity>::new("rollback", |ctx, txn, deployments, _| {
+                Box::pin(async move {
+                    let user = ctx.principal.id.parse().ok();
+                    for earlier in deployments {
+                        let service = service::Entity::find_by_id(earlier.service_id)
+                            .one(txn)
+                            .await?
+                            .ok_or(AppError::NotFound)?;
+                        let row = deployment_service::request(
+                            txn,
+                            &service,
+                            Trigger::Rollback,
+                            Some(&earlier),
+                            user,
+                        )
+                        .await?;
+                        ctx.dispatch(
+                            txn,
+                            &RunDeployment {
+                                deployment_id: row.id,
+                            },
+                        )
+                        .await?;
+                    }
+                    Ok(())
+                })
+            })
+            .label("Roll back to this")
+            .requires_confirmation("Deploy this configuration and image again?"),
+        ]
+    }
 }
 
-/// Viewing needs the permissions; nobody writes through the panel.
+/// Viewing needs the permissions; nobody writes through the panel; rolling
+/// back needs `services.deploy`, to a deployment that succeeded running a
+/// recorded image (not a stop or a destroy).
+fn can_return_to(record: &Data) -> bool {
+    let field = |name: &str| record.get(name).and_then(|v| v.as_str());
+    field("status") == Some(SUCCEEDED)
+        && field("image_digest").is_some_and(|image| !image.is_empty())
+        && !matches!(field("trigger"), Some("stop" | "destroy"))
+}
+
 struct ReadOnly;
 
 #[async_trait]
 impl Policy for ReadOnly {
-    async fn allows(&self, ctx: &Ctx, ability: &str, _record: Option<&Data>) -> bool {
-        matches!(ability, "view_any" | "view") && ctx.can(&format!("deployments.{ability}"))
+    async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
+        match ability {
+            "view_any" | "view" => ctx.can(&format!("deployments.{ability}")),
+            "rollback" => {
+                ctx.can("deployments.view")
+                    && ctx.can("services.deploy")
+                    && record.is_none_or(can_return_to)
+            }
+            _ => false,
+        }
     }
 
     async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {

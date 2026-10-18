@@ -68,3 +68,7 @@
 
 .rdp-terminal { height: 26rem; padding: 0.5rem; border-radius: 0.375rem; background: #0b0b0e; overflow: hidden; }
 .rdp-terminal .xterm { height: 100%; }
+.rdp-slot { gap: 0.6rem; }
+.rdp-facts-tight { grid-template-columns: 1fr; gap: 0.35rem; }
+.rdp-notice-warn { color: var(--warning, var(--foreground)); border-color: var(--warning, var(--border)); }
+.rdp-badge-error { color: var(--destructive); border-color: var(--destructive); }

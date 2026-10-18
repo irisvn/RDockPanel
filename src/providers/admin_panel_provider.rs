@@ -21,6 +21,7 @@ pub fn provider() -> AdminProvider {
         .page::<crate::admin::pages::volumes_page::VolumesPage>()
         .page::<crate::admin::pages::networks_page::NetworksPage>()
         // rustcms:pages
+        .slot::<crate::admin::slots::service_live_slot::ServiceLiveSlot>()
         // The terminal's xterm.js, its CSP shim first (resources/admin/js/rdockpanel/vendor/README.md).
         .extension_script(
             "xterm-csp-shim",
@@ -62,6 +63,10 @@ pub fn provider() -> AdminProvider {
         .extension_script(
             "networks",
             include_str!("../../resources/admin/js/rdockpanel/networks.js"),
+        )
+        .extension_script(
+            "service-live",
+            include_str!("../../resources/admin/js/rdockpanel/service-live.js"),
         )
         .extension_style(
             "panel",

@@ -187,7 +187,7 @@ pub struct ContainerStats {
 
 pub use ::bollard::models::{
     NetworkAttachmentConfig, ObjectVersion, Service as SwarmService, ServiceSpec,
-    Task as SwarmTask, TaskState, TaskStatus,
+    ServiceUpdateStatus, ServiceUpdateStatusStateEnum, Task as SwarmTask, TaskState, TaskStatus,
 };
 
 /// Marks the Swarm services, networks and volumes the panel deploys (with

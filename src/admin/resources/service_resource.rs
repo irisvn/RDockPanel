@@ -7,12 +7,14 @@ use std::sync::Arc;
 
 use rustcms::admin::*;
 use rustcms::{AppResult, ValidationErrors, async_trait};
-use sea_orm::DatabaseTransaction;
+use sea_orm::{DatabaseTransaction, EntityTrait, QuerySelect};
 
 use crate::admin::{int, is_set, text};
-use crate::models::service;
+use crate::jobs::run_deployment::RunDeployment;
+use crate::models::service::{self, NEW};
 use crate::services::deploy_rules_service::{valid_image_reference, valid_name};
 use crate::services::deploy_service::command_args;
+use crate::services::deployment_service::{self, Trigger};
 
 pub struct ServiceResource;
 
@@ -121,6 +123,22 @@ impl Resource for ServiceResource {
             .default_sort("name")
     }
 
+    /// Deploy, start, stop, restart (`services.deploy`) and destroy
+    /// (`services.destroy`): each asks for a deployment, run in the background.
+    fn actions() -> Vec<Action<service::Entity>> {
+        vec![
+            deployment_action("deploy", Trigger::Deploy, "Deploy").icon("box"),
+            deployment_action("start", Trigger::Start, "Start"),
+            deployment_action("stop", Trigger::Stop, "Stop")
+                .requires_confirmation("Stop this service? Its tasks are removed."),
+            deployment_action("restart", Trigger::Restart, "Restart"),
+            deployment_action("destroy", Trigger::Destroy, "Destroy")
+                .ability("destroy")
+                .color("danger")
+                .requires_confirmation("Remove this service from Docker? Its volumes are kept."),
+        ]
+    }
+
     fn relations() -> Vec<Relation> {
         vec![
             Relation::has_many("domains", "service_domains", "service_id").label("Domains"),
@@ -147,12 +165,19 @@ impl Resource for ServiceResource {
 
     async fn mutate_before_update(
         ctx: &Ctx,
-        _txn: &DatabaseTransaction,
+        txn: &DatabaseTransaction,
         record: &service::Model,
         data: Data,
     ) -> AppResult<Data> {
         let data = normalize(data);
-        check(ctx, &data, Some(record))?;
+        // Read again, locked: a deployment asked for meanwhile waits for
+        // this edit, or went first (then its status is checked here).
+        let record = service::Entity::find_by_id(record.id)
+            .lock_exclusive()
+            .one(txn)
+            .await?
+            .ok_or(rustcms::AppError::NotFound)?;
+        check(ctx, &data, Some(&record))?;
         Ok(data)
     }
 }
@@ -236,8 +261,9 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
             errors.add(reservation, ctx.t("cannot exceed the limit"));
         }
     }
-    // Once deployed, the Docker objects carry the names.
-    if let Some(record) = record.filter(|r| r.deployed_at.is_some()) {
+    // Once deployed (or while a first deployment runs), the Docker objects
+    // carry the names.
+    if let Some(record) = record.filter(|r| r.status != NEW) {
         if text(data, "name").is_some_and(|name| name != record.name) {
             errors.add("name", ctx.t("cannot change once deployed"));
         }
@@ -252,6 +278,27 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
     }
 }
 
+fn deployment_action(name: &'static str, trigger: Trigger, label: &str) -> Action<service::Entity> {
+    Action::<service::Entity>::new(name, move |ctx, txn, services, _| {
+        Box::pin(async move {
+            let user = ctx.principal.id.parse().ok();
+            for service in services {
+                let row = deployment_service::request(txn, &service, trigger, None, user).await?;
+                ctx.dispatch(
+                    txn,
+                    &RunDeployment {
+                        deployment_id: row.id,
+                    },
+                )
+                .await?;
+            }
+            Ok(())
+        })
+    })
+    .label(label)
+    .ability("deploy")
+}
+
 /// The permissions, and no delete once deployed (Destroy first).
 struct ServicePolicy;
 
@@ -261,7 +308,9 @@ impl Policy for ServicePolicy {
         if !ctx.can(&format!("services.{ability}")) {
             return false;
         }
-        !(ability == "delete" && record.is_some_and(|r| is_set(r, "deployed_at")))
+        // Deployed, deploying, or left by a failed first run: Destroy first.
+        !(ability == "delete"
+            && record.is_some_and(|r| r.get("status").and_then(|s| s.as_str()) != Some(NEW)))
     }
 
     async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {

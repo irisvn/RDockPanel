@@ -43,12 +43,24 @@ jobs:
       - run: cargo test --locked
 
   # The Docker and Swarm code against the runner's real engine, made a
-  # single-node Swarm (the Docker tests need no database).
+  # single-node Swarm, and a whole deployment through the panel.
   docker:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval 2s --health-timeout 3s --health-retries 60
+        ports:
+          - 3306:3306
     env:
       PANEL_TEST_DOCKER: "1"
       PANEL_TEST_SWARM: "1"
+      RUSTCMS_TEST_MYSQL: mysql://root:root@127.0.0.1:3306/mysql
+      RUSTCMS_TEST_BACKENDS: mysql
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -61,3 +73,4 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
       - run: docker swarm init --advertise-addr 127.0.0.1
       - run: "cargo test --locked --test feature docker::"
+      - run: cargo test --locked --test feature deployments_on_a_real_swarm

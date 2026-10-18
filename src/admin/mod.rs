@@ -3,6 +3,7 @@
 
 pub mod pages;
 pub mod resources;
+pub mod slots;
 
 use rustcms::admin::Data;
 use serde_json::Value;

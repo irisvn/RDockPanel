@@ -21,11 +21,20 @@ impl ServiceProvider for AppServiceProvider {
         app.seeder(crate::database::seeders::DatabaseSeeder);
         // rustcms:seeders
         app.job::<crate::jobs::pull_image::PullImage>();
+        app.job::<crate::jobs::run_deployment::RunDeployment>();
         // rustcms:jobs
         // rustcms:commands
     }
 
     async fn boot(&self, state: &AppState) -> anyhow::Result<()> {
+        // Deployments whose run died: interrupted, their services released.
+        match crate::services::deployment_service::recover_interrupted(state.db()).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "deployments interrupted by a stop"),
+            Err(err) => tracing::debug!(%err, "interrupted deployments not checked"),
+        }
+        // Then every minute: a run whose job timed out or died stops renewing.
+        crate::services::deployment_service::reap_every_minute(state);
         use crate::http::controllers::docker_controller::TERMINAL_SESSION;
         use crate::services::action_service::interrupted_terminals;
         use crate::services::docker_service::Docker;

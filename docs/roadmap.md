@@ -13,7 +13,9 @@ RDockPanel aims at EasyPanel's features, all free.
 
 Done so far: projects, services, domains, ports, mounts and deployments in the panel with their rules;
 the Swarm API (services, tasks, networks, images); a development Swarm script; CI on a real Swarm; the
-service spec and Traefik routes generated from the configuration, with image digests pinned.
+service spec and Traefik routes generated from the configuration, with image digests pinned;
+deployments (Deploy, Start, Stop, Restart, Destroy, Rollback) run as jobs with a per-service lock,
+convergence checks, automatic rollback and a live log.
 
 - Projects and services from a Docker image: replicas, resources, health checks, volumes, ports.
 - Deployments as Swarm services: rolling updates (start-first), automatic rollback, deployment history

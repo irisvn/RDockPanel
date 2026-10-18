@@ -141,6 +141,7 @@ db_test!(
             .unwrap();
         let mut active = row.into_active_model();
         active.deployed_at = Set(Some(Utc::now()));
+        active.status = Set("running".to_owned());
         active.update(app.state().db()).await.unwrap();
 
         let url = record(&app, "services", &service);

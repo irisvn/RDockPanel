@@ -19,12 +19,18 @@ The Deploy group's resources use the panel's standard permissions, one set per r
 `service_domains.*`, `service_ports.*`, `service_mounts.*`, and `deployments.view_any` /
 `deployments.view` (deployments are written by the panel only). Besides:
 
+- `services.deploy` runs a service's Deploy, Start, Stop and Restart, and a deployment's Rollback
+  (to a deployment that succeeded running a recorded image: not a Stop or a Destroy);
+- `services.destroy` removes a service from Swarm (Destroy; its volumes are kept);
+- a service's deployments (their log, error and image), on its page too, need `deployments.view`;
+
 - a **host directory** (bind mount) needs `system.manage`, and a source under one of the
   `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, the
   Docker socket, `/proc`, `/sys`, `/dev`, Docker's and the panel's own files, and any directory above
   them (`/run`, `/etc`, `/var`), are always refused;
-- a service, once deployed, keeps its name and project, and cannot be deleted before it is destroyed;
-  a project with services cannot be deleted, nor renamed once one of them was deployed;
+- a service, once deployed (from its first deployment on, even a failed one), keeps its name and
+  project, and cannot be deleted before it is destroyed; a project with services cannot be deleted,
+  nor renamed once one of them was deployed;
 - the ports in `[panel] reserved_ports` (the proxy's and the panel's) cannot be published.
 
 ## The panel's own objects

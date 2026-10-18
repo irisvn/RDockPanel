@@ -5,7 +5,9 @@
 
 use rustcms::prelude::*;
 
-use crate::http::controllers::{docker_controller as docker, server_controller as server};
+use crate::http::controllers::{
+    deploy_controller as deploy, docker_controller as docker, server_controller as server,
+};
 
 /// Every admin route, with the access it requires.
 pub fn routes() -> AdminRoutes {
@@ -58,5 +60,13 @@ pub fn routes() -> AdminRoutes {
                 .get("/info", AdminAccess::can("server.view"), server::info)
                 .get("/samples", AdminAccess::can("server.view"), server::samples)
                 .events("/live", AdminAccess::can("server.view"), server::live),
+        )
+        .nest(
+            "/deploy",
+            AdminRoutes::scope().events(
+                "/deployments/{id}/log",
+                AdminAccess::can("deployments.view"),
+                deploy::log,
+            ),
         )
 }

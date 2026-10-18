@@ -9,8 +9,9 @@ use futures_util::stream::{self, BoxStream};
 use rdockpanel::services::docker_service::{
     ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
     DockerResult, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream, NetworkItem,
-    NetworkRequest, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec, SwarmRole, SwarmService,
-    SwarmTask, TermSize, VolumeItem,
+    NetworkRequest, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec, ServiceUpdateStatus,
+    ServiceUpdateStatusStateEnum, SwarmRole, SwarmService, SwarmTask, TaskState, TermSize,
+    VolumeItem,
 };
 use rustcms::async_trait;
 use serde_json::{Value, json};
@@ -23,6 +24,12 @@ pub struct FakeDocker {
     pub images: Arc<Mutex<Vec<ImageItem>>>,
     /// Swarm services by name.
     pub services: Arc<Mutex<HashMap<String, SwarmService>>>,
+    /// The state every task reports (default: running).
+    pub task_state: Arc<Mutex<Option<TaskState>>>,
+    /// The update status an update leaves (default: none, like a create).
+    pub update_state: Arc<Mutex<Option<ServiceUpdateStatusStateEnum>>>,
+    /// A stopped service's task that Swarm wants shut down but still runs.
+    pub lingering: Arc<Mutex<bool>>,
     /// `"restart web"`, `"remove web"`, `"prune rdockpanel.system"`, …
     pub calls: Arc<Mutex<Vec<String>>>,
 }
@@ -328,6 +335,17 @@ impl DockerApi for FakeDocker {
             index: Some(current + 1),
         });
         service.spec = Some(spec);
+        if let Some(state) = *self.update_state.lock().unwrap() {
+            service.update_status = Some(ServiceUpdateStatus {
+                state: Some(state),
+                started_at: serde_json::from_value(serde_json::json!(
+                    chrono::Utc::now().to_rfc3339()
+                ))
+                .ok(),
+                message: Some(format!("update {state}")),
+                ..Default::default()
+            });
+        }
         Ok(vec![])
     }
     async fn delete_service(&self, name: &str) -> DockerResult<()> {
@@ -340,24 +358,53 @@ impl DockerApi for FakeDocker {
         Ok(())
     }
     /// One running task per replica.
+    /// One task per replica, running the service's current task template,
+    /// in the state set by `task_state`.
     async fn list_tasks(&self, service: &str) -> DockerResult<Vec<SwarmTask>> {
         let services = self.services.lock().unwrap();
         let Some(found) = services.get(service) else {
             return Ok(vec![]);
         };
-        let replicas = found
-            .spec
+        let spec = found.spec.clone().unwrap_or_default();
+        let replicas = spec
+            .mode
             .as_ref()
-            .and_then(|s| s.mode.as_ref())
             .and_then(|m| m.replicated.as_ref())
             .and_then(|r| r.replicas)
             .unwrap_or(1);
+        let state = self
+            .task_state
+            .lock()
+            .unwrap()
+            .unwrap_or(TaskState::RUNNING);
+        let now = serde_json::from_value(serde_json::json!(chrono::Utc::now().to_rfc3339())).ok();
+        if replicas == 0 && *self.lingering.lock().unwrap() {
+            return Ok(vec![SwarmTask {
+                id: Some(format!("task-{service}-1")),
+                slot: Some(1),
+                spec: spec.task_template.clone(),
+                desired_state: Some(TaskState::SHUTDOWN),
+                status: Some(rdockpanel::services::docker_service::TaskStatus {
+                    state: Some(TaskState::RUNNING),
+                    timestamp: now,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]);
+        }
+        // A failing task is restarted by Swarm: three tries per slot.
+        let tries = if state == TaskState::FAILED { 3 } else { 1 };
         Ok((1..=replicas)
+            .flat_map(|slot| std::iter::repeat_n(slot, tries))
             .map(|slot| SwarmTask {
                 id: Some(format!("task-{service}-{slot}")),
                 slot: Some(slot),
+                spec: spec.task_template.clone(),
+                desired_state: Some(TaskState::RUNNING),
                 status: Some(rdockpanel::services::docker_service::TaskStatus {
-                    state: Some(rdockpanel::services::docker_service::TaskState::RUNNING),
+                    state: Some(state),
+                    timestamp: now.clone(),
+                    err: (state == TaskState::FAILED).then(|| "exit code 1".to_owned()),
                     ..Default::default()
                 }),
                 ..Default::default()

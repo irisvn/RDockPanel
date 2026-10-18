@@ -3,6 +3,7 @@
 pub mod action_service;
 pub mod deploy_rules_service;
 pub mod deploy_service;
+pub mod deployment_service;
 pub mod docker_service;
 pub mod live_service;
 pub mod system_stats_service;

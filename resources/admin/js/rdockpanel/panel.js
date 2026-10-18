@@ -71,6 +71,28 @@
     return null;
   }
 
+  // Runs the action `name` of the resource `slug` on `keys` (the panel's own
+  // action route: same permissions, locks and audit as from its lists).
+  async function resourceAction(slug, name, keys) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await fetch(`${base()}/api/resources/${slug}/actions/${name}`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": await csrf(attempt > 0) },
+        body: JSON.stringify({ keys }),
+      });
+      const text = await response.text();
+      const json = text ? JSON.parse(text) : null;
+      if (response.ok) {
+        if (json?.denied?.length) throw new ApiError(403, "Not allowed");
+        return json;
+      }
+      if (attempt === 0 && json?.code === "csrf_mismatch") continue;
+      throw new ApiError(response.status, messageOf(response.status, json), json);
+    }
+    return null;
+  }
+
   // h("button", { className: "rdp-btn", onclick }, "Text", child, …)
   function h(tag, props, ...children) {
     const element = document.createElement(tag);
@@ -215,7 +237,7 @@
     else note.error(t("Live updates stopped."));
   }
 
-  window.rdockPanel = { showState, api, ApiError, h, bytes, percent, date, duration, shortId, poll, table, badge, button, act, page };
+  window.rdockPanel = { showState, resourceAction, api, ApiError, h, bytes, percent, date, duration, shortId, poll, table, badge, button, act, page };
 
   window.rustcms.registerTranslations("vi", {
     Server: "Máy chủ",

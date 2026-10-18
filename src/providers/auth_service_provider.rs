@@ -14,4 +14,7 @@ pub fn provider(api: &ApiRoutes, admin: &AdminRoutes) -> AuthProvider {
             crate::http::controllers::docker_controller::SYSTEM_PERMISSION,
             "system",
         )
+        // Deploying, starting, stopping, restarting and rolling back services; destroying them.
+        .permission(rustcms::auth::ADMIN_GUARD, "services.deploy", "services")
+        .permission(rustcms::auth::ADMIN_GUARD, "services.destroy", "services")
 }

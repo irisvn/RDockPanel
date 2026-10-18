@@ -1,9 +1,13 @@
 //! `services` table: an app deployed as a Docker Swarm service
 //! (`<project>_<service>`). What is configured here becomes the service on
-//! the next deployment; `deployed_at` marks the first one (after which the
-//! name and the project are fixed and deleting needs Destroy first).
+//! the next deployment; `deployed_at` marks the first one. Once its status
+//! is no longer [`NEW`] (deploying, deployed, or left by a failed first run),
+//! the name and the project are fixed and deleting needs Destroy first.
 
 use sea_orm::entity::prelude::*;
+
+/// The status of a service Docker has never had (or no longer has: destroyed).
+pub const NEW: &str = "new";
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "services")]

@@ -42,7 +42,8 @@ expression: canonical(&out.spec)
       "Labels": {
         "rdockpanel.managed": "true",
         "rdockpanel.project": "shop",
-        "rdockpanel.service": "web"
+        "rdockpanel.service": "web",
+        "rdockpanel.template": "477b59031a3d97cdbaabf14279420f6a1e18415f0e35557588dc25322c8e65ea"
       },
       "Mounts": [
         {

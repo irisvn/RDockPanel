@@ -32,6 +32,16 @@ for the panel's own pages, not for scripts: token-authenticated API routes come 
 | GET / POST | `/networks` | docker.view / docker.manage | list / create `{"name","driver":"bridge"\|"overlay"}` |
 | DELETE | `/networks/{id or name}` | docker.manage | remove |
 
+## Deployments (`/deploy`)
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET (SSE) | `/deployments/{id}/log` | deployments.view | `log` events (`{"append": "…"}`, or `{"reset": "…"}` with the whole log), `status` events (the deployment without its log) when it changes; ends once the deployment finished |
+
+Deploy, Start, Stop, Restart, Destroy and Rollback are resource actions
+(`POST /admin/api/resources/services/actions/{name}`, `…/deployments/actions/rollback`). A service
+with a deployment under way answers 409 `deployment_in_progress`.
+
 ## Server (`/server`)
 
 | Method | Path | Permission | |
