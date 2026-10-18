@@ -31,9 +31,19 @@ who can replace a directory there with a symlink could point a later start elsew
 
 - Deploying needs `services.deploy`, destroying `services.destroy`; a deployment's log, error and
   image need `deployments.view` (also on the service page).
-- The configuration snapshot kept with each deployment holds no environment variables or registry
-  credentials (they will be encrypted columns, RustCMS W8). A secret written into a service's
-  command or health check is stored as typed: don't put secrets there.
+- Environment variables and the registry password are sealed with `APP_KEY` (RustCMS encrypted
+  columns): the panel shows their names (and whether a password is set), never their values, not
+  even to the user who set them; the audit log, the deployments' configuration and their logs never
+  hold them. Losing `APP_KEY` loses them (set them again); rotate it with `APP_PREVIOUS_KEYS` and
+  `rustcms key:reencrypt`.
+- The panel never logs them. The Docker client library logs request bodies (a service's spec) at
+  debug level through the `log` crate: the panel caps `log` records at info at boot, whatever
+  `RUST_LOG` asks.
+- Docker holds the values in clear: in the Swarm service's spec and in the containers' environment.
+  Anyone who controls Docker on the host (or with `docker.view`, a container's inspect, which hides
+  only secret-looking names) can read them.
+- A secret written into a service's command or health check is stored as typed: use environment
+  variables instead.
 - Services run on their project's own overlay network: a project cannot call another project's
   services directly, nor the panel's MySQL. What a service makes public (a domain, a published
   port) stays reachable by anyone, other projects included. Traefik joins every project's network to

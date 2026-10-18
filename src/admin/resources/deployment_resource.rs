@@ -107,6 +107,7 @@ impl Resource for DeploymentResource {
                             Trigger::Rollback,
                             Some(&earlier),
                             user,
+                            ctx.keyring()?,
                         )
                         .await?;
                         ctx.dispatch(

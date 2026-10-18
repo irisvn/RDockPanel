@@ -161,7 +161,7 @@ db_test!(
         );
         assert!(row.deployed_at.is_some() && row.deployed_spec_hash == deployed.spec_hash);
         assert!(
-            !deployment_service::has_pending_changes(app.state().db(), &row)
+            !deployment_service::has_pending_changes(app.state().db(), &row, app.state().keyring())
                 .await
                 .unwrap()
         );
@@ -196,9 +196,13 @@ db_test!(
             .await
             .assert_status(StatusCode::OK);
         assert!(
-            deployment_service::has_pending_changes(app.state().db(), &service_row(&app, id).await)
-                .await
-                .unwrap()
+            deployment_service::has_pending_changes(
+                app.state().db(),
+                &service_row(&app, id).await,
+                app.state().keyring()
+            )
+            .await
+            .unwrap()
         );
         assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
         assert_eq!(replicas(&fake, "shop_web"), Some(3));
@@ -683,6 +687,219 @@ db_test!(
         let reader = app.acting_as(&reader).await;
         let data = aside(&app, &reader, id).await;
         assert_eq!(data["latest"]["status"], "queued", "{data}");
+    }
+);
+
+db_test!(
+    secrets_are_sealed_and_never_shown,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        const SECRET: &str = "s3cret-7f3a";
+        const TOKEN: &str = "token-9b2c";
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        let url = format!("{}/{id}", records(&app, "services"));
+        let read = |body: Value| body["data"]["data"]["env"].clone();
+        let env = read(admin.get(&url).await.json());
+        let revision = env["revision"].clone();
+
+        // A name no shell takes: refused.
+        let bad = json!({"env": {"revision": revision, "set": {"1BAD": "x"}}});
+        admin
+            .send(rustcms::axum::http::Method::PATCH, &url, Some(&bad))
+            .await
+            .assert_validation_error("env");
+        // A private image, its environment and credentials.
+        let patch = json!({
+            "image": "ghcr.io/acme/web:1",
+            "env": {"revision": revision, "set": {"DB_PASSWORD": SECRET, "MODE": "prod"}},
+            "registry_username": "bot",
+            "registry_password": {"replace": TOKEN},
+        });
+        let saved = admin
+            .send(rustcms::axum::http::Method::PATCH, &url, Some(&patch))
+            .await;
+        saved.assert_status(StatusCode::OK);
+        assert!(!saved.text().contains(SECRET) && !saved.text().contains(TOKEN));
+        let shown = admin.get(&url).await.text();
+        assert!(!shown.contains(SECRET) && !shown.contains(TOKEN), "{shown}");
+        assert!(shown.contains("DB_PASSWORD"), "names are shown: {shown}");
+
+        let first = run(&app, &admin, "deploy", id).await;
+        assert_eq!(first.status, "succeeded", "{:?}", first.error);
+        // The containers get the values; the pull and the service the credentials.
+        let container = |fake: &FakeDocker| {
+            fake.services.lock().unwrap()["shop_web"]
+                .spec
+                .clone()
+                .unwrap()
+                .task_template
+                .unwrap()
+                .container_spec
+                .unwrap()
+        };
+        let spec = container(&fake);
+        assert_eq!(
+            spec.env.clone().unwrap(),
+            [format!("DB_PASSWORD={SECRET}"), "MODE=prod".to_owned()]
+        );
+        let label = &spec.labels.unwrap()["rdockpanel.template"];
+        assert!(!label.contains(SECRET));
+        let calls = fake.calls();
+        assert!(
+            calls.contains(&"pull ghcr.io/acme/web:1 as bot@ghcr.io".to_owned()),
+            "{calls:?}"
+        );
+        assert!(
+            calls.contains(&"create shop_web as bot@ghcr.io".to_owned()),
+            "{calls:?}"
+        );
+        // The deployment keeps names, never values: not in its spec, its log,
+        // what the panel sends, the audit log.
+        let row = deployment_by_id(&app, first.id).await;
+        let spec_json = row.spec.to_string();
+        assert!(!spec_json.contains(SECRET) && spec_json.contains("DB_PASSWORD"));
+        assert!(!row.log.clone().unwrap_or_default().contains(SECRET));
+        assert!(row.env.is_some());
+        let listed = admin.get(&records(&app, "deployments")).await.text();
+        assert!(!listed.contains(SECRET) && !listed.contains(TOKEN));
+        let audit = rustcms::models::audit_log::Entity::find()
+            .all(app.state().db())
+            .await
+            .unwrap();
+        let audit = format!("{audit:?}");
+        assert!(!audit.contains(SECRET) && !audit.contains(TOKEN));
+
+        // A new value: a change to deploy, then the containers get it.
+        let service = service_row(&app, id).await;
+        let keyring = app.state().keyring();
+        assert!(
+            !deployment_service::has_pending_changes(app.state().db(), &service, keyring)
+                .await
+                .unwrap()
+        );
+        let revision = read(admin.get(&url).await.json())["revision"].clone();
+        let patch = json!({"env": {"revision": revision, "set": {"DB_PASSWORD": "rotated"}, "keep": ["MODE"]}});
+        admin
+            .send(rustcms::axum::http::Method::PATCH, &url, Some(&patch))
+            .await
+            .assert_status(StatusCode::OK);
+        assert!(
+            deployment_service::has_pending_changes(
+                app.state().db(),
+                &service_row(&app, id).await,
+                keyring
+            )
+            .await
+            .unwrap()
+        );
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        assert!(
+            container(&fake)
+                .env
+                .unwrap()
+                .contains(&"DB_PASSWORD=rotated".to_owned())
+        );
+
+        // APP_KEY rotated (the old one kept to open values): nothing to deploy.
+        let rotated = rustcms::crypto::Keyring::new(
+            rustcms::key::AppKey::generate(),
+            vec![keyring.current().clone()],
+        )
+        .unwrap();
+        assert!(
+            !deployment_service::has_pending_changes(
+                app.state().db(),
+                &service_row(&app, id).await,
+                &rotated
+            )
+            .await
+            .unwrap(),
+            "the same environment under a new key is no change"
+        );
+
+        // A rollback applies the environment of then.
+        action(
+            &app,
+            &admin,
+            "deployments",
+            "rollback",
+            &first.id.to_string(),
+        )
+        .await
+        .assert_status(StatusCode::OK);
+        let rollback = last_deployment(&app, id).await;
+        deployment_service::run(app.state(), rollback.id, FAST)
+            .await
+            .unwrap();
+        assert!(
+            container(&fake)
+                .env
+                .unwrap()
+                .contains(&format!("DB_PASSWORD={SECRET}"))
+        );
+
+        // Credentials go to their registry only: an image moved elsewhere,
+        // then rolled back to, is pulled without them.
+        let patch =
+            json!({"image": "registry.example.com/acme/web:2", "registry_username": "other"});
+        admin
+            .send(rustcms::axum::http::Method::PATCH, &url, Some(&patch))
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        assert!(fake.calls().contains(
+            &"pull registry.example.com/acme/web:2 as other@registry.example.com".to_owned()
+        ));
+        action(
+            &app,
+            &admin,
+            "deployments",
+            "rollback",
+            &first.id.to_string(),
+        )
+        .await
+        .assert_status(StatusCode::OK);
+        let back = last_deployment(&app, id).await;
+        deployment_service::run(app.state(), back.id, FAST)
+            .await
+            .unwrap();
+        let back = deployment_by_id(&app, back.id).await;
+        assert!(
+            back.log
+                .unwrap_or_default()
+                .contains("credentials are for registry.example.com"),
+        );
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|c| c.starts_with("pull ghcr.io") && c.contains("other")),
+            "{:?}",
+            fake.calls()
+        );
+
+        // Sealed with another key: no deployment, a clear error.
+        let mut broken = service_row(&app, id).await.into_active_model();
+        broken.env = Set(Some(rustcms::crypto::Encrypted::from_envelope(
+            "v1.not-ours".to_owned(),
+        )));
+        broken.update(app.state().db()).await.unwrap();
+        let refused = action(&app, &admin, "services", "deploy", &id.to_string()).await;
+        assert_eq!(
+            refused.status,
+            StatusCode::BAD_REQUEST,
+            "{}",
+            refused.text()
+        );
+        assert!(refused.text().contains("APP_KEY"), "{}", refused.text());
+        // Destroying needs none of it.
+        assert_eq!(run(&app, &admin, "destroy", id).await.status, "succeeded");
+
+        // bollard logs request bodies (the spec, its environment) at debug
+        // through `log`: capped at info whatever RUST_LOG says.
+        assert!(log::max_level() <= log::LevelFilter::Info);
     }
 );
 

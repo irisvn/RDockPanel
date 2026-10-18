@@ -23,6 +23,10 @@ use sea_orm::{
 };
 use serde_json::json;
 
+use std::collections::BTreeMap;
+
+use rustcms::crypto::{Encrypted, Keyring, Unreadable};
+
 use crate::models::{deployment, project, service, service_domain, service_mount, service_port};
 use crate::services::deploy_rules_service::{bind_source, config};
 use crate::services::deploy_service::{
@@ -30,7 +34,8 @@ use crate::services::deploy_service::{
     pulled_digest,
 };
 use crate::services::docker_service::{
-    Docker, DockerError, MANAGED_LABEL, NetworkRequest, SwarmService, SwarmTask, TaskState,
+    Docker, DockerError, MANAGED_LABEL, NetworkRequest, RegistryAuth, SwarmService, SwarmTask,
+    TaskState,
 };
 use crate::services::traefik_service::{self, Traefik};
 
@@ -94,8 +99,43 @@ fn busy() -> AppError {
     }
 }
 
-/// The service's configuration as it is now (rows read in `db`).
+/// The key of environment digests ([`Snapshot::env_digest`]), from `APP_KEY`.
+fn env_digest_key(keyring: &Keyring) -> [u8; 32] {
+    keyring.current().derive("rdockpanel.env-digest")
+}
+
+/// A service's environment, opened (empty when it has none).
+pub fn service_env(
+    service: &service::Model,
+    keyring: &Keyring,
+) -> Result<BTreeMap<String, String>, Unreadable> {
+    match &service.env {
+        Some(sealed) => sealed.open(keyring, &service::env_context()),
+        None => Ok(BTreeMap::new()),
+    }
+}
+
+fn unreadable_env() -> AppError {
+    AppError::BadRequest(
+        "the service's environment cannot be read (sealed with another APP_KEY): set its values again"
+            .into(),
+    )
+}
+
+/// The service's configuration as it is now (rows read in `db`), its
+/// environment opened with `keyring` (a digest only: never its values).
 pub async fn snapshot_of<C: ConnectionTrait>(
+    db: &C,
+    service: &service::Model,
+    keyring: &Keyring,
+) -> AppResult<Snapshot> {
+    let snapshot = snapshot_without_env(db, service).await?;
+    let env = service_env(service, keyring).map_err(|_| unreadable_env())?;
+    Ok(snapshot.with_env(&env, &env_digest_key(keyring)))
+}
+
+/// [`snapshot_of`] without the environment (names, rules: no key needed).
+pub async fn snapshot_without_env<C: ConnectionTrait>(
     db: &C,
     service: &service::Model,
 ) -> AppResult<Snapshot> {
@@ -119,12 +159,47 @@ pub async fn snapshot_of<C: ConnectionTrait>(
 }
 
 /// Whether the configuration changed since the last successful deployment.
+/// An environment that cannot be opened counts as a change.
 pub async fn has_pending_changes<C: ConnectionTrait>(
     db: &C,
     service: &service::Model,
+    keyring: &Keyring,
 ) -> AppResult<bool> {
-    let current = snapshot_of(db, service).await?;
-    Ok(service.deployed_spec_hash.as_deref() != Some(current.hash().as_str()))
+    let current = match snapshot_of(db, service, keyring).await {
+        Ok(current) => current,
+        Err(AppError::BadRequest(_)) => return Ok(true),
+        Err(err) => return Err(err),
+    };
+    let Some(deployed_hash) = service.deployed_spec_hash.as_deref() else {
+        return Ok(true);
+    };
+    if deployed_hash == current.hash() {
+        return Ok(false);
+    }
+    // The digests may only differ by their key (APP_KEY rotated since): the
+    // deployed environment, digested with today's key, tells.
+    use sea_orm::QueryOrder;
+    let Some(deployed) = deployment::Entity::find()
+        .filter(deployment::Column::ServiceId.eq(service.id))
+        .filter(deployment::Column::SpecHash.eq(deployed_hash))
+        .filter(deployment::Column::Status.eq(SUCCEEDED))
+        .order_by_desc(deployment::Column::Id)
+        .one(db)
+        .await?
+    else {
+        return Ok(true);
+    };
+    let Ok(then) = serde_json::from_value::<Snapshot>(deployed.spec) else {
+        return Ok(true);
+    };
+    let env_then = match &deployed.env {
+        Some(sealed) => match sealed.open(keyring, &deployment::env_context()) {
+            Ok(env) => env,
+            Err(_) => return Ok(true),
+        },
+        None => BTreeMap::new(),
+    };
+    Ok(then.with_env(&env_then, &env_digest_key(keyring)).hash() != current.hash())
 }
 
 /// Asks for a deployment of `service`, in `txn` (the caller queues
@@ -137,6 +212,7 @@ pub async fn request<C: ConnectionTrait>(
     trigger: Trigger,
     rollback_to: Option<&deployment::Model>,
     user_id: Option<i64>,
+    keyring: &Keyring,
 ) -> AppResult<deployment::Model> {
     let now = Utc::now();
     // The service and its project as they are now, locked until the
@@ -151,7 +227,8 @@ pub async fn request<C: ConnectionTrait>(
         .one(txn)
         .await?
         .ok_or(AppError::NotFound)?;
-    let (mut snapshot, image) = match (trigger, rollback_to) {
+    // The environment it applies, sealed apart from the snapshot.
+    let (mut snapshot, image, env) = match (trigger, rollback_to) {
         (Trigger::Rollback, Some(earlier)) => {
             let snapshot: Snapshot =
                 serde_json::from_value(earlier.spec.clone()).map_err(|_| {
@@ -169,16 +246,28 @@ pub async fn request<C: ConnectionTrait>(
             };
             // The service's names now: an earlier name may have been
             // destroyed, then taken by another service.
-            let current = snapshot_of(txn, service).await?;
+            let current = snapshot_without_env(txn, service).await?;
             let mut snapshot = snapshot;
             snapshot.project = current.project;
             snapshot.service = current.service;
-            (snapshot, Some(image))
+            // Its environment as it was (credentials: the service's at run).
+            (snapshot, Some(image), earlier.env.clone())
         }
         (Trigger::Rollback, None) => {
             return Err(AppError::BadRequest("a rollback needs a deployment".into()));
         }
-        _ => (snapshot_of(txn, service).await?, None),
+        // Removing needs no secret (one sealed with a lost key included).
+        (Trigger::Destroy, _) => (snapshot_without_env(txn, service).await?, None, None),
+        _ => {
+            let env = service_env(service, keyring).map_err(|_| unreadable_env())?;
+            let snapshot = snapshot_without_env(txn, service)
+                .await?
+                .with_env(&env, &env_digest_key(keyring));
+            let sealed = (!env.is_empty())
+                .then(|| Encrypted::seal(keyring, &deployment::env_context(), &env))
+                .transpose()?;
+            (snapshot, None, sealed)
+        }
     };
     match trigger {
         Trigger::Start | Trigger::Deploy | Trigger::Restart | Trigger::Rollback => {
@@ -193,6 +282,7 @@ pub async fn request<C: ConnectionTrait>(
         spec: Set(serde_json::to_value(&snapshot).map_err(AppError::internal)?),
         spec_hash: Set(Some(snapshot.hash())),
         image_digest: Set(image),
+        env: Set(env),
         published: Set(false),
         user_id: Set(user_id),
         created_at: Set(now),
@@ -407,7 +497,28 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
     let mut log = RunLog::new(db, &row);
     let traefik = state.service::<Traefik>();
     let outcome = match state.service::<Docker>() {
-        Some(docker) => apply(&docker, traefik.as_deref(), &row, &mut log, timings).await,
+        Some(docker) => {
+            let secrets = Secrets::of(&row, &service, state.keyring());
+            if let Ok(secrets) = &secrets
+                && let Some(note) = secrets.unmatched(&row)
+            {
+                log.line(note).await;
+            }
+            match secrets {
+                Ok(secrets) => {
+                    apply(
+                        &docker,
+                        traefik.as_deref(),
+                        &row,
+                        &secrets,
+                        &mut log,
+                        timings,
+                    )
+                    .await
+                }
+                Err(outcome) => Err(outcome),
+            }
+        }
         None => Err(Outcome::Failed("Docker is not available".into())),
     };
     let (outcome, image) = match outcome {
@@ -466,10 +577,100 @@ pub fn deploy_options(force_update: u64) -> DeployOptions {
 }
 
 /// Applies `row` to Docker: the outcome and the image it ran, or how it failed.
+/// What a run applies besides its snapshot, opened: never logged.
+struct Secrets {
+    env: BTreeMap<String, String>,
+    /// The service's registry credentials now (server, user, password),
+    /// for the registry of its image now.
+    registry: Option<(String, String, String)>,
+}
+
+impl Secrets {
+    /// Nothing for a Destroy: it needs no secret, even one that cannot be
+    /// opened any more.
+    fn of(
+        row: &deployment::Model,
+        service: &service::Model,
+        keyring: &Keyring,
+    ) -> Result<Self, Outcome> {
+        if Trigger::parse(&row.trigger) == Some(Trigger::Destroy) {
+            return Ok(Self {
+                env: BTreeMap::new(),
+                registry: None,
+            });
+        }
+        let env = match &row.env {
+            Some(sealed) => sealed
+                .open(keyring, &deployment::env_context())
+                .map_err(|_| {
+                    Outcome::Failed(
+                        "its environment cannot be read (sealed with another APP_KEY)".into(),
+                    )
+                })?,
+            None => BTreeMap::new(),
+        };
+        let username = service
+            .registry_username
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty());
+        let registry = match (username, &service.registry_password) {
+            (Some(username), Some(sealed)) => {
+                let password = sealed
+                    .open(keyring, &service::registry_password_context())
+                    .map_err(|_| {
+                        Outcome::Failed(
+                            "the registry password cannot be read (sealed with another APP_KEY)"
+                                .into(),
+                        )
+                    })?;
+                Some((registry_of(&service.image), username.to_owned(), password))
+            }
+            _ => None,
+        };
+        Ok(Self { env, registry })
+    }
+
+    /// Credentials for `snapshot`'s image: the service's, only when they are
+    /// for that image's registry (a rollback to an image of another registry
+    /// never gets them).
+    fn auth(&self, snapshot: &Snapshot) -> Option<RegistryAuth> {
+        let (server, username, password) = self.registry.as_ref()?;
+        (registry_of(&snapshot.image) == *server).then(|| RegistryAuth {
+            server: server.clone(),
+            username: username.clone(),
+            password: password.clone(),
+        })
+    }
+
+    /// A note for the log when the service has credentials, but for another
+    /// registry than the image this run deploys.
+    fn unmatched(&self, row: &deployment::Model) -> Option<String> {
+        let (server, _, _) = self.registry.as_ref()?;
+        let snapshot: Snapshot = serde_json::from_value(row.spec.clone()).ok()?;
+        let wanted = registry_of(&snapshot.image);
+        (wanted != *server).then(|| {
+            format!("the registry credentials are for {server}, not {wanted}: pulling without them")
+        })
+    }
+}
+
+/// The registry an image reference names (`ghcr.io/org/app:v1` →
+/// `ghcr.io`); Docker Hub's address for the others.
+pub fn registry_of(image: &str) -> String {
+    match image.split_once('/') {
+        Some((first, _)) if first.contains('.') || first.contains(':') || first == "localhost" => {
+            first.to_owned()
+        }
+        _ => "https://index.docker.io/v1/".to_owned(),
+    }
+}
+
 async fn apply(
     docker: &Docker,
     traefik: Option<&Traefik>,
     row: &deployment::Model,
+    secrets: &Secrets,
     log: &mut RunLog<'_>,
     timings: Timings,
 ) -> Result<(Outcome, Option<String>), Outcome> {
@@ -559,27 +760,45 @@ async fn apply(
         }
     }
 
-    let image = image_for(docker, trigger, &snapshot, row, existing.as_ref(), log).await?;
+    let auth = secrets.auth(&snapshot);
+    let image = image_for(
+        docker,
+        trigger,
+        &snapshot,
+        row,
+        existing.as_ref(),
+        auth.clone(),
+        log,
+    )
+    .await?;
     log.hold().await?;
     if let Some(warning) = image.warning() {
         log.line(format!("warning: {warning}")).await;
     }
     let options =
         deploy_options(force_update_of(existing.as_ref()) + u64::from(trigger == Trigger::Restart));
-    let out = desired(&snapshot, &image, &options);
+    let out = desired(&snapshot, &image, &secrets.env, &options);
     let sent = Utc::now();
     match existing {
         None => {
             log.line(format!("creating {name} ({})", image.reference()))
                 .await;
-            api.create_service(out.spec.clone(), None)
+            api.create_service(out.spec.clone(), auth.clone())
                 .await
                 .map_err(fail)?;
         }
         Some(_) => {
             log.line(format!("updating {name} ({})", image.reference()))
                 .await;
-            update(docker, &name, &snapshot, out.spec.clone(), log).await?;
+            update(
+                docker,
+                &name,
+                &snapshot,
+                out.spec.clone(),
+                auth.clone(),
+                log,
+            )
+            .await?;
         }
     }
     let replicas = if snapshot.running {
@@ -599,6 +818,7 @@ async fn image_for(
     snapshot: &Snapshot,
     row: &deployment::Model,
     existing: Option<&SwarmService>,
+    auth: Option<RegistryAuth>,
     log: &mut RunLog<'_>,
 ) -> Result<PinnedImage, Outcome> {
     if trigger == Trigger::Rollback {
@@ -616,7 +836,7 @@ async fn image_for(
         return Ok(pinned_as(&running));
     }
     log.line(format!("pulling {}", snapshot.image)).await;
-    let mut progress = docker.pull_image(&snapshot.image);
+    let mut progress = docker.pull_image_with(&snapshot.image, auth);
     let mut lines = Vec::new();
     use futures_util::StreamExt;
     while let Some(line) = progress.next().await {
@@ -658,6 +878,7 @@ async fn update(
     name: &str,
     snapshot: &Snapshot,
     spec: crate::services::docker_service::ServiceSpec,
+    auth: Option<RegistryAuth>,
     log: &mut RunLog<'_>,
 ) -> Result<(), Outcome> {
     let fail = |err: DockerError| Outcome::Failed(err.to_string());
@@ -672,7 +893,7 @@ async fn update(
         log.hold().await?;
         match docker
             .engine()
-            .update_service(name, version, spec.clone(), None)
+            .update_service(name, version, spec.clone(), auth.clone())
             .await
         {
             Err(DockerError::Conflict(_)) => tokio::time::sleep(Duration::from_millis(200)).await,

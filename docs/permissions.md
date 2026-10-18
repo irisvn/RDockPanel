@@ -24,6 +24,8 @@ The Deploy group's resources use the panel's standard permissions, one set per r
   succeeded running a recorded image: not a Stop or a Destroy);
 - `services.destroy` removes a service from Swarm (Destroy; its volumes are kept);
 - a service's deployments (their log, error and image), on its page too, need `deployments.view`;
+- environment variables and registry credentials are fields of the service (`services.update`):
+  their values are write-only for everyone;
 
 - a **host directory** (bind mount) needs `system.manage`, and a source under one of the
   `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, `/proc`,

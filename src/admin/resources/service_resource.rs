@@ -14,7 +14,7 @@ use crate::jobs::publish_routes::PublishRoutes;
 use crate::jobs::run_deployment::RunDeployment;
 use crate::models::service::{self, NEW};
 use crate::services::deploy_rules_service::{valid_image_reference, valid_name};
-use crate::services::deploy_service::command_args;
+use crate::services::deploy_service::{command_args, valid_env_name};
 use crate::services::deployment_service::{self, Trigger};
 
 pub struct ServiceResource;
@@ -68,6 +68,13 @@ impl Resource for ServiceResource {
             Field::column(service::Column::HealthcheckCmd).max_length(500),
             Field::column(service::Column::HealthcheckIntervalS),
             Field::column(service::Column::HealthcheckRetries),
+            // Sealed with APP_KEY; names shown, values never.
+            Field::column(service::Column::Env)
+                .encrypted_map()
+                .max_items(100)
+                .max_length(16_384),
+            Field::column(service::Column::RegistryUsername).max_length(255),
+            Field::column(service::Column::RegistryPassword).encrypted(),
             // Set by deployments, never by the form.
             Field::column(service::Column::DesiredState)
                 .guarded()
@@ -108,6 +115,12 @@ impl Resource for ServiceResource {
                 .help("Run in the container, e.g. wget -qO- http://127.0.0.1/health"),
             NumberInput::make("healthcheck_interval_s"),
             NumberInput::make("healthcheck_retries"),
+            SecretMapInput::make("env")
+                .column_span(2)
+                .help("Environment variables: names are letters, digits and _; values are never shown again"),
+            TextInput::make("registry_username")
+                .help("For a private image: the registry is the image's (e.g. ghcr.io)"),
+            SecretInput::make("registry_password").help("Or an access token"),
         ])
     }
 
@@ -209,6 +222,18 @@ fn normalize(mut data: Data) -> Data {
 
 fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<()> {
     let mut errors = ValidationErrors::new();
+    // New environment variables (`{"set": {NAME: value}}`): names a shell takes.
+    if let Some(set) = data
+        .get("env")
+        .and_then(|e| e.get("set"))
+        .and_then(|s| s.as_object())
+        && set.keys().any(|name| !valid_env_name(name))
+    {
+        errors.add(
+            "env",
+            ctx.t("names must be letters, digits and _, not starting with a digit"),
+        );
+    }
     if let Some(name) = text(data, "name")
         && !valid_name(name)
     {
@@ -300,7 +325,9 @@ fn deployment_action(name: &'static str, trigger: Trigger, label: &str) -> Actio
         Box::pin(async move {
             let user = ctx.principal.id.parse().ok();
             for service in services {
-                let row = deployment_service::request(txn, &service, trigger, None, user).await?;
+                let row =
+                    deployment_service::request(txn, &service, trigger, None, user, ctx.keyring()?)
+                        .await?;
                 ctx.dispatch(
                     txn,
                     &RunDeployment {

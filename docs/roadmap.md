@@ -17,9 +17,10 @@ service spec and Traefik routes generated from the configuration, with images pi
 deployments (Deploy, Start, Stop, Restart, Destroy, Rollback) run as jobs with a per-service lock,
 convergence checks, automatic rollback and a live log; domains routed through Traefik (route files,
 Republish, rewritten at boot, Traefik on each project's network), checked end to end: zero-downtime
-image changes, HTTPS, isolated projects.
+image changes, HTTPS, isolated projects; environment variables and private registry credentials,
+encrypted (RustCMS W8), kept with each deployment for rollback.
 
-Next: environment variables and registry credentials (encrypted, RustCMS W8), the installer, then
+Next: the installer, then
 service logs and terminal, a projects overview, certificate status, and drift checks (RustCMS W4).
 Deleting a project will also detach Traefik from its network and remove it.
 

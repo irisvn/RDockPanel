@@ -277,8 +277,13 @@ pub trait DockerApi: Send + Sync {
     fn logs(&self, id: &str, query: LogQuery) -> BoxStream<'static, DockerResult<LogLine>>;
     fn stats(&self, id: &str) -> BoxStream<'static, DockerResult<ContainerStats>>;
     async fn images(&self) -> DockerResult<Vec<ImageItem>>;
-    /// Progress lines while pulling `image` (`name[:tag]`).
-    fn pull_image(&self, image: &str) -> BoxStream<'static, DockerResult<String>>;
+    /// Progress lines while pulling `image` (`name[:tag]`), with `auth` for
+    /// a private registry.
+    fn pull_image(
+        &self,
+        image: &str,
+        auth: Option<RegistryAuth>,
+    ) -> BoxStream<'static, DockerResult<String>>;
     async fn remove_image(&self, id: &str, force: bool) -> DockerResult<()>;
     /// Removes stopped containers and dangling images, except those
     /// labelled `exclude_label=true`.
@@ -411,7 +416,16 @@ impl Docker {
     }
 
     pub fn pull_image(&self, image: &str) -> BoxStream<'static, DockerResult<String>> {
-        self.0.pull_image(image)
+        self.0.pull_image(image, None)
+    }
+
+    /// [`Self::pull_image`] from a private registry.
+    pub fn pull_image_with(
+        &self,
+        image: &str,
+        auth: Option<RegistryAuth>,
+    ) -> BoxStream<'static, DockerResult<String>> {
+        self.0.pull_image(image, auth)
     }
 
     /// Removes the image `reference` (its id, or one of its tags exactly as
@@ -745,7 +759,11 @@ impl DockerApi for Unavailable {
     async fn images(&self) -> DockerResult<Vec<ImageItem>> {
         Err(self.err())
     }
-    fn pull_image(&self, _: &str) -> BoxStream<'static, DockerResult<String>> {
+    fn pull_image(
+        &self,
+        _: &str,
+        _: Option<RegistryAuth>,
+    ) -> BoxStream<'static, DockerResult<String>> {
         futures_util::stream::iter([Err(self.err())]).boxed()
     }
     async fn remove_image(&self, _: &str, _: bool) -> DockerResult<()> {

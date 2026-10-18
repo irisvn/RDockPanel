@@ -83,9 +83,11 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
 `services/deploy_service.rs` turns a service into what it becomes, as pure functions:
 
 - `Snapshot::of(...)` is the configuration one deployment applies (stored with it for history and
-  rollback). It has no environment variables or registry credentials (they will be encrypted
-  columns); a secret written into a command or a health check is kept as typed. `Snapshot::hash()` (SHA-256 of its JSON, lists sorted) tells whether the
-  configuration changed since the last deployment.
+  rollback). Of the environment it keeps the variable names and a digest keyed with `APP_KEY`
+  (HMAC-SHA256, `env_digest`), never a value; of the registry, the user. A secret written into a
+  command or a health check is kept as typed. `Snapshot::hash()` (SHA-256 of its JSON, lists sorted)
+  tells whether the configuration changed since the last deployment, a new environment value
+  included.
 - `pin_image` pins the configured image to what was just pulled: the digest the pull reported
   (`nginx:1.27@sha256:…`), else the repository's only registry digest (Docker Hub's names `nginx`,
   `library/nginx`, `docker.io/library/nginx` are one; several digests are ambiguous), else the local
@@ -102,6 +104,22 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
 
 Snapshot tests (`src/services/snapshots/`, insta) pin the generated spec and routes; a Swarm test runs a
 generated spec on a real engine.
+
+### Secrets
+
+A service's environment variables (`services.env`) and registry password
+(`services.registry_password`) are RustCMS encrypted columns (`Encrypted<T>`, sealed with `APP_KEY`):
+the form shows the variables' names and whether a password is set, never a value, and the audit log
+never holds them. Asking for a deployment seals the environment it applies into `deployments.env`
+(its own context), so a rollback applies the environment of then. The run opens it, puts it in the
+Swarm spec (`Env`), and sends the service's registry credentials (as they are now) with the pull and
+with the service's create or update, so every node can pull. Credentials belong to the registry of
+the service's image (Docker Hub when the image names none): a run whose image is on another registry
+(a rollback to an image since moved) pulls without them, and says so in its log. Destroy opens no
+secret. After an `APP_KEY` rotation the digests differ but the environment does not: the pending
+check then digests the deployed environment with today's key before telling a change. The task template's hash label counts the environment by its
+keyed digest. A value sealed with a key that is gone (see `APP_PREVIOUS_KEYS` and
+`rustcms key:reencrypt`, which knows all three columns) refuses the deployment with a clear error.
 
 ### Deployments
 

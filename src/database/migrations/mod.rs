@@ -9,6 +9,7 @@ mod m20261018_084011_create_service_domains_table;
 mod m20261018_084012_create_service_ports_table;
 mod m20261018_084013_create_service_mounts_table;
 mod m20261018_084014_create_deployments_table;
+mod m20261018_132946_add_secrets_to_services;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -24,6 +25,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261018_084012_create_service_ports_table::Migration),
             Box::new(m20261018_084013_create_service_mounts_table::Migration),
             Box::new(m20261018_084014_create_deployments_table::Migration),
+            Box::new(m20261018_132946_add_secrets_to_services::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

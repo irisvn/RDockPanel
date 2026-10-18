@@ -673,7 +673,13 @@ async fn desired_specs_run_on_a_real_swarm() {
             source: "data".to_owned(),
             read_only: false,
         }],
+        env_names: vec![],
+        env_digest: None,
+        registry_username: None,
     };
+    // An environment, as a deployment opens it.
+    let env = std::collections::BTreeMap::from([("GREETING".to_owned(), "hello".to_owned())]);
+    let snapshot = snapshot.with_env(&env, b"a key");
     let name = snapshot.service_name();
     let network = NetworkRequest {
         name: network_name(&project),
@@ -696,7 +702,7 @@ async fn desired_specs_run_on_a_real_swarm() {
         &api.inspect_image("alpine:3.20").await.unwrap(),
     );
     assert!(image.digest().is_some(), "{image:?}");
-    let out = desired(&snapshot, &image, &DeployOptions::default());
+    let out = desired(&snapshot, &image, &env, &DeployOptions::default());
 
     let checks = std::panic::AssertUnwindSafe(async {
         api.create_service(out.spec.clone(), None).await.unwrap();
@@ -705,7 +711,14 @@ async fn desired_specs_run_on_a_real_swarm() {
             .await
             .unwrap()
             .expect("created");
-        let labels = service.spec.and_then(|s| s.labels).unwrap_or_default();
+        let spec = service.spec.unwrap_or_default();
+        let env = spec
+            .task_template
+            .as_ref()
+            .and_then(|t| t.container_spec.as_ref())
+            .and_then(|c| c.env.clone());
+        assert_eq!(env, Some(vec!["GREETING=hello".to_owned()]));
+        let labels = spec.labels.unwrap_or_default();
         assert_eq!(labels.get("rdockpanel.spec-hash"), Some(&out.hash));
         // Running, and healthy (the command wrote the file the check looks for).
         let mut healthy = false;

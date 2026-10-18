@@ -8,8 +8,8 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 > **Trạng thái: đang phát triển.**
 > - Phase 1 (giám sát server, quản lý Docker) đã chạy được.
-> - Phase 2 (deploy app) đã chạy được từ mã nguồn: project, service, deploy, domain.
-> - Phase 2 còn lại: mã hoá biến môi trường, registry riêng, installer (hiện chạy từ mã nguồn như hướng dẫn bên dưới).
+> - Phase 2 (deploy app) đã chạy được từ mã nguồn: project, service, deploy, domain, biến môi trường mã hoá, registry riêng.
+> - Phase 2 còn lại: installer (hiện chạy từ mã nguồn như hướng dẫn bên dưới).
 > - Chưa dùng được cho production.
 
 ![Bảng điều khiển server](docs/images/server.png)
@@ -49,10 +49,11 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
   - mỗi lần deploy lưu lại cấu hình để xem lịch sử và rollback;
   - trang service báo khi có thay đổi chưa deploy.
 - **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS.
+- **Bí mật:** biến môi trường và tài khoản registry riêng được mã hoá bằng app key; panel chỉ hiện tên biến, không bao giờ hiện giá trị. Rollback trả lại đúng biến môi trường của lần deploy đó.
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- **Phase 2:** mã hoá biến môi trường, registry riêng, Let's Encrypt khi chạy thật, installer cài bằng một lệnh.
+- **Phase 2:** Let's Encrypt khi chạy thật, installer cài bằng một lệnh.
 - **Phase 3:** build từ Git, database kèm backup, Compose, template, thông báo, nhiều node, xác thực 2 lớp, API và CLI.
 
 | Container | Log trực tiếp | Terminal |

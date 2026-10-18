@@ -4,6 +4,9 @@
 //! is no longer [`NEW`] (deploying, deployed, or left by a failed first run),
 //! the name and the project are fixed and deleting needs Destroy first.
 
+use std::collections::BTreeMap;
+
+use rustcms::crypto::{Context, Encrypted};
 use sea_orm::entity::prelude::*;
 
 /// The status of a service Docker has never had (or no longer has: destroyed).
@@ -27,6 +30,15 @@ pub struct Model {
     pub healthcheck_cmd: Option<String>,
     pub healthcheck_interval_s: Option<i32>,
     pub healthcheck_retries: Option<i32>,
+    /// Environment variables, sealed with `APP_KEY` (context `services.env`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub env: Option<Encrypted<BTreeMap<String, String>>>,
+    /// For a private registry (with `registry_password`); the registry is
+    /// the image's.
+    pub registry_username: Option<String>,
+    /// Sealed with `APP_KEY` (context `services.registry_password`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub registry_password: Option<Encrypted<String>>,
     /// `running` or `stopped`: what the next deployment aims for.
     pub desired_state: String,
     /// `new`, `deploying`, `running`, `stopped`, `failed`.
@@ -44,3 +56,13 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+/// Where `env` is sealed.
+pub fn env_context() -> Context {
+    Context::column("services", "env")
+}
+
+/// Where `registry_password` is sealed.
+pub fn registry_password_context() -> Context {
+    Context::column("services", "registry_password")
+}

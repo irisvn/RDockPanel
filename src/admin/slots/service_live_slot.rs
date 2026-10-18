@@ -9,7 +9,9 @@ use serde_json::{Value, json};
 
 use crate::models::service;
 use crate::services::deploy_service::Snapshot;
-use crate::services::deployment_service::{has_pending_changes, latest, snapshot_of, summary};
+use crate::services::deployment_service::{
+    has_pending_changes, latest, snapshot_without_env, summary,
+};
 
 pub struct ServiceLiveSlot;
 
@@ -38,7 +40,7 @@ impl PanelSlot for ServiceLiveSlot {
             .one(&ctx.db)
             .await?
             .ok_or(AppError::NotFound)?;
-        let snapshot: Snapshot = snapshot_of(&ctx.db, &row).await?;
+        let snapshot: Snapshot = snapshot_without_env(&ctx.db, &row).await?;
         // The deployment (its log, error, image) needs its own permission.
         let latest = if ctx.can("deployments.view") {
             latest(&ctx.db, id).await?
@@ -53,7 +55,7 @@ impl PanelSlot for ServiceLiveSlot {
             "desired_state": row.desired_state,
             "deployed_at": row.deployed_at,
             "busy": row.current_deployment_id.is_some(),
-            "pending": has_pending_changes(&ctx.db, &row).await?,
+            "pending": has_pending_changes(&ctx.db, &row, ctx.keyring()?).await?,
             "zero_downtime": row.zero_downtime,
             "zero_downtime_possible": snapshot.zero_downtime_possible(),
             "latest": latest.as_ref().map(summary),

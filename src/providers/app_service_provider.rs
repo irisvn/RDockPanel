@@ -20,6 +20,11 @@ impl ServiceProvider for AppServiceProvider {
         app.bind(crate::services::system_stats_service::SystemStats::from_env());
         let shutdown = app.shutdown();
         app.bind(crate::services::live_service::Live::new(shutdown));
+        // Sealed outside the admin's fields: found by `rustcms key:reencrypt`.
+        app.encrypted_column::<crate::models::deployment::Entity>(
+            crate::models::deployment::Column::Env,
+            rustcms::crypto::Binding::Column,
+        );
         // `rustcms db:seed` runs this one (it calls the others).
         app.seeder(crate::database::seeders::DatabaseSeeder);
         // rustcms:seeders
@@ -47,6 +52,11 @@ impl ServiceProvider for AppServiceProvider {
     }
 
     async fn boot(&self, state: &AppState) -> anyhow::Result<()> {
+        // bollard logs each request's body at debug (through the `log`
+        // crate): a service spec holds its environment's values. Whatever
+        // RUST_LOG says, `log` records stop at info (the panel's own logs are
+        // `tracing`'s).
+        log::set_max_level(log::LevelFilter::Info.min(log::max_level()));
         // Deployments whose run died: interrupted, their services released.
         match crate::services::deployment_service::recover_interrupted(state.db()).await {
             Ok(0) => {}

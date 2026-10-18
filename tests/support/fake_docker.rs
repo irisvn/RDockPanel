@@ -182,7 +182,14 @@ impl DockerApi for FakeDocker {
     async fn images(&self) -> DockerResult<Vec<ImageItem>> {
         Ok(self.images.lock().unwrap().clone())
     }
-    fn pull_image(&self, image: &str) -> BoxStream<'static, DockerResult<String>> {
+    fn pull_image(
+        &self,
+        image: &str,
+        auth: Option<RegistryAuth>,
+    ) -> BoxStream<'static, DockerResult<String>> {
+        if let Some(auth) = auth {
+            self.record(format!("pull {image} as {}@{}", auth.username, auth.server));
+        }
         stream::iter([Ok(format!("Pulling {image}")), Ok("Done".to_owned())]).boxed()
     }
     async fn remove_image(&self, id: &str, force: bool) -> DockerResult<()> {
@@ -295,9 +302,15 @@ impl DockerApi for FakeDocker {
     async fn create_service(
         &self,
         spec: ServiceSpec,
-        _auth: Option<RegistryAuth>,
+        auth: Option<RegistryAuth>,
     ) -> DockerResult<String> {
         let name = spec.name.clone().unwrap_or_default();
+        if let Some(auth) = auth {
+            self.record(format!(
+                "create {name} as {}@{}",
+                auth.username, auth.server
+            ));
+        }
         let mut services = self.services.lock().unwrap();
         if services.contains_key(&name) {
             return Err(DockerError::Conflict(format!("service {name} exists")));
@@ -322,8 +335,14 @@ impl DockerApi for FakeDocker {
         name: &str,
         version: u64,
         spec: ServiceSpec,
-        _auth: Option<RegistryAuth>,
+        auth: Option<RegistryAuth>,
     ) -> DockerResult<Vec<String>> {
+        if let Some(auth) = &auth {
+            self.record(format!(
+                "update {name} as {}@{}",
+                auth.username, auth.server
+            ));
+        }
         let mut services = self.services.lock().unwrap();
         let service = services.get_mut(name).ok_or(DockerError::NotFound)?;
         let current = service.version.as_ref().and_then(|v| v.index).unwrap_or(0);

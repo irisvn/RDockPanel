@@ -58,6 +58,46 @@ pub struct Snapshot {
     pub domains: Vec<Domain>,
     pub ports: Vec<Port>,
     pub mounts: Vec<Mount>,
+    /// The environment's variable names; their values are sealed apart
+    /// (`deployments.env`), never in a snapshot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_names: Vec<String>,
+    /// A digest of the environment keyed with `APP_KEY` ([`env_digest`]):
+    /// a change of a value changes the snapshot's hash, and reveals nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_digest: Option<String>,
+    /// The private registry's user (its password is sealed apart).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry_username: Option<String>,
+}
+
+/// The environment's digest, keyed (`key`: derived from `APP_KEY`): HMAC-SHA256
+/// of its JSON. `None` for no variable.
+pub fn env_digest(env: &BTreeMap<String, String>, key: &[u8]) -> Option<String> {
+    use hmac::{KeyInit, Mac};
+    if env.is_empty() {
+        return None;
+    }
+    let mut mac = hmac::Hmac::<Sha256>::new_from_slice(key).expect("HMAC takes keys of any length");
+    mac.update(&serde_json::to_vec(env).expect("an environment serializes"));
+    Some(
+        mac.finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
+}
+
+/// An environment variable's name: a letter or `_`, then letters, digits
+/// and `_` (what every shell takes), at most 128.
+pub fn valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    name.len() <= 128
+        && chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,7 +218,23 @@ impl Snapshot {
             domains,
             ports,
             mounts,
+            // Set from the sealed environment ([`Snapshot::with_env`]).
+            env_names: vec![],
+            env_digest: None,
+            registry_username: service
+                .registry_username
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .map(str::to_owned),
         }
+    }
+
+    /// With the environment `env` (its names, and its digest keyed with `key`).
+    pub fn with_env(mut self, env: &BTreeMap<String, String>, key: &[u8]) -> Self {
+        self.env_names = env.keys().cloned().collect();
+        self.env_digest = env_digest(env, key);
+        self
     }
 
     /// Tells configurations apart (`services.deployed_spec_hash`): SHA-256 of
@@ -322,8 +378,9 @@ impl Default for DeployOptions {
     }
 }
 
-/// What a snapshot becomes: the Swarm service and its routes.
-#[derive(Debug, Clone, PartialEq)]
+/// What a snapshot becomes: the Swarm service and its routes. Its `Debug`
+/// leaves the spec out (it holds the environment's values).
+#[derive(Clone, PartialEq)]
 pub struct Desired {
     pub spec: ServiceSpec,
     /// `None` when the service has no domain or is stopped (no file).
@@ -332,6 +389,16 @@ pub struct Desired {
     /// The task template's own hash, also a container label
     /// ([`TEMPLATE_LABEL`]): which tasks run this spec.
     pub template: String,
+}
+
+impl std::fmt::Debug for Desired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Desired")
+            .field("name", &self.spec.name)
+            .field("hash", &self.hash)
+            .field("template", &self.template)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The container label naming the task template a task runs.
@@ -344,8 +411,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// The Swarm service and Traefik routes of `snapshot`, running `image`.
-pub fn desired(snapshot: &Snapshot, image: &PinnedImage, options: &DeployOptions) -> Desired {
+/// The Swarm service and Traefik routes of `snapshot`, running `image` with
+/// the environment `env` (the snapshot's, opened).
+pub fn desired(
+    snapshot: &Snapshot,
+    image: &PinnedImage,
+    env: &BTreeMap<String, String>,
+    options: &DeployOptions,
+) -> Desired {
     let hash = snapshot.hash();
     let name = snapshot.service_name();
     let labels: BTreeMap<&str, &str> = BTreeMap::from([
@@ -402,8 +475,21 @@ pub fn desired(snapshot: &Snapshot, image: &PinnedImage, options: &DeployOptions
     });
     // Tasks tell which template they run (a restart, a new command or mount
     // with the same image are told apart from the previous tasks).
-    let template_hash = sha256_hex(&serde_json::to_vec(&template).expect("a template serializes"));
+    // The environment counts by its keyed digest: the label never tells
+    // anything of its values.
+    let mut hashed = template.clone();
+    if let Some(digest) = &snapshot.env_digest {
+        hashed["ContainerSpec"]["Env"] = json!(digest);
+    }
+    let template_hash = sha256_hex(&serde_json::to_vec(&hashed).expect("a template serializes"));
     template["ContainerSpec"]["Labels"][TEMPLATE_LABEL] = json!(template_hash);
+    if !env.is_empty() {
+        template["ContainerSpec"]["Env"] = json!(
+            env.iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+        );
+    }
     let spec = json!({
         "Name": name,
         "Labels": labels,
@@ -661,6 +747,9 @@ mod tests {
                 source: "html".to_owned(),
                 read_only: true,
             }],
+            env_names: vec![],
+            env_digest: None,
+            registry_username: None,
         }
     }
 
@@ -678,7 +767,7 @@ mod tests {
 
     #[test]
     fn a_web_service_with_domains() {
-        let out = desired(&snapshot(), &pinned(), &production());
+        let out = desired(&snapshot(), &pinned(), &BTreeMap::new(), &production());
         insta::assert_snapshot!("web_service_spec", canonical(&out.spec));
         insta::assert_snapshot!("web_service_routes", out.routes.unwrap().to_yaml());
     }
@@ -687,7 +776,7 @@ mod tests {
     fn a_stopped_service_has_no_tasks_and_no_routes() {
         let mut stopped = snapshot();
         stopped.running = false;
-        let out = desired(&stopped, &pinned(), &production());
+        let out = desired(&stopped, &pinned(), &BTreeMap::new(), &production());
         assert_eq!(out.spec.mode.unwrap().replicated.unwrap().replicas, Some(0));
         assert!(out.routes.is_none());
     }
@@ -723,6 +812,7 @@ mod tests {
         let out = desired(
             &worker,
             &PinnedImage::Local("sha256:local".to_owned()),
+            &BTreeMap::new(),
             &DeployOptions::default(),
         );
         // Zero downtime asked, but without a health check (and with a host port) it stops first.
@@ -737,7 +827,7 @@ mod tests {
             https_port: 8443,
             ..DeployOptions::default()
         };
-        let yaml = desired(&snapshot(), &pinned(), &dev)
+        let yaml = desired(&snapshot(), &pinned(), &BTreeMap::new(), &dev)
             .routes
             .unwrap()
             .to_yaml();
@@ -750,19 +840,52 @@ mod tests {
 
     #[test]
     fn routing_and_scaling_changes_keep_the_task_template() {
-        let base = desired(&snapshot(), &pinned(), &production());
+        let base = desired(&snapshot(), &pinned(), &BTreeMap::new(), &production());
         let mut changed = snapshot();
         changed.replicas = 5;
         changed.domains.pop();
-        let after = desired(&changed, &pinned(), &production());
+        let after = desired(&changed, &pinned(), &BTreeMap::new(), &production());
         assert_ne!(after.hash, base.hash);
         assert_eq!(after.spec.task_template, base.spec.task_template);
     }
 
     #[test]
+    fn the_environment_stays_out_of_labels_and_debug() {
+        let env = BTreeMap::from([("DB_PASSWORD".to_owned(), "s3cret-7f3a".to_owned())]);
+        let with_env = snapshot().with_env(&env, b"a key");
+        assert_eq!(with_env.env_names, ["DB_PASSWORD"]);
+        assert!(!serde_json::to_string(&with_env).unwrap().contains("s3cret"));
+        let out = desired(&with_env, &pinned(), &env, &production());
+        let container = out
+            .spec
+            .task_template
+            .clone()
+            .unwrap()
+            .container_spec
+            .unwrap();
+        assert_eq!(container.env.unwrap(), ["DB_PASSWORD=s3cret-7f3a"]);
+        assert!(!format!("{:?}", container.labels).contains("s3cret"));
+        assert!(!format!("{out:?}").contains("s3cret"));
+        // Another value, another template (the tasks restart) and hash.
+        let other = BTreeMap::from([("DB_PASSWORD".to_owned(), "rotated".to_owned())]);
+        let changed = snapshot().with_env(&other, b"a key");
+        assert_ne!(changed.hash(), with_env.hash());
+        assert_ne!(
+            desired(&changed, &pinned(), &other, &production()).template,
+            out.template
+        );
+        // Keyed: another key, another digest.
+        assert_ne!(
+            snapshot().with_env(&env, b"another").env_digest,
+            with_env.env_digest
+        );
+    }
+
+    #[test]
     fn the_template_follows_what_tasks_run() {
         let options = DeployOptions::default();
-        let template = |s: &Snapshot, o: &DeployOptions| desired(s, &pinned(), o).template;
+        let template =
+            |s: &Snapshot, o: &DeployOptions| desired(s, &pinned(), &BTreeMap::new(), o).template;
         let base = template(&snapshot(), &options);
         // More replicas, another domain: the same tasks.
         let mut scaled = snapshot();
@@ -779,7 +902,7 @@ mod tests {
         command.command = Some("nginx -g 'daemon off;'".to_owned());
         assert_ne!(template(&command, &options), base);
         // Carried by the containers.
-        let out = desired(&snapshot(), &pinned(), &options);
+        let out = desired(&snapshot(), &pinned(), &BTreeMap::new(), &options);
         let labels = out
             .spec
             .task_template
@@ -810,6 +933,7 @@ mod tests {
         let a = desired(
             &base,
             &pinned(),
+            &BTreeMap::new(),
             &DeployOptions {
                 force_update: 1,
                 ..production()

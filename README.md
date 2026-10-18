@@ -7,9 +7,9 @@ feature is free: no project limits, no paid tiers.
 [Tiếng Việt](README.vi.md) · [Docs](docs/) · [Roadmap](docs/roadmap.md)
 
 > **Status: early development.** Phase 1 (server monitoring and Docker management) works. Phase 2
-> (deploying apps) works from source: projects, services, deployments and domains. Still to come in
-> Phase 2: encrypted environment variables, private registries and the installer. Not for production
-> use.
+> (deploying apps) works from source: projects, services, deployments, domains, encrypted
+> environment variables and private registries. Still to come in Phase 2: the installer. Not for
+> production use.
 
 ![Server dashboard](docs/images/server.png)
 
@@ -47,11 +47,12 @@ feature is free: no project limits, no paid tiers.
   configuration, for history and rollback, and the page shows changes not deployed yet.
 - **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
   redirects its HTTP to HTTPS.
+- **Secrets**: environment variables and private registry credentials, encrypted with the app key;
+  the panel shows their names, never their values. A rollback brings back the environment of then.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Phase 2: encrypted environment variables, private registries, Let's Encrypt in production, a
-  one-command installer.
+- Phase 2: Let's Encrypt in production, a one-command installer.
 - Phase 3: builds from Git, databases with backups, Compose, templates, notifications, multiple
   nodes, two-factor authentication, an API and a CLI.
 

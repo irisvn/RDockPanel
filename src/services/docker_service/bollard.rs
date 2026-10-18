@@ -308,14 +308,18 @@ impl DockerApi for BollardDocker {
             .collect())
     }
 
-    fn pull_image(&self, image: &str) -> BoxStream<'static, DockerResult<String>> {
+    fn pull_image(
+        &self,
+        image: &str,
+        auth: Option<RegistryAuth>,
+    ) -> BoxStream<'static, DockerResult<String>> {
         let (name, tag) = split_reference(image);
         let options = CreateImageOptionsBuilder::new()
             .from_image(name)
             .tag(tag)
             .build();
         self.client
-            .create_image(Some(options), None, None)
+            .create_image(Some(options), None, auth.map(credentials))
             .map(|item| {
                 let info = item.map_err(map_err)?;
                 if let Some(detail) = info.error_detail {
