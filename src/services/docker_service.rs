@@ -186,7 +186,7 @@ pub struct ContainerStats {
 }
 
 pub use ::bollard::models::{
-    NetworkAttachmentConfig, ObjectVersion, Service as SwarmService, ServiceSpec,
+    ContainerStatus, NetworkAttachmentConfig, ObjectVersion, Service as SwarmService, ServiceSpec,
     ServiceUpdateStatus, ServiceUpdateStatusStateEnum, Task as SwarmTask, TaskState, TaskStatus,
 };
 
@@ -200,6 +200,15 @@ pub const MANAGED_LABEL: &str = "rdockpanel.managed";
 pub enum BuildLine {
     Log(String),
     Image(String),
+}
+
+/// What a command run in a container ([`DockerApi::run_in_container`])
+/// writes, then its exit code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecChunk {
+    Out(Vec<u8>),
+    Err(Vec<u8>),
+    Exit(i64),
 }
 
 /// Registry credentials for pulling a private image (sent with service
@@ -354,6 +363,14 @@ pub trait DockerApi: Send + Sync {
     async fn exec(&self, container: &str, size: TermSize, token: &str)
     -> DockerResult<ExecSession>;
     async fn resize_exec(&self, exec_id: &str, size: TermSize) -> DockerResult<()>;
+    /// Runs `cmd` in the container (no TTY; the container's environment),
+    /// `input` fed to its standard input: what it writes, then its exit code.
+    async fn run_in_container(
+        &self,
+        container: &str,
+        cmd: Vec<String>,
+        input: Option<BoxStream<'static, Vec<u8>>>,
+    ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>>;
     /// Ends every process of the container's sessions marked with `token`:
     /// hangs them up, then kills what is left.
     async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()>;
@@ -880,6 +897,14 @@ impl DockerApi for Unavailable {
         Err(self.err())
     }
     async fn resize_exec(&self, _: &str, _: TermSize) -> DockerResult<()> {
+        Err(self.err())
+    }
+    async fn run_in_container(
+        &self,
+        _: &str,
+        _: Vec<String>,
+        _: Option<BoxStream<'static, Vec<u8>>>,
+    ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>> {
         Err(self.err())
     }
 }

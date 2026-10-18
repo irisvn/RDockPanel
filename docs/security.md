@@ -80,6 +80,16 @@ Nixpacks run is limited to 10 minutes, the context to 1 GB. A trigger URL's toke
 request log records paths only) and stored as its SHA-256 only; anyone with the URL can deploy the service (not change it): make a new one when it
 leaks.
 
+## Backups
+
+A backup holds the database's data in clear (gzipped, not encrypted): keep the bucket private, or
+the local directory (`0700` by the installer) to root. The S3 secret key is sealed with `APP_KEY`
+and never shown again. Dumps run in the database's own container with its own credentials; the
+database name is an argument, never part of the shell script. Provider paths are checked (no `..`,
+no absolute path) and a local provider's directory must be absolute and not `/`; it is written as
+the panel's user, so `storage_providers.*` is an administrator's permission. A restore replaces
+data in place: `backups.restore` is separate from `backups.run`.
+
 ## The terminal
 
 - Needs `docker.exec` (and `system.manage` for the panel's own containers).

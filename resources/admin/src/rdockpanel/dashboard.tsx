@@ -9,6 +9,7 @@ import { useState } from "react";
 import { Dashboard, NewService } from "./apps/Dashboard";
 import { ServicePage } from "./apps/ServicePage";
 import { Templates } from "./apps/Templates";
+import { Settings } from "./settings/Settings";
 import type { Overview } from "./apps/types";
 import { StatusDot } from "./lib/ui";
 import { bindSession } from "./lib/resources";
@@ -109,3 +110,10 @@ function Apps(props: PageProps<{ user?: string | number }>) {
 }
 
 registerPage("rdockpanel/dashboard", Apps as (p: PageProps<unknown>) => ReturnType<typeof Apps>);
+
+function SettingsRoute(props: PageProps<{ user?: string | number }>) {
+  bindSession(String(props.data.user ?? ""));
+  return <Settings {...props} />;
+}
+
+registerPage("rdockpanel/settings", SettingsRoute as (p: PageProps<unknown>) => ReturnType<typeof SettingsRoute>);

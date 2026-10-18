@@ -34,6 +34,10 @@ impl ServiceProvider for AppServiceProvider {
             crate::models::deployment::Column::Files,
             rustcms::crypto::Binding::Column,
         );
+        app.encrypted_column::<crate::models::storage_provider::Entity>(
+            crate::models::storage_provider::Column::SecretKey,
+            rustcms::crypto::Binding::Column,
+        );
         app.encrypted_column::<crate::models::service::Entity>(
             crate::models::service::Column::DeployKey,
             rustcms::crypto::Binding::Column,
@@ -44,6 +48,22 @@ impl ServiceProvider for AppServiceProvider {
         app.job::<crate::jobs::pull_image::PullImage>();
         app.job::<crate::jobs::run_deployment::RunDeployment>();
         app.job::<crate::jobs::publish_routes::PublishRoutes>();
+        app.job::<crate::jobs::run_backup::RunBackup>();
+        // Backups whose cron fired: queued (each configuration's own
+        // schedule; the slot claimed in the database).
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "database-backups",
+                std::time::Duration::from_secs(60),
+            )
+            .run(|state| async move {
+                let n = crate::services::backup_service::tick(&state).await?;
+                if n > 0 {
+                    tracing::info!(n, "scheduled backups queued");
+                }
+                Ok(())
+            }),
+        );
         // Deployments whose run stopped renewing its lease (`serve` only;
         // in the process, never queued behind long pulls or deployments).
         app.schedule(
@@ -75,6 +95,11 @@ impl ServiceProvider for AppServiceProvider {
             Ok(0) => {}
             Ok(n) => tracing::info!(n, "deployments interrupted by a stop"),
             Err(err) => tracing::debug!(%err, "interrupted deployments not checked"),
+        }
+        match crate::services::backup_service::recover_interrupted(state.db()).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "backups interrupted by a stop"),
+            Err(err) => tracing::debug!(%err, "interrupted backups not checked"),
         }
         // Traefik's routes, written again from the database.
         if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {

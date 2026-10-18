@@ -188,6 +188,30 @@ A service's trigger URL (`/api/v1/deploy/{id}?token={token}`) deploys it without
 (40 characters) is shown once, only its SHA-256 is stored and compared in constant time; a new
 one replaces it. Unknown, wrong or malformed answers 404 the same; a deployment under way, 409.
 
+### Database backups
+
+As EasyPanel's. A **storage provider** (Settings) is a local directory (absolute; in the
+installed panel under `/var/lib/rdockpanel/backups`, a host directory) or an S3-compatible bucket
+(requests signed by `rusty-s3`, sent by `reqwest`; its secret key sealed, context
+`storage_providers.secret_key`). A database service (PostgreSQL, MySQL, MariaDB, MongoDB; Redis
+keeps its append-only file) has **backup configurations**: a database, a five-field cron schedule
+(UTC), a provider, a path (folders of letters, digits, `.`, `_`, `-`) and a retention.
+
+A run (`backup_runs`, the `backup.run` job on the `backup` queue, one attempt) finds the service's
+running task and runs the engine's own dump in its container (`docker exec`, no TTY):
+`pg_dump --clean --if-exists`, `mysqldump`/`mariadb-dump` as root with `--single-transaction`,
+`mongodump --archive --gzip`. The credentials are the container's own environment (the panel
+passes none); the database is `$1` of `sh -c` (never parsed). The panel gzips SQL dumps as they
+come, writes `<path>/<database>-<YYYYmmddTHHMMSSZ>.sql.gz` (`.archive.gz` for MongoDB), then deletes
+the oldest files of that database in that path beyond the retention (other files are left alone; a
+failed deletion is logged, the backup stands). A **restore** downloads a file, gunzips SQL, feeds
+it to `psql -v ON_ERROR_STOP=1`, `mysql` or `mariadb` (`mongorestore --drop`, the archive's database
+renamed to the one asked), in place.
+
+Schedules: every minute the `database-backups` tick (RustCMS W4) queues one run per enabled
+configuration whose cron fired since its last slot (missed slots are not caught up), the slot
+claimed in the database. Runs cut by a stop are marked failed at boot.
+
 ### Secrets
 
 A service's environment variables (`services.env`) and registry password
@@ -276,4 +300,5 @@ clear needs `services.secrets` and is audited.
 MySQL 8.4 (`docker-compose.yml` for development). Besides the framework's tables (users, roles,
 sessions, audit log, jobs, schedule slots, …), the panel adds `actions`, then for Phase 2 `projects`,
 `services`, `service_domains`, `service_ports`, `service_mounts` and `deployments` (each with its
-configuration snapshot, pinned image, status and log).
+configuration snapshot, pinned image, status and log), then `storage_providers`,
+`database_backups` and `backup_runs`.

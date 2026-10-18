@@ -68,6 +68,21 @@ passwords. `GET /services/{id}/credentials` (services.secrets) answers `{"passwo
 | POST | `/projects/{id}/templates/{slug}` | services.create (+ projects.view; services.deploy to deploy) | `{"input":{…},"deploy":bool}`: runs the generator, creates its services (databases first), queues their deployments when asked; `{"project","services","warnings"}` |
 | POST | `/projects/{id}/schema` | same | `{"schema":{"services":[…]},"deploy":bool}`: "Create from Schema" |
 
+## Backups (`/apps`)
+
+Configurations and providers are written through the `database_backups` and `storage_providers`
+resources.
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/services/{id}/backups` | database_backups.view_any | a database's Backups tab: `supported`, `configs`, the last 30 `runs`, `providers` (with storage_providers.view_any) |
+| POST | `/backups/{id}/run` | backups.run | runs a configuration now: 202 with the run; audited |
+| GET | `/backup-runs/{id}` | database_backups.view_any | a run with its log |
+| POST | `/services/{id}/restore` | backups.restore | `{"storage_provider_id","file","database"}`: restores a file in place: 202 with the run; 422 on a bad file or database; audited |
+| GET | `/storage-providers` | storage_providers.view_any | the providers (never the secret key: `secret_set`) |
+| GET | `/storage-providers/{id}/files?path=` | backups.restore | the files of a folder, newest first |
+| POST | `/storage-providers/{id}/check` | storage_providers.update | writes, lists and deletes a small file: `{"ok","error"?}` |
+
 ## Deployments (`/deploy`)
 
 | Method | Path | Permission | |

@@ -6,12 +6,13 @@ import { type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
 import { Alert, Button, Checkbox, Dialog, ErrorState, Input, Loading, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
 import { CopyButton, ErrorNote, Facts, Field, Section, StatusBadge, Tabs, when } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
+import { BackupsTab } from "./Backups";
 import type { Deployment, ServiceDetail } from "./types";
 
 type Props = PageProps<unknown> & { project: string; serviceId: number; tab: string };
 type T = (s: string) => string;
 
-const TABS = ["overview", "credentials", "deployments", "environment", "domains", "source", "storage", "advanced"] as const;
+const TABS = ["overview", "credentials", "backups", "deployments", "environment", "domains", "source", "storage", "advanced"] as const;
 
 export function ServicePage(props: Props) {
   const t = props.t;
@@ -96,6 +97,7 @@ export function ServicePage(props: Props) {
         tabs={[
           { id: "overview", label: t("Overview") },
           ...(d.database ? [{ id: "credentials", label: t("Credentials") }] : []),
+          ...(d.database ? [{ id: "backups", label: t("Backups") }] : []),
           { id: "deployments", label: t("Deployments") },
           { id: "environment", label: t("Environment") },
           { id: "domains", label: t("Domains") },
@@ -107,6 +109,7 @@ export function ServicePage(props: Props) {
       <div className="rdp2-tab-body">
         {tab === "overview" && <OverviewTab {...props} d={d} />}
         {tab === "credentials" && d.database && <CredentialsTab {...props} d={d} />}
+        {tab === "backups" && d.database && <BackupsTab {...props} d={d} />}
         {tab === "deployments" && <DeploymentsTab {...props} d={d} onError={setError} refresh={refresh} />}
         {tab === "environment" && <EnvironmentTab {...props} d={d} onSaved={saved} />}
         {tab === "domains" && !d.can.domains.view && <p className="rdp2-muted">{t("You may not see domains.")}</p>}

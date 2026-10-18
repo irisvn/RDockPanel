@@ -6,8 +6,8 @@
 use rustcms::prelude::*;
 
 use crate::http::controllers::{
-    apps_controller as apps, deploy_controller as deploy, docker_controller as docker,
-    server_controller as server, templates_controller as templates,
+    apps_controller as apps, backups_controller as backups, deploy_controller as deploy,
+    docker_controller as docker, server_controller as server, templates_controller as templates,
 };
 
 /// Every admin route, with the access it requires.
@@ -139,6 +139,42 @@ pub fn routes() -> AdminRoutes {
                     "/services/{id}/env",
                     AdminAccess::can("services.update"),
                     apps::put_env,
+                )
+                // Database backups (configurations: the `database_backups` resource).
+                .get(
+                    "/services/{id}/backups",
+                    AdminAccess::can("database_backups.view_any"),
+                    backups::index,
+                )
+                .post(
+                    "/services/{id}/restore",
+                    AdminAccess::can(backups::RESTORE_PERMISSION),
+                    backups::restore,
+                )
+                .post(
+                    "/backups/{id}/run",
+                    AdminAccess::can(backups::RUN_PERMISSION),
+                    backups::run,
+                )
+                .get(
+                    "/backup-runs/{id}",
+                    AdminAccess::can("database_backups.view_any"),
+                    backups::show_run,
+                )
+                .get(
+                    "/storage-providers",
+                    AdminAccess::can("storage_providers.view_any"),
+                    backups::providers,
+                )
+                .get(
+                    "/storage-providers/{id}/files",
+                    AdminAccess::can(backups::RESTORE_PERMISSION),
+                    backups::files,
+                )
+                .post(
+                    "/storage-providers/{id}/check",
+                    AdminAccess::can("storage_providers.update"),
+                    backups::check,
                 ),
         )
         .nest(

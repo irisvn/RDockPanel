@@ -94,6 +94,27 @@ db_test!(
                 Case::new(Method::GET, "/apps/services/1/env")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/services/1/backups")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/backup-runs/1")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/backups/1/run")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/services/1/restore")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/storage-providers")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/storage-providers/1/files")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/storage-providers/1/check")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
                 Case::new(Method::POST, "/apps/services/1/deploy-key")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

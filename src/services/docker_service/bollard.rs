@@ -26,9 +26,9 @@ use ::bollard::query_parameters::ResizeExecOptionsBuilder;
 
 use super::{
     BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream, NetworkItem,
-    NetworkRequest, PruneReport, RegistryAuth, SESSION_ENV, ServiceSpec, SwarmRole, SwarmService,
-    SwarmTask, TermSize, VolumeItem,
+    DockerResult, ExecChunk, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream,
+    NetworkItem, NetworkRequest, PruneReport, RegistryAuth, SESSION_ENV, ServiceSpec, SwarmRole,
+    SwarmService, SwarmTask, TermSize, VolumeItem,
 };
 
 /// bash when the image has it, else sh.
@@ -494,6 +494,98 @@ impl DockerApi for BollardDocker {
             .map(|chunk| chunk.map(|out| out.into_bytes().to_vec()).map_err(map_err))
             .boxed();
         Ok(ExecSession { id, output, input })
+    }
+
+    async fn run_in_container(
+        &self,
+        container: &str,
+        cmd: Vec<String>,
+        input: Option<BoxStream<'static, Vec<u8>>>,
+    ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>> {
+        let config = CreateExecOptions {
+            attach_stdin: Some(input.is_some()),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            tty: Some(false),
+            cmd: Some(cmd),
+            ..Default::default()
+        };
+        let id = self
+            .client
+            .create_exec(container, config)
+            .await
+            .map_err(map_err)?
+            .id;
+        let start = StartExecOptions {
+            detach: false,
+            tty: false,
+            output_capacity: None,
+        };
+        let StartExecResults::Attached {
+            mut output,
+            input: mut stdin,
+        } = self
+            .client
+            .start_exec(&id, Some(start))
+            .await
+            .map_err(map_err)?
+        else {
+            return Err(DockerError::Other(
+                "the command started detached".to_owned(),
+            ));
+        };
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            // Fed while its output is read (a full pipe would block both).
+            let feed = async move {
+                if let Some(mut input) = input {
+                    while let Some(chunk) = input.next().await {
+                        if stdin.write_all(&chunk).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                let _ = stdin.shutdown().await;
+            };
+            let read = async {
+                loop {
+                    let item = tokio::select! {
+                        item = output.next() => item,
+                        () = tx.closed() => return false,
+                    };
+                    let chunk = match item {
+                        None => return true,
+                        Some(Ok(LogOutput::StdOut { message })) => {
+                            Ok(ExecChunk::Out(message.to_vec()))
+                        }
+                        Some(Ok(LogOutput::StdErr { message })) => {
+                            Ok(ExecChunk::Err(message.to_vec()))
+                        }
+                        Some(Ok(_)) => continue,
+                        Some(Err(e)) => Err(map_err(e)),
+                    };
+                    let failed = chunk.is_err();
+                    if tx.send(chunk).await.is_err() || failed {
+                        return false;
+                    }
+                }
+            };
+            let (_, finished) = tokio::join!(feed, read);
+            if finished {
+                let code = client
+                    .inspect_exec(&id)
+                    .await
+                    .map_err(map_err)
+                    .map(|e| e.exit_code.unwrap_or(-1));
+                let _ = tx.send(code.map(ExecChunk::Exit)).await;
+            }
+        });
+        Ok(futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|chunk| (chunk, rx))
+        })
+        .boxed())
     }
 
     async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {

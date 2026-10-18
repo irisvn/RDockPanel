@@ -8,10 +8,10 @@ use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
 use rdockpanel::services::docker_service::{
     BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream, NetworkItem,
-    NetworkRequest, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec, ServiceUpdateStatus,
-    ServiceUpdateStatusStateEnum, SwarmRole, SwarmService, SwarmTask, TaskState, TermSize,
-    VolumeItem,
+    DockerResult, ExecChunk, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream,
+    NetworkItem, NetworkRequest, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec,
+    ServiceUpdateStatus, ServiceUpdateStatusStateEnum, SwarmRole, SwarmService, SwarmTask,
+    TaskState, TermSize, VolumeItem,
 };
 use rustcms::async_trait;
 use serde_json::{Value, json};
@@ -37,6 +37,10 @@ pub struct FakeDocker {
     pub update_state: Arc<Mutex<Option<ServiceUpdateStatusStateEnum>>>,
     /// A stopped service's task that Swarm wants shut down but still runs.
     pub lingering: Arc<Mutex<bool>>,
+    /// What commands run in containers were fed (a restore's dump).
+    pub fed: Arc<Mutex<Vec<u8>>>,
+    /// The exit code of commands run in containers (default 0).
+    pub exec_exit: Arc<Mutex<i64>>,
     /// `"restart web"`, `"remove web"`, `"prune rdockpanel.system"`, …
     pub calls: Arc<Mutex<Vec<String>>>,
 }
@@ -269,6 +273,33 @@ impl DockerApi for FakeDocker {
             input: Box::pin(input),
         })
     }
+    /// Records `run <container>: <command>`; writes `dump of <container>`
+    /// (a backup's dump), keeps what it is fed.
+    async fn run_in_container(
+        &self,
+        container: &str,
+        cmd: Vec<String>,
+        input: Option<BoxStream<'static, Vec<u8>>>,
+    ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>> {
+        self.record(format!("run {container}: {}", cmd.join(" ")));
+        if let Some(mut input) = input {
+            let mut fed = vec![];
+            while let Some(chunk) = input.next().await {
+                fed.extend(chunk);
+            }
+            *self.fed.lock().unwrap() = fed;
+        }
+        let code = *self.exec_exit.lock().unwrap();
+        let mut chunks = vec![Ok(ExecChunk::Out(
+            format!("dump of {container}\n").into_bytes(),
+        ))];
+        if code != 0 {
+            chunks.push(Ok(ExecChunk::Err(b"access denied\n".to_vec())));
+        }
+        chunks.push(Ok(ExecChunk::Exit(code)));
+        Ok(stream::iter(chunks).boxed())
+    }
+
     async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()> {
         self.record(format!("end exec {container} {token}"));
         Ok(())
@@ -515,6 +546,10 @@ impl DockerApi for FakeDocker {
                 spec: spec.task_template.clone(),
                 desired_state: Some(TaskState::RUNNING),
                 status: Some(rdockpanel::services::docker_service::TaskStatus {
+                    container_status: Some(rdockpanel::services::docker_service::ContainerStatus {
+                        container_id: Some(format!("ctr-{service}-{slot}")),
+                        ..Default::default()
+                    }),
                     state: Some(state),
                     timestamp: now,
                     err: (state == TaskState::FAILED).then(|| "exit code 1".to_owned()),

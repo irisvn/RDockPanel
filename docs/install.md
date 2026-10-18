@@ -45,7 +45,9 @@ panel is reached over HTTPS only.
   - `rdp-mysql`: MySQL 8.4, data on the volume `rdp-mysql-data`, reachable on `rdp-internal` only;
   - `rdp-traefik`: Traefik v3 on ports 80 and 443;
   - `rdockpanel`: the panel (port 3000 without a domain), with the Docker socket, the host's `/proc` (server
-    metrics) and the routes directory. Its entrypoint migrates the database at each start.
+    metrics), the routes directory and `/var/lib/rdockpanel/backups` (the same path inside: what a
+    "Local directory" storage provider under it writes lands on the host). Its entrypoint migrates
+    the database at each start.
 
 ## Upgrading and changing options
 
@@ -57,7 +59,9 @@ the file from a backup (changing `APP_KEY` needs `rustcms key:reencrypt`; see
 
 ## Backups
 
-Back up `/etc/rdockpanel` (secrets and certificates) and the database: `docker exec` into the
+Your apps' databases: a database service's Backups tab (scheduled dumps to a storage provider of
+Settings: a directory under `/var/lib/rdockpanel/backups`, or an S3-compatible bucket, better off
+the server). The panel itself: back up `/etc/rdockpanel` (secrets and certificates) and the database: `docker exec` into the
 `rdp-mysql` container and `mysqldump panel`. Losing `APP_KEY` loses the encrypted environment
 variables, registry passwords and file mounts (see [security](security.md)).
 

@@ -17,6 +17,17 @@ pub fn provider(api: &ApiRoutes, admin: &AdminRoutes) -> AuthProvider {
         // Deploying, starting, stopping, restarting and rolling back services; destroying them.
         .permission(rustcms::auth::ADMIN_GUARD, "services.deploy", "services")
         .permission(rustcms::auth::ADMIN_GUARD, "services.destroy", "services")
+        // Running a database backup by hand; restoring one (replaces its data).
+        .permission(
+            rustcms::auth::ADMIN_GUARD,
+            crate::http::controllers::backups_controller::RUN_PERMISSION,
+            "database_backups",
+        )
+        .permission(
+            rustcms::auth::ADMIN_GUARD,
+            crate::http::controllers::backups_controller::RESTORE_PERMISSION,
+            "database_backups",
+        )
         // Reading environment values in clear (audited); writing needs `services.update`.
         .permission(
             rustcms::auth::ADMIN_GUARD,

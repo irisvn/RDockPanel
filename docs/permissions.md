@@ -28,6 +28,10 @@ The Deploy group's resources use the panel's standard permissions, one set per r
   reading environment values in clear (the Environment tab) needs `services.secrets`, and each read
   is audited; the registry password is never shown;
 
+- database backups: `storage_providers.*` (Settings), `database_backups.*` (a database's
+  configurations; their tab needs `database_backups.view_any`), `backups.run` (run one now) and
+  `backups.restore` (restore one, replacing the database's data; lists a provider's files);
+
 - a **host directory** (bind mount) needs `system.manage`, and a source under one of the
   `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, `/proc`,
   `/sys`, `/dev`, `/boot`, `/var/lib/docker`, the Docker socket, `/etc/rdockpanel`, `/run/secrets`,

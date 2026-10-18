@@ -43,7 +43,8 @@ Deleting a project will also detach Traefik from its network and remove it.
 
 - Builds from uploads, Railpack and buildpacks; GitHub webhooks with signatures, a GitHub token
   (builds from Git with Dockerfile or Nixpacks, an inline Dockerfile and trigger URLs are done).
-- Databases (PostgreSQL, MySQL, MariaDB, MongoDB, Redis) with scheduled backups to S3 and restore.
+- Volume backups (database backups to a local directory or S3, scheduled, with retention and
+  restore, are done).
 - Docker Compose, one-click templates.
 - Notifications (Discord, Slack, Telegram, email).
 - Multiple servers (Swarm workers), placement.

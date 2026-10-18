@@ -14,9 +14,12 @@ pub fn provider() -> AdminProvider {
         .resource::<crate::admin::resources::service_port_resource::ServicePortResource>()
         .resource::<crate::admin::resources::service_mount_resource::ServiceMountResource>()
         .resource::<crate::admin::resources::deployment_resource::DeploymentResource>()
+        .resource::<crate::admin::resources::database_backup_resource::DatabaseBackupResource>()
+        .resource::<crate::admin::resources::storage_provider_resource::StorageProviderResource>()
         // rustcms:resources
         // The apps interface first (React, host API v2).
         .page::<crate::admin::pages::dashboard_page::DashboardPage>()
+        .page::<crate::admin::pages::settings_page::SettingsPage>()
         .page::<crate::admin::pages::server_page::ServerPage>()
         .page::<crate::admin::pages::containers_page::ContainersPage>()
         .page::<crate::admin::pages::images_page::ImagesPage>()
