@@ -94,7 +94,11 @@ impl What {
     fn restore(&self, database: &str, source: Option<&str>) -> Option<Vec<String>> {
         match self {
             Self::Database(engine) => restore_command(*engine, database, source),
-            Self::Volume(path) => Some(sh(r#"exec tar -xzf - -C "$1""#, &[path])),
+            // Emptied first: the volume becomes the archive, nothing else.
+            Self::Volume(path) => Some(sh(
+                r#"find "$1" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && exec tar -xzf - -C "$1""#,
+                &[path],
+            )),
         }
     }
 
@@ -517,13 +521,15 @@ async fn target(
     let (service, owner) = owner_of(db, run.service_id)
         .await
         .map_err(|_| "the service is gone")?;
+    let mut expected_volume = None;
     let what = match &run.volume {
         // Still one of its volumes (checked again).
         Some(path) => {
-            volume_at(db, service.id, path)
+            let mount = volume_at(db, service.id, path)
                 .await
                 .map_err(|e| e.to_string())?
                 .ok_or("the volume is no longer mounted in this service")?;
+            expected_volume = Some(format!("rdp_{owner}_{}", mount.name.unwrap_or_default()));
             What::Volume(path.clone())
         }
         None => What::Database(
@@ -556,6 +562,32 @@ async fn target(
                 .clone()
         })
         .ok_or("the service is not running (deploy it first)")?;
+    // A volume as the container has it (not what the panel's records say):
+    // that named volume at that path, and nothing mounted inside it.
+    if let (What::Volume(path), Some(expected)) = (&what, &expected_volume) {
+        let inspect = docker
+            .engine()
+            .inspect_container(&container)
+            .await
+            .map_err(|e| format!("the container: {e}"))?;
+        let mounts = inspect["Mounts"].as_array().cloned().unwrap_or_default();
+        let at = |m: &serde_json::Value| m["Destination"].as_str().unwrap_or_default().to_owned();
+        let here = mounts.iter().find(|m| at(m) == *path);
+        let ok = here.is_some_and(|m| {
+            m["Type"].as_str() == Some("volume") && m["Name"].as_str() == Some(expected.as_str())
+        });
+        if !ok {
+            return Err(format!(
+                "{path} is not the volume {expected} in the running container (deploy the service first)"
+            ));
+        }
+        let prefix = format!("{}/", path.trim_end_matches('/'));
+        if mounts.iter().any(|m| at(m).starts_with(&prefix)) {
+            return Err(format!(
+                "something else is mounted inside {path}: not backed up"
+            ));
+        }
+    }
     log.line(format!(
         "{} {owner}, provider {}",
         match &what {

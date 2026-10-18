@@ -48,10 +48,16 @@ function whatOptions(t: (s: string) => string, tab: Tab): Array<[string, string]
   ];
 }
 
-/** A label for a volume backup's files: the volume's last folder. */
+/** A volume backup's label in its files: its whole path (`/var/lib/data` →
+ * `var-lib-data`), so two volumes never share files (or retention). */
 function volumeLabel(path: string): string {
-  const name = path.split("/").filter(Boolean).pop() ?? "volume";
-  return name.replace(/[^A-Za-z0-9_$-]/g, "-").replace(/^-+/, "") || "volume";
+  const name = path
+    .split("/")
+    .filter(Boolean)
+    .join("-")
+    .replace(/[^A-Za-z0-9_$-]/g, "-")
+    .replace(/^-+/, "");
+  return name.slice(0, 64) || "volume";
 }
 type Props = PageProps<unknown> & { d: ServiceDetail };
 
@@ -286,7 +292,7 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
         )}
         <ErrorNote error={error} />
         <div className="rdp2-row rdp2-end">
-          <Button type="submit" variant="destructive" disabled={!file || !database.trim()}>
+          <Button type="submit" variant="destructive" disabled={!file || (!what && !database.trim())}>
             {t("Restore")}
           </Button>
         </div>

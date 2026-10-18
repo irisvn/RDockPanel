@@ -523,6 +523,35 @@ db_test!(
         let tar = calls.iter().find(|c| c.contains("tar -czf")).unwrap();
         assert!(tar.ends_with(" /usr/share/nginx/html"), "{tar}");
 
+        // The container is what counts: a record changed without a deploy
+        // (another volume named there) is refused.
+        {
+            use rdockpanel::models::service_mount;
+            use sea_orm::{ColumnTrait, QueryFilter};
+            let mount = service_mount::Entity::find()
+                .filter(service_mount::Column::ServiceId.eq(web))
+                .one(app.state().db())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut renamed = mount.clone().into_active_model();
+            renamed.name = Set(Some("other".to_owned()));
+            renamed.update(app.state().db()).await.unwrap();
+            admin
+                .post_json(
+                    &app.admin_api(&format!("x/apps/backups/{backup}/run")),
+                    &json!({}),
+                )
+                .await
+                .assert_status(StatusCode::ACCEPTED);
+            let refused = run_last(&app, web).await;
+            assert_eq!(refused.status, "failed");
+            assert!(refused.error.unwrap().contains("is not the volume"));
+            let mut back = mount.into_active_model();
+            back.name = Set(Some("content".to_owned()));
+            back.update(app.state().db()).await.unwrap();
+        }
+
         // A restore feeds the archive (checked whole first) to tar.
         let archive = {
             let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());

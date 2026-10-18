@@ -269,8 +269,9 @@ pub(crate) async fn sync_repo(
     let reference = branch.unwrap_or("HEAD");
     // The first time an empty repository (any reference fetches then, a
     // commit too); after, tracked files back as committed (`reset`), never
-    // an untracked file overwritten (no `--force`: a commit replacing
-    // `./data` fails the deployment rather than erase it).
+    // an untracked or ignored file overwritten (no `--force`,
+    // `--no-overwrite-ignore`: a commit replacing `./data` fails the
+    // deployment rather than erase it).
     if !checkout.join(".git").is_dir() {
         log.line(format!("cloning {url} ({reference})")).await;
         std::fs::create_dir_all(checkout).map_err(|e| failed(e.to_string()))?;
@@ -289,12 +290,20 @@ pub(crate) async fn sync_repo(
             &mut git(&["-C", &at, "remote", "set-url", "origin", "--", url]),
         )
         .await?;
-        run(
-            log,
-            "resetting tracked files",
-            &mut git(&["-C", &at, "reset", "-q", "--hard", "HEAD"]),
-        )
-        .await?;
+        // Tracked files back as committed (when there is a commit: a first
+        // fetch that failed left none).
+        if git(&["-C", &at, "rev-parse", "-q", "--verify", "HEAD"])
+            .output()
+            .await
+            .is_ok_and(|o| o.status.success())
+        {
+            run(
+                log,
+                "resetting tracked files",
+                &mut git(&["-C", &at, "reset", "-q", "--hard", "HEAD"]),
+            )
+            .await?;
+        }
     }
     run(
         log,
@@ -307,7 +316,15 @@ pub(crate) async fn sync_repo(
     run(
         log,
         "the checkout",
-        &mut git(&["-C", &at, "checkout", "-q", "--detach", "FETCH_HEAD"]),
+        &mut git(&[
+            "-C",
+            &at,
+            "checkout",
+            "-q",
+            "--no-overwrite-ignore",
+            "--detach",
+            "FETCH_HEAD",
+        ]),
     )
     .await?;
     let commit = run(

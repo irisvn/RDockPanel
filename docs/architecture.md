@@ -221,7 +221,9 @@ keeps its append-only file) has **backup configurations**: a database, a five-fi
 
 A configuration may back up a **volume** of any service instead (its path in the container): a run
 then runs `tar -czf - -C <path> .` in the service's running container (so the image needs `tar`),
-writes `….tar.gz`, and a restore feeds an archive (checked whole first) to `tar -xzf - -C <path>`.
+writes `….tar.gz`, and a restore empties the directory and feeds an archive (checked whole
+first) to `tar -xzf - -C <path>` (stop what writes there first). The volume is checked in the
+running container itself: the service's named volume at that path, nothing mounted inside it.
 
 A run (`backup_runs`, the `backup.run` job on the `backup` queue, one attempt, up to 3 hours) has
 its file, provider and retention fixed when it is asked for (a later edit changes later runs). One

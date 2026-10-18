@@ -154,6 +154,29 @@ impl DockerApi for FakeDocker {
         Ok(self.containers.lock().unwrap().clone())
     }
     async fn inspect_container(&self, id: &str) -> DockerResult<Value> {
+        // A task's container (`ctr-<service>-<slot>`): its service's mounts.
+        if let Some(rest) = id.strip_prefix("ctr-")
+            && let Some((service, _)) = rest.rsplit_once('-')
+            && let Some(found) = self.services.lock().unwrap().get(service)
+        {
+            let mounts: Vec<Value> = found
+                .spec
+                .as_ref()
+                .and_then(|s| s.task_template.as_ref())
+                .and_then(|t| t.container_spec.as_ref())
+                .and_then(|c| c.mounts.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m| {
+                    json!({
+                        "Type": m.typ.map(|t| t.to_string()).unwrap_or_default(),
+                        "Name": m.source,
+                        "Destination": m.target,
+                    })
+                })
+                .collect();
+            return Ok(json!({"Id": id, "Mounts": mounts}));
+        }
         let c = self.container(id)?;
         Ok(
             json!({"Id": c.id, "Config": {"Labels": c.labels, "Env": ["PATH=/bin", "DB_PASSWORD=hunter2"]}}),
