@@ -966,7 +966,8 @@ sleep 1
     let id = match client.create_exec(container, config).await.map_err(map_err) {
         Ok(created) => created.id,
         // The container is gone, with its processes.
-        Err(DockerError::NotFound) => return Ok(()),
+        // The container is gone, or stopped: so are its processes.
+        Err(DockerError::NotFound) | Err(DockerError::Conflict(_)) => return Ok(()),
         Err(err) => return Err(err),
     };
     let start = StartExecOptions {

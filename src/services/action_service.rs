@@ -211,6 +211,9 @@ pub async fn reap_stale<C: ConnectionTrait>(db: &C) -> AppResult<u64> {
         .col_expr(action::Column::UpdatedAt, Expr::value(now))
         .filter(action::Column::Status.is_in([action::QUEUED, action::RUNNING]))
         .filter(action::Column::UpdatedAt.lt(now - STALE_AFTER))
+        // A script's run ends once its processes are known dead (the
+        // reaper's `abandoned_scripts`), never here.
+        .filter(action::Column::Kind.ne("script.run"))
         .exec(db)
         .await?;
     Ok(result.rows_affected)
