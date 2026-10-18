@@ -159,6 +159,16 @@ db_test!(
         assert_eq!(said["title"], "deploy of shop/web succeeded");
         assert_eq!(said["data"]["status"], "succeeded");
 
+        // Its secret never goes elsewhere: another kind needs it again.
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{}/{id}", records(&app, "notification_channels")),
+                Some(&json!({"kind": "email", "smtp_host": "evil.example", "smtp_from": "a@b.c", "email_to": "d@e.f"})),
+            )
+            .await
+            .assert_validation_error("secret");
+
         // A channel that cannot be reached says why (never its URL).
         let dead = create(
             &app,

@@ -200,8 +200,10 @@ keeps its append-only file) has **backup configurations**: a database, a five-fi
 A run (`backup_runs`, the `backup.run` job on the `backup` queue, one attempt, up to 3 hours) has
 its file, provider and retention fixed when it is asked for (a later edit changes later runs). One
 run of a service at a time (claimed with the service's row locked; another one running fails it).
-A running run beats every 30 s; one silent for 150 s (its process stopped) is marked failed by the
-every-minute tick and at boot. It finds the service's running task and runs the engine's own dump in its container (`docker exec`, no TTY):
+A running run beats every 30 s; one silent for 150 s (its process stopped) has its command killed
+in its container (the run records the container and the mark its processes carry) and is marked
+failed, by the every-minute tick, at boot and before another run starts; a run that finds itself
+taken for dead stops. It finds the service's running task and runs the engine's own dump in its container (`docker exec`, no TTY):
 `pg_dump --clean --if-exists`, `mysqldump`/`mariadb-dump` as root with `--single-transaction`,
 `mongodump --archive --gzip`. The credentials are the container's own environment (the panel
 passes none); the database is `$1` of `sh -c` (never parsed). The panel gzips SQL dumps as they
@@ -210,7 +212,8 @@ come (scratch files in a private `0700` directory), writes
 then deletes the oldest files of that service's database in that path beyond the retention (other
 files are left alone; a failed deletion is logged, the backup stands). Under a local root every
 folder is opened without following links (`openat`, `O_NOFOLLOW`), files are written aside
-(`0600`, a new file) and renamed. A **restore** downloads a file, gunzips SQL, feeds it to
+(`0600`, a new file) and renamed. A **restore** downloads a file and reads it whole first (SQL decompressed to a private file, a
+MongoDB archive checked): a corrupt file changes nothing. It then feeds it to
 `psql -v ON_ERROR_STOP=1 --single-transaction`, `mysql` or `mariadb` (`mongorestore --drop`, the
 archive's database renamed to the one asked), in place. A command whose caller goes away (a job
 timeout) is killed in the container (its processes carry a mark), never left half fed.
@@ -222,7 +225,8 @@ claimed in the database.
 ### Actions
 
 The Actions page (`/admin/p/actions`, like EasyPanel's) lists the last 100 deployments, backup runs
-and Docker actions (pulls, prunes, container actions), newest first, each kind with its permission
+and Docker actions (pulls, prunes, container actions), newest first, each kind with its permissions
+(deployments: `deployments.view_any` and `deployments.view`)
 (Docker actions: the caller's own, every one with `system.manage`); a row opens its service's tab or
 its log.
 
@@ -231,7 +235,8 @@ its log.
 As EasyPanel's (Settings → Notifications). A channel is Discord or Slack (their webhook URL), a
 Telegram bot (token and chat), email (SMTP: port 465 TLS, else STARTTLS required) or a webhook (a
 JSON `{event, ok, title, details, data}` POST). Its URL, token or SMTP password is sealed (context
-`notification_channels.secret`). Each channel picks its events: deployments (Deploy and Rollback
+`notification_channels.secret`); changing a channel's kind or SMTP server needs it entered again
+(never the old one sent elsewhere). Each channel picks its events: deployments (Deploy and Rollback
 that succeeded, and every failure), database backups and restores, and the server's disk at or over
 its threshold (checked every 5 minutes, said at most every 6 hours per channel). Sent in the
 background, 15 s per channel, never retried; a failure is logged (never the URL). "Send test

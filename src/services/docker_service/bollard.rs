@@ -500,10 +500,10 @@ impl DockerApi for BollardDocker {
         &self,
         container: &str,
         cmd: Vec<String>,
+        mark: &str,
         input: Option<BoxStream<'static, Vec<u8>>>,
     ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>> {
-        // Its processes carry a mark: killed if the caller goes away.
-        let token = crate::services::database_service::random_string(24);
+        let token = mark.to_owned();
         let config = CreateExecOptions {
             attach_stdin: Some(input.is_some()),
             attach_stdout: Some(true),
@@ -603,6 +603,10 @@ impl DockerApi for BollardDocker {
         })
         .boxed())
     }
+    async fn kill_marked(&self, container: &str, mark: &str) -> DockerResult<()> {
+        kill_marked(&self.client, container, mark).await
+    }
+
     async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
         // By its exact name, inspected (lists may leave out the labels).
         match self

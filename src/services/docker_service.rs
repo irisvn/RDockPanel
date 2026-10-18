@@ -365,12 +365,17 @@ pub trait DockerApi: Send + Sync {
     async fn resize_exec(&self, exec_id: &str, size: TermSize) -> DockerResult<()>;
     /// Runs `cmd` in the container (no TTY; the container's environment),
     /// `input` fed to its standard input: what it writes, then its exit code.
+    /// Its processes carry [`SESSION_ENV`]`=mark`: killed if the caller goes
+    /// away, or later by [`DockerApi::kill_marked`].
     async fn run_in_container(
         &self,
         container: &str,
         cmd: Vec<String>,
+        mark: &str,
         input: Option<BoxStream<'static, Vec<u8>>>,
     ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>>;
+    /// Kills the container's processes carrying [`SESSION_ENV`]`=mark`.
+    async fn kill_marked(&self, container: &str, mark: &str) -> DockerResult<()>;
     /// Ends every process of the container's sessions marked with `token`:
     /// hangs them up, then kills what is left.
     async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()>;
@@ -903,8 +908,12 @@ impl DockerApi for Unavailable {
         &self,
         _: &str,
         _: Vec<String>,
+        _: &str,
         _: Option<BoxStream<'static, Vec<u8>>>,
     ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>> {
+        Err(self.err())
+    }
+    async fn kill_marked(&self, _: &str, _: &str) -> DockerResult<()> {
         Err(self.err())
     }
 }

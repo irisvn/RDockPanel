@@ -124,7 +124,14 @@ impl ServiceProvider for AppServiceProvider {
             Ok(n) => tracing::info!(n, "deployments interrupted by a stop"),
             Err(err) => tracing::debug!(%err, "interrupted deployments not checked"),
         }
-        match crate::services::backup_service::recover_interrupted(state.db()).await {
+        match crate::services::backup_service::recover_interrupted(
+            state.db(),
+            state
+                .service::<crate::services::docker_service::Docker>()
+                .as_deref(),
+        )
+        .await
+        {
             Ok(0) => {}
             Ok(n) => tracing::info!(n, "backups interrupted by a stop"),
             Err(err) => tracing::debug!(%err, "interrupted backups not checked"),

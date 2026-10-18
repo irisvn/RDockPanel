@@ -24,6 +24,10 @@ pub struct Model {
     pub size: Option<i64>,
     /// A backup: the files kept, as configured when it was asked for.
     pub retention: Option<i32>,
+    /// While it runs: the container its command runs in, and the mark its
+    /// processes carry (killed when the run is found dead).
+    pub container: Option<String>,
+    pub mark: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub log: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]

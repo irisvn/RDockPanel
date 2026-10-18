@@ -88,7 +88,7 @@ resources.
 
 | Method | Path | Permission | |
 |---|---|---|---|
-| GET | `/actions` | projects.view_any | the last 100 deployments (with deployments.view_any), backup runs (database_backups.view_any) and Docker actions (docker.view; own unless system.manage): `{type, id, what, status, error, detail?, target?: {project, service}, created_at, finished_at}` |
+| GET | `/actions` | projects.view_any | the last 100 deployments (with deployments.view_any and deployments.view), backup runs (database_backups.view_any) and Docker actions (docker.view; own unless system.manage): `{type, id, what, status, error, detail?, target?: {project, service}, created_at, finished_at}` |
 
 ## Notifications (`/apps`)
 

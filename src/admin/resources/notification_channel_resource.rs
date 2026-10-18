@@ -125,6 +125,29 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&notification_channel::Model>) -
     };
     let kind = after("kind", record.map(|r| r.kind.as_str())).unwrap_or_default();
     let secret = new_secret(data);
+    // A secret goes where it was meant to: another kind of channel, or
+    // another SMTP server, needs it entered again (never the old one sent
+    // elsewhere).
+    let moved = record.is_some_and(|r| {
+        let changed = |field: &str, old: Option<String>| {
+            data.contains_key(field)
+                && data.get(field).map(|v| match v {
+                    Value::Null => None,
+                    Value::String(s) => Some(s.trim().to_owned()),
+                    other => Some(other.to_string()),
+                }) != Some(old)
+        };
+        r.kind != kind
+            || changed("smtp_host", r.smtp_host.clone())
+            || changed("smtp_port", r.smtp_port.map(|p| p.to_string()))
+            || changed("smtp_username", r.smtp_username.clone())
+    });
+    if moved && secret.is_none() && record.is_some_and(|r| r.secret.is_some()) {
+        errors.add(
+            "secret",
+            ctx.t("enter it again: the channel's kind or server changed"),
+        );
+    }
     let has_secret = secret.is_some() || record.is_some_and(|r| r.secret.is_some());
     match kind.as_str() {
         "discord" | "slack" | "webhook" => {

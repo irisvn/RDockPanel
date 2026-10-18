@@ -1,7 +1,8 @@
 //! The Actions page (`/admin/api/x/apps/actions`), like EasyPanel's: what
 //! the panel did lately, newest first — deployments, database backups and
 //! restores, Docker actions (pulls, prunes, container actions) — each kind
-//! only with its permission (Docker actions: the caller's own, every one
+//! only with its permissions (deployments: `deployments.view_any` and
+//! `deployments.view`, as their pages) (Docker actions: the caller's own, every one
 //! with `system.manage`).
 
 use std::collections::HashMap;
@@ -43,7 +44,7 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
             .unwrap_or(Value::Null)
     };
     let mut items: Vec<Value> = vec![];
-    if principal.can("deployments.view_any") {
+    if principal.can("deployments.view_any") && principal.can("deployments.view") {
         for row in deployment::Entity::find()
             .order_by_desc(deployment::Column::Id)
             .limit(LIMIT)

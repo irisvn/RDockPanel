@@ -273,6 +273,24 @@ db_test!(
         );
         assert!(fake.calls().iter().any(|c| c.contains("psql")));
 
+        // A corrupt file fails before anything reaches the database.
+        std::fs::write(root.join("prod/shop/broken.sql.gz"), b"\x1f\x8bnot gzip").unwrap();
+        let runs_before = fake.calls().iter().filter(|c| c.contains("psql")).count();
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{id}/restore")),
+                &json!({"storage_provider_id": provider.parse::<i64>().unwrap(), "file": "prod/shop/broken.sql.gz", "database": "shop"}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        let broken = run_last(&app, id).await;
+        assert_eq!(broken.status, "failed");
+        assert!(broken.error.unwrap().contains("not a valid gzip"));
+        assert_eq!(
+            fake.calls().iter().filter(|c| c.contains("psql")).count(),
+            runs_before
+        );
+
         // One run of a service at a time: another one running fails this one.
         let mut busy = backup_run::Entity::find_by_id(restored.id)
             .one(app.state().db())
@@ -309,6 +327,14 @@ db_test!(
             .unwrap()
             .unwrap();
         assert_eq!(dead.status, "failed");
+        // Its command killed in the container (a restore never goes on).
+        assert!(
+            fake.calls()
+                .iter()
+                .any(|c| c.starts_with("kill ctr-shop_db-1 rdp-backup-")),
+            "{:?}",
+            fake.calls()
+        );
 
         // A failing dump fails the run, with the engine's message.
         *fake.exec_exit.lock().unwrap() = 1;

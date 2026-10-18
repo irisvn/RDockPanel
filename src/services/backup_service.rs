@@ -100,7 +100,7 @@ fn dump_command(engine: Engine, database: &str) -> Option<Vec<String>> {
 fn restore_command(engine: Engine, database: &str, source: Option<&str>) -> Option<Vec<String>> {
     let script = match engine {
         Engine::Postgres => {
-            r#"PGPASSWORD="$POSTGRES_PASSWORD" exec psql -q -v ON_ERROR_STOP=1 --single-transaction -h 127.0.0.1 -U "$POSTGRES_USER" -d "$1""#
+            r#"PGPASSWORD="$POSTGRES_PASSWORD" exec psql -q -v ON_ERROR_STOP=1 --single-transaction -h 127.0.0.1 -U "$POSTGRES_USER" -d "$1" -f -"#
         }
         Engine::Mysql => r#"exec mysql -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" "$1""#,
         Engine::Mariadb => r#"exec mariadb -h 127.0.0.1 -uroot -p"$MARIADB_ROOT_PASSWORD" "$1""#,
@@ -312,6 +312,8 @@ pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
     if row.status != "queued" {
         return Ok(());
     }
+    // A dead run's command killed before another one is let in.
+    recover_interrupted(db, state.service::<Docker>().as_deref()).await?;
     let now = Utc::now();
     let txn = db.begin().await?;
     // The service locked: two runs claim one after the other.
@@ -376,12 +378,17 @@ pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
             tokio::select! {
                 result = &mut work => break result,
                 _ = beat.tick() => {
-                    let _ = backup_run::Entity::update_many()
+                    let beat = backup_run::Entity::update_many()
                         .col_expr(backup_run::Column::UpdatedAt, Expr::value(Utc::now()))
                         .filter(backup_run::Column::Id.eq(id))
                         .filter(backup_run::Column::Status.eq("running"))
                         .exec(db)
                         .await;
+                    // Taken for dead meanwhile: stopped (its command killed
+                    // as the work is dropped).
+                    if beat.is_ok_and(|b| b.rows_affected == 0) {
+                        break Err("the run was taken for dead (no heartbeat)".to_owned());
+                    }
                 }
             }
         }
@@ -401,7 +408,10 @@ pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
     active.finished_at = Set(Some(Utc::now()));
     active.updated_at = Set(Utc::now());
     let done = active.update(db).await?;
-    crate::services::notify_service::backup_finished(state, &done).await;
+    let notify = state.clone();
+    tokio::spawn(async move {
+        crate::services::notify_service::backup_finished(&notify, &done).await;
+    });
     Ok(())
 }
 
@@ -455,6 +465,20 @@ async fn target(
     Ok((engine, store, container, owner))
 }
 
+/// A mark for a run's command, recorded with the container before it runs
+/// (a run found dead has its command killed: [`recover_interrupted`]).
+async fn marked(db: &DatabaseConnection, run: i64, container: &str) -> Result<String, String> {
+    let mark = format!("rdp-backup-{}", random_string(20));
+    backup_run::Entity::update_many()
+        .col_expr(backup_run::Column::Container, Expr::value(container))
+        .col_expr(backup_run::Column::Mark, Expr::value(mark.as_str()))
+        .filter(backup_run::Column::Id.eq(run))
+        .exec(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(mark)
+}
+
 /// The engines warn about a password on the command line: not worth a line.
 fn noise(line: &str) -> bool {
     line.contains("password on the command line")
@@ -485,9 +509,10 @@ async fn backup(
         .map_err(|e| e.to_string())?;
     let mut encoder =
         gzip.then(|| flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default()));
+    let mark = marked(state.db(), run.id, &container).await?;
     let mut chunks = docker
         .engine()
-        .run_in_container(&container, cmd, None)
+        .run_in_container(&container, cmd, &mark, None)
         .await
         .map_err(|e| format!("the dump could not start: {e}"))?;
     let mut code = None;
@@ -586,10 +611,20 @@ async fn restore(
         .await;
     let cmd = restore_command(engine, &run.database_name, database_of(&key))
         .ok_or("this engine is not restored")?;
-    // The file, decompressed when the panel compressed it, as the client's input.
+    // Checked whole before anything reaches the database: a corrupt file
+    // changes nothing. SQL is decompressed to a file, Mongo's archive read
+    // through once (mongorestore takes it gzipped).
+    let source = path.clone();
+    let plain = scratch.0.join("restore.sql");
+    let target = plain.clone();
+    tokio::task::spawn_blocking(move || unpack(&source, gzip.then_some(target.as_path())))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("the file is not a valid gzip archive: {e}"))?;
+    let feed_from = if gzip { plain } else { path.clone() };
+    // The file as the client's input.
     let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
-    let reading = path.clone();
-    let reader = tokio::task::spawn_blocking(move || feed(&reading, gzip, &tx));
+    let reader = tokio::task::spawn_blocking(move || feed(&feed_from, &tx));
     let input = futures_util::stream::unfold(rx, |mut rx| async move {
         rx.recv().await.map(|chunk| (chunk, rx))
     })
@@ -597,9 +632,10 @@ async fn restore(
     log.line(format!("restoring into {}", run.database_name))
         .await;
     let docker = state.service::<Docker>().ok_or("Docker is not available")?;
+    let mark = marked(state.db(), run.id, &container).await?;
     let mut chunks = docker
         .engine()
-        .run_in_container(&container, cmd, Some(input))
+        .run_in_container(&container, cmd, &mark, Some(input))
         .await
         .map_err(|e| format!("the restore could not start: {e}"))?;
     let mut code = None;
@@ -630,15 +666,28 @@ async fn restore(
     }
 }
 
-/// Sends `path` (gunzipped when `gzip`) in chunks; stops when nobody reads.
-fn feed(path: &Path, gzip: bool, tx: &tokio::sync::mpsc::Sender<Vec<u8>>) -> std::io::Result<()> {
+/// Reads the gzip file `path` whole (a corrupt one fails here), written
+/// decompressed to `to` (`0600`) when given.
+fn unpack(path: &Path, to: Option<&Path>) -> std::io::Result<()> {
+    let mut reader = flate2::read::MultiGzDecoder::new(std::fs::File::open(path)?);
+    match to {
+        Some(to) => {
+            let mut out = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode_private()
+                .open(to)?;
+            std::io::copy(&mut reader, &mut out)?;
+            out.sync_all()
+        }
+        None => std::io::copy(&mut reader, &mut std::io::sink()).map(drop),
+    }
+}
+
+/// Sends `path` in chunks; stops when nobody reads.
+fn feed(path: &Path, tx: &tokio::sync::mpsc::Sender<Vec<u8>>) -> std::io::Result<()> {
     use std::io::Read;
-    let file = std::fs::File::open(path)?;
-    let mut reader: Box<dyn Read> = if gzip {
-        Box::new(flate2::read::GzDecoder::new(file))
-    } else {
-        Box::new(file)
-    };
+    let mut reader = std::fs::File::open(path)?;
     let mut buf = vec![0; 256 * 1024];
     loop {
         let n = reader.read(&mut buf)?;
@@ -654,7 +703,7 @@ fn feed(path: &Path, gzip: bool, tx: &tokio::sync::mpsc::Sender<Vec<u8>>) -> std
 /// instances never run one twice.
 pub async fn tick(state: &AppState) -> AppResult<usize> {
     let db = state.db();
-    let n = recover_interrupted(db).await?;
+    let n = recover_interrupted(db, state.service::<Docker>().as_deref()).await?;
     if n > 0 {
         tracing::warn!(n, "backups interrupted (their run stopped)");
     }
@@ -709,10 +758,32 @@ fn latest_slot(
     Some(slot)
 }
 
-/// Runs whose process stopped (no heartbeat for a while): failed. At boot
-/// and every minute; a run still alive elsewhere keeps beating.
-pub async fn recover_interrupted(db: &DatabaseConnection) -> AppResult<u64> {
+/// Runs whose process stopped (no heartbeat for a while): their command
+/// killed in its container (a restore never goes on unattended), then
+/// failed. At boot, every minute, and before a run starts; a run still alive
+/// elsewhere keeps beating.
+pub async fn recover_interrupted(
+    db: &DatabaseConnection,
+    docker: Option<&Docker>,
+) -> AppResult<u64> {
     let now = Utc::now();
+    let dead = backup_run::Entity::find()
+        .filter(backup_run::Column::Status.eq("running"))
+        .filter(backup_run::Column::UpdatedAt.lt(now - stale()))
+        .all(db)
+        .await?;
+    if dead.is_empty() {
+        return Ok(0);
+    }
+    if let Some(docker) = docker {
+        for run in &dead {
+            if let (Some(container), Some(mark)) = (&run.container, &run.mark)
+                && let Err(err) = docker.engine().kill_marked(container, mark).await
+            {
+                tracing::debug!(%err, run = run.id, "a dead run's command not killed");
+            }
+        }
+    }
     Ok(backup_run::Entity::update_many()
         .col_expr(backup_run::Column::Status, Expr::value("failed"))
         .col_expr(
@@ -721,8 +792,8 @@ pub async fn recover_interrupted(db: &DatabaseConnection) -> AppResult<u64> {
         )
         .col_expr(backup_run::Column::FinishedAt, Expr::value(now))
         .col_expr(backup_run::Column::UpdatedAt, Expr::value(now))
+        .filter(backup_run::Column::Id.is_in(dead.iter().map(|r| r.id)))
         .filter(backup_run::Column::Status.eq("running"))
-        .filter(backup_run::Column::UpdatedAt.lt(now - stale()))
         .exec(db)
         .await?
         .rows_affected)

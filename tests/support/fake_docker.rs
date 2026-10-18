@@ -283,6 +283,7 @@ impl DockerApi for FakeDocker {
         &self,
         container: &str,
         cmd: Vec<String>,
+        _mark: &str,
         input: Option<BoxStream<'static, Vec<u8>>>,
     ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>> {
         self.record(format!("run {container}: {}", cmd.join(" ")));
@@ -302,6 +303,11 @@ impl DockerApi for FakeDocker {
         }
         chunks.push(Ok(ExecChunk::Exit(code)));
         Ok(stream::iter(chunks).boxed())
+    }
+
+    async fn kill_marked(&self, container: &str, mark: &str) -> DockerResult<()> {
+        self.record(format!("kill {container} {mark}"));
+        Ok(())
     }
 
     async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()> {
