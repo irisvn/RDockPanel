@@ -275,7 +275,31 @@ pub async fn deployed_routes(
     else {
         return Ok(None);
     };
-    let snapshot: Snapshot = serde_json::from_value(deployed.spec).map_err(AppError::internal)?;
+    let mut snapshot: Snapshot =
+        serde_json::from_value(deployed.spec).map_err(AppError::internal)?;
+    // Its basic authentication's users, with their hashes now (never kept
+    // in a deployment).
+    if !snapshot.basic_auth.is_empty() {
+        let names: std::collections::HashSet<String> = snapshot
+            .basic_auth
+            .iter()
+            .filter_map(|u| u.split_once(':').map(|(n, _)| n.to_owned()))
+            .collect();
+        let mut users: Vec<String> = crate::models::service_basic_auth::Entity::find()
+            .filter(crate::models::service_basic_auth::Column::ServiceId.eq(row.id))
+            .all(db)
+            .await?
+            .into_iter()
+            .filter(|u| names.contains(&u.username))
+            .map(|u| format!("{}:{}", u.username, u.password_hash))
+            .collect();
+        users.sort();
+        // Every user removed since: nobody gets in (never open by accident).
+        if users.is_empty() {
+            users.push("nobody:!".to_owned());
+        }
+        snapshot.basic_auth = users;
+    }
     Ok(snapshot
         .running
         .then(|| routes(&snapshot, options))

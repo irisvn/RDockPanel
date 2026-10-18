@@ -80,6 +80,13 @@ Nixpacks run is limited to 10 minutes, the context to 1 GB. A trigger URL's toke
 request log records paths only) and stored as its SHA-256 only; anyone with the URL can deploy the service (not change it): make a new one when it
 leaks.
 
+## Traefik's files
+
+Traefik reads its dynamic files as Go templates before parsing them: every value the panel writes
+there is checked (hosts, paths and names by their character sets; redirects may not contain `{{`
+or `}}`), so a user's value never runs a template (which could read Traefik's environment).
+Basic authentication hashes are written there but never kept in a deployment's snapshot.
+
 ## Compose services
 
 A Compose file can run privileged containers and mount any host directory: creating or editing a

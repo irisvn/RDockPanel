@@ -195,8 +195,10 @@ As EasyPanel's Redirects and Security tabs. A service's redirects (`service_redi
 expression over the request's URL, its replacement, permanent or not, on or off) and the users of
 its HTTP basic authentication (`service_basic_auth`: bcrypt hashes, never shown) become Traefik
 middlewares (`redirectRegex`, then `basicAuth`) on every router of its domains. They are part of
-the deployment's snapshot (the hashes too: the routes of a rollback are those of then) and apply on
-the next deployment. EasyPanel templates' `basicAuth` and `redirects` are created with the service.
+the deployment's snapshot (users as a digest of their hash: the hashes are read from their table
+when the routes are written, never kept in a deployment) and apply on the next deployment.
+Regular expressions are checked as Go's (inline flags `i`, `m`, `s`, `U` only), and no value
+written to Traefik's files may contain `{{` or `}}` (Traefik reads them as Go templates). EasyPanel templates' `basicAuth` and `redirects` are created with the service.
 
 ### Compose services
 

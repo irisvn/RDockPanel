@@ -843,15 +843,46 @@ fn check_tar(path: &Path) -> std::io::Result<()> {
     for entry in archive.entries()? {
         let mut entry = entry?;
         let name = entry.path()?.into_owned();
-        if name.is_absolute()
-            || name
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
+        let outside = |p: &Path| {
+            p.is_absolute()
+                || p.components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+        };
+        if outside(&name) {
             return Err(std::io::Error::other(format!(
                 "{} leaves the volume",
                 name.display()
             )));
+        }
+        // Files, directories and links only; a hard link within the archive.
+        use tar::EntryType;
+        match entry.header().entry_type() {
+            EntryType::Regular
+            | EntryType::Continuous
+            | EntryType::Directory
+            | EntryType::Symlink
+            | EntryType::GNULongName
+            | EntryType::GNULongLink
+            | EntryType::XHeader
+            | EntryType::XGlobalHeader => {}
+            EntryType::Link => {
+                let target = entry
+                    .link_name()?
+                    .map(|t| t.into_owned())
+                    .unwrap_or_default();
+                if target.as_os_str().is_empty() || outside(&target) {
+                    return Err(std::io::Error::other(format!(
+                        "the link {} leads out of the volume",
+                        name.display()
+                    )));
+                }
+            }
+            other => {
+                return Err(std::io::Error::other(format!(
+                    "{} is a {other:?}: not restored",
+                    name.display()
+                )));
+            }
         }
         std::io::copy(&mut entry, &mut std::io::sink())?;
         entries += 1;

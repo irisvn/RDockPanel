@@ -200,6 +200,14 @@ async fn apply(
             services.iter().any(|s| !s.mounts.is_empty()),
             "service_mounts.create",
         ),
+        (
+            services.iter().any(|s| !s.redirects.is_empty()),
+            "service_redirects.create",
+        ),
+        (
+            services.iter().any(|s| !s.basic_auth.is_empty()),
+            "services.update",
+        ),
     ] {
         if wanted && !principal.can(permission) {
             return Err(AppError::Forbidden);

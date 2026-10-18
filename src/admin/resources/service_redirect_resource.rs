@@ -9,6 +9,7 @@ use sea_orm::DatabaseTransaction;
 
 use crate::admin::text;
 use crate::models::service_redirect;
+use crate::services::deploy_service::check_redirect;
 
 pub struct ServiceRedirectResource;
 
@@ -87,12 +88,14 @@ impl Resource for ServiceRedirectResource {
 fn check(ctx: &Ctx, data: &Data) -> AppResult<()> {
     let mut errors = ValidationErrors::new();
     if let Some(regex) = text(data, "regex")
-        && (regex.trim().is_empty() || regex::Regex::new(regex).is_err())
+        && let Err(e) = check_redirect(regex, "x")
     {
-        errors.add("regex", ctx.t("is not a regular expression"));
+        errors.add("regex", ctx.t(e));
     }
-    if text(data, "replacement").is_some_and(|r| r.trim().is_empty()) {
-        errors.add("replacement", ctx.t("is required"));
+    if let Some(replacement) = text(data, "replacement")
+        && let Err(e) = check_redirect("x", replacement)
+    {
+        errors.add("replacement", ctx.t(e));
     }
     if errors.is_empty() {
         Ok(())

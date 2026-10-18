@@ -380,12 +380,8 @@ pub async fn create(
             errors.add("ports", "a protocol is tcp or udp");
         }
     }
-    if !errors.is_empty() {
-        return Err(errors.into());
-    }
-
     for (user, password) in &new.basic_auth {
-        if user.is_empty() || user.len() > 64 || user.contains(':') {
+        if !crate::services::deploy_service::valid_auth_user(user) {
             errors.add("basic_auth", format!("{user:?} is not a user name"));
         }
         if password.is_empty() || password.len() > 72 {
@@ -396,10 +392,16 @@ pub async fn create(
         }
     }
     for redirect in &new.redirects {
-        if regex::Regex::new(&redirect.regex).is_err() || redirect.replacement.trim().is_empty() {
-            errors.add("redirects", format!("{} is not a redirect", redirect.regex));
+        if let Err(e) =
+            crate::services::deploy_service::check_redirect(&redirect.regex, &redirect.replacement)
+        {
+            errors.add("redirects", format!("{}: {e}", redirect.regex));
         }
     }
+    if !errors.is_empty() {
+        return Err(errors.into());
+    }
+
     let now = Utc::now();
     let sealed = (!env.is_empty())
         .then(|| Encrypted::seal(keyring, &service::env_context(), &env))

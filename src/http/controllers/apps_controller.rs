@@ -707,12 +707,7 @@ pub async fn add_basic_auth(
     let row = service_of(&app, id).await?;
     let username = body.username.trim().to_owned();
     let mut errors = ValidationErrors::new();
-    if username.is_empty()
-        || username.len() > 64
-        || !username
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '@'))
-    {
+    if !crate::services::deploy_service::valid_auth_user(&username) {
         errors.add("username", "must be 1-64 letters, digits, _ - . @");
     }
     if body.password.len() < 8 || body.password.len() > 72 {

@@ -81,7 +81,9 @@ pub struct Snapshot {
     /// Redirects on its domains (those enabled, in order).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirects: Vec<Redirect>,
-    /// HTTP basic authentication on its domains: `user:bcrypt-hash`, by user.
+    /// HTTP basic authentication on its domains: `user:<digest of its
+    /// hash>`, by user (a password change is a change; the hashes
+    /// themselves stay in their table, read when the routes are written).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub basic_auth: Vec<String>,
 }
@@ -413,7 +415,13 @@ impl Snapshot {
             .collect();
         let mut users: Vec<String> = users
             .iter()
-            .map(|u| format!("{}:{}", u.username, u.password_hash))
+            .map(|u| {
+                format!(
+                    "{}:{}",
+                    u.username,
+                    &sha256_hex(u.password_hash.as_bytes())[..16]
+                )
+            })
             .collect();
         users.sort();
         self.basic_auth = users;
@@ -815,6 +823,59 @@ impl TraefikFile {
     }
 }
 
+/// A basic authentication user name: letters, digits, `_ - . @`.
+pub fn valid_auth_user(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '@'))
+}
+
+/// A redirect Traefik takes: a regular expression of Go's syntax (RE2:
+/// inline flags `i`, `m`, `s`, `U` only) and a replacement; neither with
+/// `{{` or `}}` (Traefik reads its files as Go templates first).
+pub fn check_redirect(regex: &str, replacement: &str) -> Result<(), &'static str> {
+    for text in [regex, replacement] {
+        if text.contains("{{") || text.contains("}}") {
+            return Err("may not contain {{ or }}");
+        }
+    }
+    if regex.trim().is_empty() || regex.len() > 500 || regex::Regex::new(regex).is_err() {
+        return Err("is not a regular expression");
+    }
+    // Inline flags Go knows: `(?i)`, `(?-s:…)`, … (not Rust's `x`, `u`, `R`).
+    let bytes = regex.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'(' && bytes[i + 1] == b'?' {
+            let flags: Vec<u8> = bytes[i + 2..]
+                .iter()
+                .copied()
+                .take_while(|b| b.is_ascii_alphabetic() || *b == b'-')
+                .collect();
+            let next = bytes.get(i + 2 + flags.len()).copied();
+            if !flags.is_empty()
+                && matches!(next, Some(b')') | Some(b':'))
+                && !flags
+                    .iter()
+                    .all(|f| matches!(f, b'i' | b'm' | b's' | b'U' | b'-'))
+            {
+                return Err("uses a flag Traefik does not know (only i, m, s, U)");
+            }
+        }
+        i += 1;
+    }
+    if replacement.trim().is_empty() || replacement.len() > 500 {
+        return Err("needs a replacement");
+    }
+    Ok(())
+}
+
 /// A Compose service's container on its project's network:
 /// `<project>_<service>_<container>`.
 pub fn compose_alias(base: &str, container: &str) -> String {
@@ -930,6 +991,27 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirects_traefik_takes() {
+        assert!(check_redirect("^https?://a.example/(.*)", "https://b.example/${1}").is_ok());
+        assert!(check_redirect("(?i)^http://A/(.*)", "x").is_ok());
+        for (regex, replacement) in [
+            ("^x", "{{ env \"SECRET\" }}"),
+            ("{{.}}", "x"),
+            ("([", "x"),
+            ("(?x)^a b", "x"),
+            ("^x", " "),
+        ] {
+            assert!(
+                check_redirect(regex, replacement).is_err(),
+                "{regex} {replacement}"
+            );
+        }
+        assert!(
+            valid_auth_user("ops@shop") && !valid_auth_user("a:b") && !valid_auth_user("{{x}}")
+        );
+    }
 
     /// The spec as JSON with every object's keys sorted (labels are hash
     /// maps: their order changes between runs).
