@@ -8,9 +8,8 @@ publish = false
 version = "0.3.2"
 
 [dependencies]
-# Core v0.4 is on main, not tagged yet: pin the commit. 218d9a3 is only in
-# the local checkout until it is pushed: then use the GitHub URL again.
-rustcms = { git = "file:///Users/ducdo/Documents/Dev/irisvn/RustCMS", rev = "218d9a3" }
+# Core v0.4 is on main, not tagged yet: pin the commit.
+rustcms = { git = "https://github.com/irisvn/RustCMS-Core", rev = "4429543" }
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "with-chrono", "with-uuid", "with-rust_decimal", "with-json"] }
 sea-orm-migration = { version = "=2.0.4", default-features = false }
 anyhow = "1"
@@ -20,12 +19,12 @@ bollard = "0.21"
 sysinfo = "0.39"
 futures-util = "0.3"
 rustix = { version = "1", features = ["fs"] }
-tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros", "io-util"] }
 thiserror = "2"
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-rustcms-testing = { git = "file:///Users/ducdo/Documents/Dev/irisvn/RustCMS", rev = "218d9a3" }
+rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", rev = "4429543" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 [workspace]

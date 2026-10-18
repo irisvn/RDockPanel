@@ -57,6 +57,12 @@ db_test!(
                 read("/server/live"),
                 read("/docker/containers/web/stats"),
                 read("/docker/containers/web/logs/follow"),
+                // The terminal needs docker.exec, which none of these has (its
+                // own tests open it: tests/feature/terminal.rs).
+                Case::new(Method::GET, "/docker/containers/web/exec")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
                 Case::new(Method::GET, "/docker/actions/1")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)

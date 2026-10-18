@@ -6,7 +6,9 @@
 use futures_util::StreamExt;
 use rustcms::Principal;
 use rustcms::audit::{self, AuditEntry, RequestMeta};
-use rustcms::auth::{EventStream, LiveSession, TargetFuture};
+use rustcms::auth::{
+    AdminSocket, EventStream, LiveSession, LiveSocket, SocketMessage, SocketResponse, TargetFuture,
+};
 use rustcms::prelude::*;
 use rustcms::queue;
 use rustcms::{AppError, AppResult, Json, ValidationErrors};
@@ -16,7 +18,9 @@ use serde_json::Value;
 use crate::jobs::pull_image::PullImage;
 use crate::models::action;
 use crate::services::action_service::{self, Initiator};
-use crate::services::docker_service::{ContainerAction, Docker, LogQuery, Scope};
+use crate::services::docker_service::{
+    ContainerAction, Docker, LogQuery, Scope, TermSize, session_token,
+};
 use crate::services::live_service::Live;
 
 /// Sees and touches the panel's own containers, volumes and networks.
@@ -55,7 +59,11 @@ fn docker(app: &AppState) -> AppResult<std::sync::Arc<Docker>> {
 }
 
 fn initiator(auth: &Auth, request: RequestMeta) -> Initiator {
-    Initiator::user(auth.principal(), request)
+    initiator_of(auth.principal(), request)
+}
+
+fn initiator_of(principal: &Principal, request: RequestMeta) -> Initiator {
+    Initiator::user(principal, request)
 }
 
 pub async fn info(State(app): State<AppState>) -> AppResult<Json<Value>> {
@@ -206,6 +214,176 @@ pub async fn live_stats(
     Ok(live
         .stream(stats.into_events())
         .target(container_target(docker, id)))
+}
+
+/// The terminal's opening size: `?cols=&rows=` (80×24 by default).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TermParams {
+    pub cols: Option<u16>,
+    pub rows: Option<u16>,
+}
+
+/// The log of a running terminal's action: this, then the session's mark.
+pub const TERMINAL_SESSION: &str = "session ";
+
+/// A terminal goes after this long without input or output.
+const TERMINAL_IDLE: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// A shell in the container, over a WebSocket (`docker.exec`; the panel's own
+/// containers also need `system.manage`). Binary messages are the terminal's
+/// bytes both ways; text messages are commands:
+/// `{"type":"resize","cols":…,"rows":…}`, authorized when they run. The
+/// session is logged as a `container.exec` action and audited (never what
+/// was typed).
+pub async fn exec(
+    live: LiveSocket,
+    State(app): State<AppState>,
+    request: RequestMeta,
+    Path(id): Path<String>,
+    Query(params): Query<TermParams>,
+) -> AppResult<SocketResponse> {
+    let docker = docker(&app)?;
+    let id = docker.container_id(&id, scope_of(live.principal())).await?;
+    let by = initiator_of(live.principal(), request);
+    let size = TermSize {
+        cols: params.cols.unwrap_or(80),
+        rows: params.rows.unwrap_or(24),
+    };
+    let (db, shell, target) = (
+        app.db().clone(),
+        docker.clone(),
+        container_target(docker, id.clone()),
+    );
+    Ok(live
+        .accept(move |mut socket| async move {
+            // Ends the action when the socket does, however it ends (the
+            // session's future may be dropped at any await).
+            let token = session_token();
+            let mut log = ExecLog::start(db, &by, &id, &token).await;
+            log.audit(&by, &id).await;
+            log.error = terminal(&shell, &id, size, &token, &mut socket).await.err();
+        })
+        .target(target))
+}
+
+/// Pumps the shell's bytes and the socket's messages until either ends.
+async fn terminal(
+    docker: &Docker,
+    id: &str,
+    size: TermSize,
+    token: &str,
+    socket: &mut AdminSocket,
+) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+    // Dropped with this future, however the socket ends: the shell ends too.
+    let mut shell = docker
+        .exec(id, size, Scope::System, token)
+        .await
+        .map_err(|err| err.to_string())?;
+    let idle = tokio::time::sleep(TERMINAL_IDLE);
+    tokio::pin!(idle);
+    loop {
+        tokio::select! {
+            message = socket.recv() => match message {
+                Some(SocketMessage::Binary(keys)) => {
+                    shell.session.input.write_all(&keys).await.map_err(|err| err.to_string())?;
+                    shell.session.input.flush().await.map_err(|err| err.to_string())?;
+                }
+                Some(SocketMessage::Text(command)) => {
+                    if let Ok(TermCommand::Resize(size)) = serde_json::from_str(&command) {
+                        // A command: checked again now, on a fresh principal.
+                        let Ok(principal) = socket.authorize().await else { return Ok(()) };
+                        if !principal.can("docker.exec") {
+                            return Ok(());
+                        }
+                        let _ = docker.resize_exec(&shell.session.id, size).await;
+                    }
+                }
+                None => return Ok(()),
+            },
+            output = shell.session.output.next() => match output {
+                Some(Ok(bytes)) => {
+                    // Messages stay under the framework's 64 KiB.
+                    for chunk in bytes.chunks(32 * 1024) {
+                        if socket.send(SocketMessage::Binary(chunk.to_vec())).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                }
+                Some(Err(err)) => return Err(err.to_string()),
+                None => {
+                    let _ = socket.send(SocketMessage::Text(json!({ "type": "exit" }).to_string())).await;
+                    return Ok(());
+                }
+            },
+            () = &mut idle => {
+                let _ = socket.send(SocketMessage::Text(json!({ "type": "idle" }).to_string())).await;
+                return Ok(());
+            }
+        }
+        idle.as_mut()
+            .reset(tokio::time::Instant::now() + TERMINAL_IDLE);
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TermCommand {
+    Resize(TermSize),
+}
+
+/// The `container.exec` action of a terminal: started with it, finished
+/// (with how long it lasted) when it is dropped.
+struct ExecLog {
+    db: sea_orm::DatabaseConnection,
+    row: Option<action::Model>,
+    started: std::time::Instant,
+    error: Option<String>,
+}
+
+impl ExecLog {
+    /// The action row, guarded at once: from here on, however this ends, the
+    /// row ends too. Its log names the session's mark until then, so a panel
+    /// stopped meanwhile ends the shell at its next boot.
+    async fn start(db: sea_orm::DatabaseConnection, by: &Initiator, id: &str, token: &str) -> Self {
+        let row = action_service::start(&db, by, "container.exec", id, action::RUNNING)
+            .await
+            .ok();
+        let row = match row {
+            Some(row) => action_service::note(&db, row, &format!("{TERMINAL_SESSION}{token}"))
+                .await
+                .ok(),
+            None => None,
+        };
+        Self {
+            db,
+            row,
+            started: std::time::Instant::now(),
+            error: None,
+        }
+    }
+
+    async fn audit(&self, by: &Initiator, id: &str) {
+        let entry = AuditEntry::new("docker.container.exec", "docker").key(id);
+        audit::record_detached(&self.db, &by.audit, entry).await;
+    }
+}
+
+impl Drop for ExecLog {
+    fn drop(&mut self) {
+        let (Some(row), Ok(runtime)) = (self.row.take(), tokio::runtime::Handle::try_current())
+        else {
+            return;
+        };
+        let (db, error) = (self.db.clone(), self.error.take());
+        let log = format!("session lasted {}s", self.started.elapsed().as_secs());
+        runtime.spawn(async move {
+            if let Err(err) = action_service::finish(&db, row, error, Some(&log)).await {
+                tracing::warn!(%err, "could not finish a terminal's action");
+            }
+        });
+    }
 }
 
 /// Ends a container's stream once its viewer may no longer see it (the

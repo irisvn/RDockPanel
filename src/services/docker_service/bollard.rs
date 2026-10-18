@@ -21,11 +21,21 @@ use futures_util::stream::{BoxStream, StreamExt};
 use rustcms::async_trait;
 use serde_json::Value;
 
+use ::bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
+use ::bollard::query_parameters::ResizeExecOptionsBuilder;
+
 use super::{
     ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ImageItem, LogLine, LogQuery, LogStream, NetworkItem, PruneReport, SwarmRole,
-    VolumeItem,
+    DockerResult, ExecSession, ImageItem, LogLine, LogQuery, LogStream, NetworkItem, PruneReport,
+    SESSION_ENV, SwarmRole, TermSize, VolumeItem,
 };
+
+/// bash when the image has it, else sh.
+const SHELL: [&str; 3] = [
+    "/bin/sh",
+    "-c",
+    "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi",
+];
 
 pub struct BollardDocker {
     client: Client,
@@ -429,6 +439,104 @@ impl DockerApi for BollardDocker {
 
     async fn remove_network(&self, id: &str) -> DockerResult<()> {
         self.client.remove_network(id).await.map_err(map_err)
+    }
+
+    async fn exec(
+        &self,
+        container: &str,
+        size: TermSize,
+        token: &str,
+    ) -> DockerResult<ExecSession> {
+        let config = CreateExecOptions {
+            attach_stdin: Some(true),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            tty: Some(true),
+            env: Some(vec![
+                "TERM=xterm-256color".to_owned(),
+                format!("{SESSION_ENV}={token}"),
+            ]),
+            cmd: Some(SHELL.iter().map(|part| (*part).to_owned()).collect()),
+            ..Default::default()
+        };
+        let id = self
+            .client
+            .create_exec(container, config)
+            .await
+            .map_err(map_err)?
+            .id;
+        let start = StartExecOptions {
+            detach: false,
+            tty: true,
+            output_capacity: None,
+        };
+        let StartExecResults::Attached { output, input } = self
+            .client
+            .start_exec(&id, Some(start))
+            .await
+            .map_err(map_err)?
+        else {
+            return Err(DockerError::Other("the shell started detached".to_owned()));
+        };
+        // Sized once it runs (Docker refuses to resize an exec not started).
+        let _ = self.resize_exec(&id, size).await;
+        let output = output
+            .map(|chunk| chunk.map(|out| out.into_bytes().to_vec()).map_err(map_err))
+            .boxed();
+        Ok(ExecSession { id, output, input })
+    }
+
+    async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()> {
+        // The sessions (TTY sessions: the shell and everything it started,
+        // even with a cleared environment) of the processes carrying the
+        // mark: hung up, then killed 2 s later.
+        let script = format!(
+            r#"m='{SESSION_ENV}={token}'; sids=''
+for p in /proc/[0-9]*; do
+  tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -qx "$m" || continue
+  s=$(cat "$p/stat" 2>/dev/null) || continue; set -- ${{s##*) }}; sids="$sids $4"
+done
+[ -n "$sids" ] || exit 0
+end() {{
+  sig=$1
+  for p in /proc/[0-9]*; do
+    s=$(cat "$p/stat" 2>/dev/null) || continue; set -- ${{s##*) }}
+    for sid in $sids; do [ "$4" = "$sid" ] && kill -$sig "${{p#/proc/}}" 2>/dev/null; done
+  done
+}}
+end HUP; sleep 2; end KILL; true"#
+        );
+        let config = CreateExecOptions {
+            cmd: Some(vec!["/bin/sh".to_owned(), "-c".to_owned(), script]),
+            ..Default::default()
+        };
+        let id = self
+            .client
+            .create_exec(container, config)
+            .await
+            .map_err(map_err)?
+            .id;
+        let start = StartExecOptions {
+            detach: true,
+            tty: false,
+            output_capacity: None,
+        };
+        self.client
+            .start_exec(&id, Some(start))
+            .await
+            .map(drop)
+            .map_err(map_err)
+    }
+
+    async fn resize_exec(&self, exec_id: &str, size: TermSize) -> DockerResult<()> {
+        let options = ResizeExecOptionsBuilder::new()
+            .h(i32::from(size.rows))
+            .w(i32::from(size.cols))
+            .build();
+        self.client
+            .resize_exec(exec_id, options)
+            .await
+            .map_err(map_err)
     }
 }
 

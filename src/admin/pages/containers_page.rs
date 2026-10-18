@@ -26,7 +26,8 @@ impl PanelPage for ContainersPage {
     /// What the script may offer (the routes check again).
     async fn data(ctx: &Ctx) -> AppResult<Value> {
         Ok(
-            json!({ "can": { "docker.manage": ctx.can("docker.manage"), "docker.logs": ctx.can("docker.logs"), "system.manage": ctx.can("system.manage") } }),
+            json!({ "can": { "docker.manage": ctx.can("docker.manage"), "docker.logs": ctx.can("docker.logs"),
+            "docker.exec": ctx.can("docker.exec"), "system.manage": ctx.can("system.manage") } }),
         )
     }
 }

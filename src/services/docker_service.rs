@@ -185,6 +185,32 @@ pub struct ContainerStats {
     pub blk_write: u64,
 }
 
+/// An interactive shell in a container (a TTY): its output, its input, and
+/// the exec's id for resizing. Dropping it does not end the shell (Docker
+/// keeps exec processes after their connection closes): [`Shell`] does.
+pub struct ExecSession {
+    pub id: String,
+    pub output: BoxStream<'static, DockerResult<Vec<u8>>>,
+    pub input: std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>,
+}
+
+/// A terminal's size in characters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+pub struct TermSize {
+    pub cols: u16,
+    pub rows: u16,
+}
+
+impl TermSize {
+    /// Within what a screen can show (Docker refuses 0).
+    pub fn clamped(self) -> Self {
+        Self {
+            cols: self.cols.clamp(10, 500),
+            rows: self.rows.clamp(4, 200),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PruneReport {
     pub containers_deleted: usize,
@@ -217,6 +243,14 @@ pub trait DockerApi: Send + Sync {
     async fn networks(&self) -> DockerResult<Vec<NetworkItem>>;
     async fn create_network(&self, name: &str, driver: &str) -> DockerResult<NetworkItem>;
     async fn remove_network(&self, id: &str) -> DockerResult<()>;
+    /// A shell (bash when present, else sh) on a TTY of `size`, its
+    /// processes marked with the environment variable [`SESSION_ENV`]`=token`.
+    async fn exec(&self, container: &str, size: TermSize, token: &str)
+    -> DockerResult<ExecSession>;
+    async fn resize_exec(&self, exec_id: &str, size: TermSize) -> DockerResult<()>;
+    /// Ends every process of the container's sessions marked with `token`:
+    /// hangs them up, then kills what is left.
+    async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()>;
 }
 
 /// Whether the caller may see and touch the panel's own objects
@@ -405,6 +439,42 @@ impl Docker {
         self.0.remove_network(&network.id).await
     }
 
+    /// A shell in the container `id` names, if `scope` may use it, marked
+    /// with `token` ([`session_token`]); it ends when the returned [`Shell`]
+    /// is dropped, also when this future is (the shell may already run).
+    pub async fn exec(
+        &self,
+        id: &str,
+        size: TermSize,
+        scope: Scope,
+        token: &str,
+    ) -> DockerResult<Shell> {
+        checked_name(token)?;
+        let (container, _) = self.resolve_container(id, scope).await?;
+        let guard = EndOnDrop {
+            docker: self.clone(),
+            container: container.clone(),
+            token: token.to_owned(),
+        };
+        let session = self.0.exec(&container, size.clamped(), token).await?;
+        Ok(Shell {
+            session,
+            _end: guard,
+        })
+    }
+
+    /// Ends the processes of the shell marked `token` in `container`.
+    pub async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()> {
+        checked_name(container)?;
+        checked_name(token)?;
+        self.0.end_exec(container, token).await
+    }
+
+    pub async fn resize_exec(&self, exec_id: &str, size: TermSize) -> DockerResult<()> {
+        checked_name(exec_id)?;
+        self.0.resize_exec(exec_id, size.clamped()).await
+    }
+
     /// The full id of the container `id` names, if `scope` may see it.
     pub async fn container_id(&self, id: &str, scope: Scope) -> DockerResult<String> {
         self.resolve_container(id, scope).await.map(|(id, _)| id)
@@ -457,6 +527,55 @@ fn reference_from(image: &ImageItem, reference: &str) -> String {
         .find(|t| *t == reference)
         .cloned()
         .unwrap_or_else(|| image.id.clone())
+}
+
+/// Marks a terminal's processes, so they can be ended with it.
+pub const SESSION_ENV: &str = "RDOCKPANEL_SESSION";
+
+/// A shell from [`Docker::exec`]: dropping it ends its processes in the
+/// container. A panel stopped before that ends them at its next boot
+/// (`action_service::interrupted_terminals`).
+pub struct Shell {
+    pub session: ExecSession,
+    _end: EndOnDrop,
+}
+
+struct EndOnDrop {
+    docker: Docker,
+    container: String,
+    token: String,
+}
+
+impl Drop for EndOnDrop {
+    fn drop(&mut self) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let (docker, container, token) = (
+            self.docker.clone(),
+            self.container.clone(),
+            self.token.clone(),
+        );
+        runtime.spawn(async move {
+            if let Err(err) = docker.0.end_exec(&container, &token).await {
+                tracing::warn!(%err, container, "could not end a terminal's shell");
+            }
+        });
+    }
+}
+
+/// Unique per terminal (hex digits only: it goes into a shell script).
+pub fn session_token() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!(
+        "{nanos:x}{:x}{:x}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 /// The engine when no client could be built.
@@ -513,6 +632,15 @@ impl DockerApi for Unavailable {
         Err(self.err())
     }
     async fn remove_network(&self, _: &str) -> DockerResult<()> {
+        Err(self.err())
+    }
+    async fn exec(&self, _: &str, _: TermSize, _: &str) -> DockerResult<ExecSession> {
+        Err(self.err())
+    }
+    async fn end_exec(&self, _: &str, _: &str) -> DockerResult<()> {
+        Err(self.err())
+    }
+    async fn resize_exec(&self, _: &str, _: TermSize) -> DockerResult<()> {
         Err(self.err())
     }
 }

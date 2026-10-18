@@ -88,6 +88,7 @@ window.rustcms.registerPage("rdockpanel/containers", {
       const tabs = [];
       if (can["docker.logs"]) tabs.push(["logs", "Logs"]);
       if (c.state === "running") tabs.push(["stats", "Stats"]);
+      if (c.state === "running" && can["docker.exec"] && window.Terminal) tabs.push(["terminal", "Terminal"]);
       tabs.push(["inspect", "Inspect"]);
       const nav = h(
         "div",
@@ -104,6 +105,7 @@ window.rustcms.registerPage("rdockpanel/containers", {
       detail.hidden = false;
       if (tab === "logs") showLogs(c, content);
       else if (tab === "stats") showStats(c, content);
+      else if (tab === "terminal") showTerminal(c, content);
       else showInspect(c, content);
       detail.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
@@ -168,6 +170,105 @@ window.rustcms.registerPage("rdockpanel/containers", {
         onState: (state) => showState(note, t, state),
       });
       stopLogs = () => stream.close();
+    }
+
+    // Terminal: a shell in the container (xterm.js over a WebSocket). Keys go
+    // as bytes, sizes as `{"type":"resize"}`; a closed socket is not reopened
+    // (a new one is a new shell).
+    function showTerminal(c, content) {
+      const screen = h("div", { className: "rdp-terminal" });
+      const status = h("p", { className: "rdp-muted" });
+      // The old terminal goes first: a new session is a new shell.
+      const again = button(t("New session"), () => {
+        stopLogs();
+        showTerminal(c, content);
+      });
+      again.hidden = true;
+      content.replaceChildren(h("div", { className: "rdp-toolbar" }, status, again), screen);
+      const style = getComputedStyle(element);
+      const term = new window.Terminal({
+        cursorBlink: true,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: 13,
+        scrollback: 5000,
+        theme: { background: "#0b0b0e", foreground: "#e4e4e7", cursor: style.getPropertyValue("--primary").trim() || "#e4e4e7" },
+        // No typing until the shell is there: nothing is queued meanwhile.
+        disableStdin: true,
+      });
+      const fit = new window.FitAddon.FitAddon();
+      term.loadAddon(fit);
+      term.open(screen);
+      fit.fit();
+      const encoder = new TextEncoder();
+      // Output not yet drawn: past this, the shell is faster than the page
+      // and the session is closed rather than the tab running out of memory.
+      const MAX_PENDING = 8 * 1024 * 1024;
+      let pending = 0;
+      const ended = (text) => {
+        status.textContent = text;
+        again.hidden = false;
+        term.options.disableStdin = true;
+      };
+      status.textContent = t("Connecting…");
+      const socket = ctx.realtime.socket(
+        path(c.id, `/exec?cols=${term.cols}&rows=${term.rows}`),
+        {
+          onOpen() {
+            status.textContent = "";
+            term.options.disableStdin = false;
+            term.focus();
+          },
+          onMessage(data) {
+            if (typeof data !== "string") {
+              const bytes = new Uint8Array(data);
+              pending += bytes.length;
+              if (pending > MAX_PENDING) {
+                socket.close();
+                return ended(t("Closed: the output was too fast to show."));
+              }
+              return term.write(bytes, () => (pending -= bytes.length));
+            }
+            const message = JSON.parse(data);
+            if (message.type === "exit") ended(t("The shell exited."));
+            else if (message.type === "idle") ended(t("Closed after 30 minutes without activity."));
+          },
+          onState(state) {
+            if (state.state !== "closed") return;
+            if (state.code === 4403 || state.code === 4401) ended(t("You may no longer use this terminal."));
+            else if (!again.hidden) return;
+            else ended(t("Disconnected."));
+          },
+        },
+        { reconnect: false },
+      );
+      // Keys and pastes, in messages under the 64 KiB limit; what the
+      // socket refuses (closed, or 1 MiB already waiting) is reported.
+      const CHUNK = 32 * 1024;
+      const typing = term.onData((keys) => {
+        const bytes = encoder.encode(keys);
+        for (let at = 0; at < bytes.length; at += CHUNK) {
+          if (!socket.send(bytes.subarray(at, at + CHUNK))) {
+            status.textContent = t("Some input was not sent: type or paste less at once.");
+            return;
+          }
+        }
+      });
+      let resizeTimer = null;
+      const observer = new ResizeObserver(() => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          fit.fit();
+          socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+        }, 150);
+      });
+      observer.observe(screen);
+      stopLogs = () => {
+        clearTimeout(resizeTimer);
+        observer.disconnect();
+        typing.dispose();
+        socket.close();
+        term.dispose();
+      };
     }
 
     async function showInspect(c, content) {

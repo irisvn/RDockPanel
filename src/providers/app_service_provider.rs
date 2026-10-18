@@ -23,6 +23,23 @@ impl ServiceProvider for AppServiceProvider {
     }
 
     async fn boot(&self, state: &AppState) -> anyhow::Result<()> {
+        use crate::http::controllers::docker_controller::TERMINAL_SESSION;
+        use crate::services::action_service::interrupted_terminals;
+        use crate::services::docker_service::Docker;
+        // Terminals cut by a stop: their shells may still run in the containers.
+        match interrupted_terminals(state.db(), TERMINAL_SESSION).await {
+            Ok(shells) if !shells.is_empty() => {
+                if let Some(docker) = state.service::<Docker>() {
+                    for (container, token) in shells {
+                        if let Err(err) = docker.end_exec(&container, &token).await {
+                            tracing::warn!(%err, container, "could not end an interrupted terminal");
+                        }
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(err) => tracing::debug!(%err, "interrupted terminals not checked"),
+        }
         // Before migrations ran (a fresh install's `migrate`) there is no table yet.
         match crate::services::action_service::reap_stale(state.db()).await {
             Ok(0) => {}

@@ -35,6 +35,11 @@ pub fn routes() -> AdminRoutes {
                     docker::follow_logs,
                 )
                 .events("/containers/{id}/stats", view(), docker::live_stats)
+                .socket(
+                    "/containers/{id}/exec",
+                    AdminAccess::can("docker.exec"),
+                    docker::exec,
+                )
                 .get("/images", view(), docker::images)
                 .post("/images/pull", manage(), docker::pull_image)
                 .delete("/images/{id}", manage(), docker::remove_image)

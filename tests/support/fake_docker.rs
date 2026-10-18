@@ -8,8 +8,8 @@ use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
 use rdockpanel::services::docker_service::{
     ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ImageItem, LogLine, LogQuery, LogStream, NetworkItem, PruneReport, SYSTEM_LABEL,
-    SwarmRole, VolumeItem,
+    DockerResult, ExecSession, ImageItem, LogLine, LogQuery, LogStream, NetworkItem, PruneReport,
+    SYSTEM_LABEL, SwarmRole, TermSize, VolumeItem,
 };
 use rustcms::async_trait;
 use serde_json::{Value, json};
@@ -214,6 +214,43 @@ impl DockerApi for FakeDocker {
     }
     async fn remove_network(&self, id: &str) -> DockerResult<()> {
         self.record(format!("remove-network {id}"));
+        Ok(())
+    }
+    /// A shell that echoes what it is sent, after a prompt.
+    async fn exec(
+        &self,
+        container: &str,
+        size: TermSize,
+        token: &str,
+    ) -> DockerResult<ExecSession> {
+        let c = self.by_id(container)?;
+        self.record(format!("exec {} {}x{}", c.id, size.cols, size.rows));
+        self.record(format!("token {token}"));
+        let (input, shell) = tokio::io::duplex(64 * 1024);
+        let prompt = stream::iter([Ok(format!("{}$ ", c.name).into_bytes())]);
+        let echo = stream::unfold(shell, |mut shell| async move {
+            use tokio::io::AsyncReadExt;
+            let mut buffer = vec![0; 4096];
+            match shell.read(&mut buffer).await {
+                Ok(0) | Err(_) => None,
+                Ok(n) => {
+                    buffer.truncate(n);
+                    Some((Ok(buffer), shell))
+                }
+            }
+        });
+        Ok(ExecSession {
+            id: format!("exec-{}", c.name),
+            output: prompt.chain(echo).boxed(),
+            input: Box::pin(input),
+        })
+    }
+    async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()> {
+        self.record(format!("end exec {container} {token}"));
+        Ok(())
+    }
+    async fn resize_exec(&self, exec_id: &str, size: TermSize) -> DockerResult<()> {
+        self.record(format!("resize {exec_id} {}x{}", size.cols, size.rows));
         Ok(())
     }
 }

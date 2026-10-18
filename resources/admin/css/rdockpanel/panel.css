@@ -65,3 +65,6 @@
 }
 .rdp-log-short { max-height: 12rem; }
 .rdp-log-err { color: var(--destructive); }
+
+.rdp-terminal { height: 26rem; padding: 0.5rem; border-radius: 0.375rem; background: #0b0b0e; overflow: hidden; }
+.rdp-terminal .xterm { height: 100%; }

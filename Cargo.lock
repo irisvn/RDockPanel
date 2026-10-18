@@ -459,6 +459,7 @@ checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
 dependencies = [
  "axum-core",
  "axum-macros",
+ "base64 0.22.1",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -478,8 +479,10 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
+ "sha1 0.10.7",
  "sync_wrapper",
  "tokio",
+ "tokio-tungstenite",
  "tower",
  "tower-layer",
  "tower-service",
@@ -1057,6 +1060,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "data-encoding"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "deranged"
@@ -2901,7 +2910,7 @@ dependencies = [
 [[package]]
 name = "rustcms"
 version = "0.3.2"
-source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=218d9a3#218d9a39793c541c693db8fb9f21d2173daca98a"
+source = "git+https://github.com/irisvn/RustCMS-Core?rev=4429543#44295432e5f96d3c93745fb0c6fba78d7b5429f4"
 dependencies = [
  "async-trait",
  "axum",
@@ -2917,7 +2926,7 @@ dependencies = [
 [[package]]
 name = "rustcms-admin"
 version = "0.3.2"
-source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=218d9a3#218d9a39793c541c693db8fb9f21d2173daca98a"
+source = "git+https://github.com/irisvn/RustCMS-Core?rev=4429543#44295432e5f96d3c93745fb0c6fba78d7b5429f4"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -2948,7 +2957,7 @@ dependencies = [
 [[package]]
 name = "rustcms-auth"
 version = "0.3.2"
-source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=218d9a3#218d9a39793c541c693db8fb9f21d2173daca98a"
+source = "git+https://github.com/irisvn/RustCMS-Core?rev=4429543#44295432e5f96d3c93745fb0c6fba78d7b5429f4"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2970,6 +2979,7 @@ dependencies = [
  "subtle",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "uuid",
 ]
@@ -2977,7 +2987,7 @@ dependencies = [
 [[package]]
 name = "rustcms-core"
 version = "0.3.2"
-source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=218d9a3#218d9a39793c541c693db8fb9f21d2173daca98a"
+source = "git+https://github.com/irisvn/RustCMS-Core?rev=4429543#44295432e5f96d3c93745fb0c6fba78d7b5429f4"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3017,7 +3027,7 @@ dependencies = [
 [[package]]
 name = "rustcms-migration"
 version = "0.3.2"
-source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=218d9a3#218d9a39793c541c693db8fb9f21d2173daca98a"
+source = "git+https://github.com/irisvn/RustCMS-Core?rev=4429543#44295432e5f96d3c93745fb0c6fba78d7b5429f4"
 dependencies = [
  "sea-orm-migration",
 ]
@@ -3025,11 +3035,12 @@ dependencies = [
 [[package]]
 name = "rustcms-testing"
 version = "0.3.2"
-source = "git+file:///Users/ducdo/Documents/Dev/irisvn/RustCMS?rev=218d9a3#218d9a39793c541c693db8fb9f21d2173daca98a"
+source = "git+https://github.com/irisvn/RustCMS-Core?rev=4429543#44295432e5f96d3c93745fb0c6fba78d7b5429f4"
 dependencies = [
  "async-trait",
  "axum",
  "figment",
+ "futures-util",
  "http-body-util",
  "rustcms-auth",
  "rustcms-core",
@@ -3037,6 +3048,8 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite",
  "tower",
  "uuid",
 ]
@@ -3403,6 +3416,17 @@ dependencies = [
 
 [[package]]
 name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest 0.10.7",
+]
+
+[[package]]
+name = "sha1"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
@@ -3617,7 +3641,7 @@ dependencies = [
  "percent-encoding",
  "rust_decimal",
  "serde",
- "sha1",
+ "sha1 0.11.0",
  "sha2 0.11.1",
  "sqlx-core",
  "thiserror",
@@ -3959,6 +3983,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4194,6 +4230,22 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.9.5",
+ "sha1 0.10.7",
+ "thiserror",
+]
 
 [[package]]
 name = "typenum"

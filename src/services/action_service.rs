@@ -79,6 +79,53 @@ pub async fn start<C: ConnectionTrait>(
     Ok(row.insert(db).await?)
 }
 
+/// Replaces `row`'s log (while it runs).
+pub async fn note<C: ConnectionTrait>(
+    db: &C,
+    row: action::Model,
+    log: &str,
+) -> AppResult<action::Model> {
+    let mut active = row.into_active_model();
+    active.log = Set(Some(action::tail(log).to_owned()));
+    active.updated_at = Set(Utc::now());
+    Ok(active.update(db).await?)
+}
+
+/// Terminals still running (none can, at boot: the panel stopped before
+/// they ended): marked failed; their containers and session marks, for
+/// ending their shells.
+pub async fn interrupted_terminals<C: ConnectionTrait>(
+    db: &C,
+    prefix: &str,
+) -> AppResult<Vec<(String, String)>> {
+    use sea_orm::{ColumnTrait, QueryFilter};
+    let rows = action::Entity::find()
+        .filter(action::Column::Kind.eq("container.exec"))
+        .filter(action::Column::Status.eq(action::RUNNING))
+        .all(db)
+        .await?;
+    let mut ended = Vec::new();
+    for row in rows {
+        let token = row
+            .log
+            .as_deref()
+            .and_then(|log| log.strip_prefix(prefix))
+            .map(str::to_owned);
+        let target = row.target.clone();
+        finish(
+            db,
+            row,
+            Some("interrupted: the panel stopped before it ended".to_owned()),
+            None,
+        )
+        .await?;
+        if let Some(token) = token {
+            ended.push((target, token));
+        }
+    }
+    Ok(ended)
+}
+
 /// Marks the row of `id` running (a job picked it up).
 pub async fn running<C: ConnectionTrait>(db: &C, id: i64) -> AppResult<Option<action::Model>> {
     let Some(row) = action::Entity::find_by_id(id).one(db).await? else {

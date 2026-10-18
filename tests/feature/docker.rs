@@ -5,7 +5,7 @@
 
 use futures_util::StreamExt;
 use rdockpanel::services::docker_service::{
-    BollardDocker, ContainerAction, Docker, DockerError, LogQuery, SYSTEM_LABEL, Scope,
+    BollardDocker, ContainerAction, Docker, DockerError, LogQuery, SYSTEM_LABEL, Scope, TermSize,
 };
 
 use crate::support::fake_docker::FakeDocker;
@@ -306,6 +306,100 @@ async fn against_the_real_engine() {
             .container_action(&name, ContainerAction::Unpause, Scope::User)
             .await
             .unwrap();
+
+        // A shell: a command's output comes back, and resizing is accepted.
+        use tokio::io::AsyncWriteExt;
+        let size = TermSize {
+            cols: 100,
+            rows: 30,
+        };
+        let token = rdockpanel::services::docker_service::session_token();
+        let mut shell = docker.exec(&name, size, Scope::User, &token).await.unwrap();
+        docker
+            .resize_exec(
+                &shell.session.id,
+                TermSize {
+                    cols: 120,
+                    rows: 40,
+                },
+            )
+            .await
+            .unwrap();
+        shell
+            .session
+            .input
+            .write_all(b"echo rdp-$((40+2))\n")
+            .await
+            .unwrap();
+        let mut seen = String::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !seen.contains("rdp-42") && std::time::Instant::now() < deadline {
+            let next = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                shell.session.output.next(),
+            )
+            .await;
+            if let Ok(Some(Ok(bytes))) = next {
+                seen.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        }
+        assert!(seen.contains("rdp-42"), "{seen:?}");
+
+        // What ignores a hang-up, or clears its environment, ends too.
+        shell
+            .session
+            .input
+            .write_all(b"nohup sleep 3001 >/dev/null 2>&1 & env -i /bin/sleep 3002 &\n")
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Dropping it ends the shell: no process of the container keeps its mark.
+        drop(shell);
+        let marked = || {
+            let out = std::process::Command::new("docker")
+                .args([
+                    "exec",
+                    &name,
+                    "sh",
+                    "-c",
+                    "grep -l RDOCKPANEL_SESSION /proc/[0-9]*/environ 2>/dev/null; true",
+                ])
+                .output()
+                .expect("docker cli");
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        let mut left = marked();
+        for _ in 0..20 {
+            if left.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            left = marked();
+        }
+        assert!(left.is_empty(), "shell processes left: {left}");
+        let sleeping = || {
+            let out = std::process::Command::new("docker")
+                .args([
+                    "exec",
+                    &name,
+                    "sh",
+                    "-c",
+                    "ps -o args | grep -c '^/bin/sleep 3002\\|^sleep 3001'; true",
+                ])
+                .output()
+                .expect("docker cli");
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        let mut count = sleeping();
+        for _ in 0..30 {
+            if count == "0" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            count = sleeping();
+        }
+        assert_eq!(count, "0", "background processes of the shell survived");
     });
     let outcome = futures_util::FutureExt::catch_unwind(checks).await;
     docker
