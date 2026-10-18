@@ -140,14 +140,27 @@ pub async fn github(
     }
     let payload: Value = serde_json::from_slice(&body)
         .map_err(|_| AppError::BadRequest("the payload is not JSON".into()))?;
+    // The branch built: the service's, else the repository's default (as a
+    // clone without a branch takes).
     let branch = row
         .git_branch
         .as_deref()
         .map(str::trim)
         .filter(|b| !b.is_empty())
-        .unwrap_or("main");
+        .map(str::to_owned)
+        .or_else(|| {
+            payload["repository"]["default_branch"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "main".to_owned());
     let pushed = payload["ref"].as_str().unwrap_or_default();
-    if pushed != format!("refs/heads/{branch}") && pushed != format!("refs/tags/{branch}") {
+    let matches = if branch.starts_with("refs/") {
+        pushed == branch
+    } else {
+        pushed == format!("refs/heads/{branch}") || pushed == format!("refs/tags/{branch}")
+    };
+    if !matches {
         return Ok((
             StatusCode::OK,
             Json(json!({ "ignored": format!("a push to {pushed}, not {branch}") })),
@@ -159,7 +172,29 @@ pub async fn github(
         .await?
         .ok_or(AppError::NotFound)?;
     let deployment =
-        deployment_service::request(&txn, &row, Trigger::Deploy, None, None, app.keyring()).await?;
+        match deployment_service::request(&txn, &row, Trigger::Deploy, None, None, app.keyring())
+            .await
+        {
+            Ok(deployment) => deployment,
+            // One under way: deployed again once it ends (pushes coalesce).
+            Err(AppError::Conflict {
+                code: "deployment_in_progress",
+                ..
+            }) => {
+                drop(txn);
+                use sea_orm::{ColumnTrait, QueryFilter};
+                service::Entity::update_many()
+                    .col_expr(
+                        service::Column::RedeployPending,
+                        sea_orm::sea_query::Expr::value(true),
+                    )
+                    .filter(service::Column::Id.eq(id))
+                    .exec(app.db())
+                    .await?;
+                return Ok((StatusCode::ACCEPTED, Json(json!({ "pending": true }))));
+            }
+            Err(err) => return Err(err),
+        };
     queue::dispatch(
         &txn,
         &RunDeployment {
@@ -214,8 +249,24 @@ pub async fn maintenance(
         .filter(service::Column::Name.eq(service_name))
         .one(app.db())
         .await?
-        .filter(|s| s.maintenance)
         .ok_or(AppError::NotFound)?;
+    // As deployed (what Traefik routes), not as saved since.
+    let deployed = match row.deployed_spec_hash.as_deref() {
+        Some(hash) => crate::models::deployment::Entity::find()
+            .filter(crate::models::deployment::Column::ServiceId.eq(row.id))
+            .filter(crate::models::deployment::Column::SpecHash.eq(hash))
+            .filter(
+                crate::models::deployment::Column::Status
+                    .eq(crate::services::deployment_service::SUCCEEDED),
+            )
+            .one(app.db())
+            .await?
+            .is_some_and(|d| d.spec["maintenance"].as_bool() == Some(true)),
+        None => false,
+    };
+    if !deployed {
+        return Err(AppError::NotFound);
+    }
     let title = escape(
         row.maintenance_title
             .as_deref()

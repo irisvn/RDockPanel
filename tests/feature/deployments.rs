@@ -1624,7 +1624,23 @@ db_test!(
         // Its branch (main by default): deployed.
         let fired = app.request(send("push", push, sign(push.as_bytes()))).await;
         fired.assert_status(StatusCode::ACCEPTED);
-        assert_eq!(last_deployment(&app, id).await.status, "queued");
+        let first = last_deployment(&app, id).await;
+        assert_eq!(first.status, "queued");
+        // Another push meanwhile: deployed again once this one ends.
+        let again = app.request(send("push", push, sign(push.as_bytes()))).await;
+        again.assert_status(StatusCode::ACCEPTED);
+        assert_eq!(again.json()["pending"], true);
+        deployment_service::run(app.state(), first.id, FAST)
+            .await
+            .unwrap();
+        let next = last_deployment(&app, id).await;
+        assert!(next.id > first.id && next.status == "queued", "{next:?}");
+        // A repository's default branch when the service names none.
+        let master = r#"{"ref": "refs/heads/master", "repository": {"default_branch": "master"}}"#;
+        let on_master = app
+            .request(send("push", master, sign(master.as_bytes())))
+            .await;
+        on_master.assert_status(StatusCode::ACCEPTED);
     }
 );
 
@@ -1645,6 +1661,11 @@ db_test!(
             )
             .await
             .assert_status(StatusCode::OK);
+        // Saved, not deployed yet: still the service.
+        app.get("/api/v1/maintenance/shop_web")
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
         let page = app.get("/api/v1/maintenance/shop_web").await;
         page.assert_status(StatusCode::SERVICE_UNAVAILABLE);
         let html = page.text();

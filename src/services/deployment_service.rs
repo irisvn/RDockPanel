@@ -614,12 +614,45 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
         Some(traefik) => publish(db, &traefik, service.id, id).await.map(drop),
         None => Ok(()),
     };
+    // A push came meanwhile: deployed again (claimed once).
+    if let Err(err) = redeploy_if_pending(state, service.id).await {
+        tracing::warn!(%err, service = service.id, "the pending deployment not asked for");
+    }
     // Said in the background: never in the way of the routes.
     let notify = state.clone();
     tokio::spawn(async move {
         crate::services::notify_service::deployment_finished(&notify, id).await;
     });
     published
+}
+
+/// Asks for the Deploy a push asked for while another one ran.
+async fn redeploy_if_pending(state: &AppState, service_id: i64) -> AppResult<()> {
+    let db = state.db();
+    let txn = rustcms::db::begin_write(db).await?;
+    let claimed = service::Entity::update_many()
+        .col_expr(service::Column::RedeployPending, Expr::value(false))
+        .filter(service::Column::Id.eq(service_id))
+        .filter(service::Column::RedeployPending.eq(true))
+        .exec(&txn)
+        .await?;
+    if claimed.rows_affected == 0 {
+        return Ok(());
+    }
+    let row = service::Entity::find_by_id(service_id)
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let deployment = request(&txn, &row, Trigger::Deploy, None, None, state.keyring()).await?;
+    rustcms::queue::dispatch(
+        &txn,
+        &crate::jobs::run_deployment::RunDeployment {
+            deployment_id: deployment.id,
+        },
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(())
 }
 
 /// Writes the routes of the service as deployed now; records on deployment

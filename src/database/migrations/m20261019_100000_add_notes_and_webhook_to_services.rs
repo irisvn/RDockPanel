@@ -28,10 +28,21 @@ impl MigrationTrait for Migration {
                 .null()
                 .to_owned(),
         )
+        .await?;
+        add_column(
+            manager,
+            Services::Table,
+            &mut ColumnDef::new(Services::RedeployPending)
+                .boolean()
+                .not_null()
+                .default(false)
+                .to_owned(),
+        )
         .await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        drop_column(manager, Services::Table, Services::RedeployPending).await?;
         drop_column(manager, Services::Table, Services::WebhookSecret).await?;
         drop_column(manager, Services::Table, Services::Notes).await
     }
@@ -42,4 +53,5 @@ enum Services {
     Table,
     Notes,
     WebhookSecret,
+    RedeployPending,
 }

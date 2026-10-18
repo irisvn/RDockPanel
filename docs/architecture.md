@@ -288,15 +288,18 @@ notification" sends at once and answers why it failed.
 As EasyPanel's Maintenance tab. A service in maintenance (applied by its next deployment) has its
 domains routed to the panel (`[panel] internal_url`, `http://rdockpanel:3000` installed; empty: no
 maintenance mode) at `/api/v1/maintenance/<project>_<service>`, a public page of its title and
-subtitle (escaped), answered 503 with `Retry-After`. Its notes (Overview) are for the team only and
+subtitle (escaped), answered 503 with `Retry-After`, while the deployment Traefik routes is one in
+maintenance (saving it off changes nothing before a deployment). Its notes (Overview) are for the team only and
 never deployed.
 
 ### Auto deploy from GitHub
 
 A Git service may have a GitHub webhook (`/api/v1/github/{id}`): its secret (40 characters, shown
 once, sealed: context `services.webhook_secret`) signs each delivery (`X-Hub-Signature-256`,
-HMAC-SHA256, compared in constant time). A `push` to the service's branch (`main` when none is set)
-queues a Deploy; a `ping` answers; other events and branches are ignored. A missing or wrong
+HMAC-SHA256, compared in constant time). A `push` to the service's branch (the repository's default
+branch when none is set; a full `refs/…` name as given) queues a Deploy; one arriving while a
+deployment runs is kept (pushes coalesce) and deployed once it ends; a `ping` answers; other events
+and branches are ignored. A missing or wrong
 signature answers 404, as an unknown service.
 
 ### Secrets

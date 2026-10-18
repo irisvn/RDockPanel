@@ -62,6 +62,8 @@ pub struct Model {
     /// sealed (context `services.webhook_secret`).
     #[sea_orm(column_type = "Text", nullable)]
     pub webhook_secret: Option<Encrypted<String>>,
+    /// A push came while a deployment ran: deployed again once it ends.
+    pub redeploy_pending: bool,
     pub command: Option<String>,
     pub replicas: i32,
     pub cpu_limit_millis: Option<i32>,
