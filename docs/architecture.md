@@ -306,8 +306,9 @@ the first deployment with a domain, the panel attaches `[panel] traefik_service`
 deployment fails rather than publish domains that lead nowhere. Writes are serialized (one lock in
 the panel's process, workers included), each reading the database at that moment, so the last one
 written is always the latest state. Projects share no network, so a project's services cannot call
-another's directly (domains and published ports remain public). Deleting a project does not yet detach Traefik from its network nor remove the network
-(see the [roadmap](roadmap.md)).
+another's directly (domains and published ports remain public). Once a project is deleted, its
+network goes within 5 minutes (the `orphan-networks` schedule): Traefik detached, then the network
+removed (one still in use is left for the next time).
 
 ## The apps interface
 

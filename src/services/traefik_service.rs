@@ -124,6 +124,95 @@ impl Traefik {
     }
 }
 
+impl Traefik {
+    /// Detaches Traefik from `network` (its name or id) when it is attached:
+    /// whether it changed anything.
+    pub async fn detach(&self, docker: &Docker, network: &str, id: &str) -> DockerResult<bool> {
+        if self.service.is_empty() {
+            return Ok(false);
+        }
+        let api = docker.engine();
+        for _ in 0..5 {
+            let Some(current) = api.inspect_service(&self.service).await? else {
+                return Ok(false);
+            };
+            let mut spec = current.spec.clone().unwrap_or_default();
+            let template = spec.task_template.get_or_insert_with(Default::default);
+            let networks = template.networks.get_or_insert_with(Vec::new);
+            let before = networks.len();
+            networks.retain(|n| !matches!(n.target.as_deref(), Some(t) if t == network || t == id));
+            if networks.len() == before {
+                return Ok(false);
+            }
+            let version = current.version.and_then(|v| v.index).unwrap_or(0);
+            match api.update_service(&self.service, version, spec, None).await {
+                Err(DockerError::Conflict(_)) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+                other => return other.map(|_| true),
+            }
+        }
+        Err(DockerError::Conflict("Traefik kept changing".into()))
+    }
+}
+
+/// The networks of projects deleted (labelled by the panel, their project
+/// gone): Traefik detached, the network removed. A network still in use is
+/// left for the next time. How many were removed.
+pub async fn remove_orphan_networks(
+    db: &sea_orm::DatabaseConnection,
+    docker: &Docker,
+    traefik: Option<&Traefik>,
+) -> rustcms::AppResult<usize> {
+    use sea_orm::EntityTrait;
+    let projects: std::collections::HashSet<String> = crate::models::project::Entity::find()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+    let networks = match docker.engine().networks().await {
+        Ok(networks) => networks,
+        Err(err) => {
+            tracing::debug!(%err, "networks not listed");
+            return Ok(0);
+        }
+    };
+    let mut removed = 0;
+    for network in networks {
+        let ours = network
+            .labels
+            .get(crate::services::docker_service::MANAGED_LABEL)
+            .is_some_and(|v| v == "true");
+        let Some(project) = network.labels.get("rdockpanel.project") else {
+            continue;
+        };
+        if !ours
+            || projects.contains(project)
+            || network.name != crate::services::deploy_service::network_name(project)
+        {
+            continue;
+        }
+        if let Some(traefik) = traefik
+            && let Err(err) = traefik.detach(docker, &network.name, &network.id).await
+        {
+            tracing::warn!(%err, network = network.name, "Traefik not detached");
+            continue;
+        }
+        match docker.engine().remove_network(&network.id).await {
+            Ok(()) => {
+                tracing::info!(
+                    network = network.name,
+                    "removed the network of a deleted project"
+                );
+                removed += 1;
+            }
+            Err(err) => tracing::debug!(%err, network = network.name, "network not removed yet"),
+        }
+    }
+    Ok(removed)
+}
+
 /// `<project>_<service>`: two checked names (no path, no dot).
 fn is_route_file_name(name: &str) -> bool {
     name.split_once('_')

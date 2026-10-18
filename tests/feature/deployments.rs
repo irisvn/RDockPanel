@@ -1426,3 +1426,73 @@ db_test!(
         assert!(!page.contains("PRIVATE KEY") && page.contains(&public));
     }
 );
+
+db_test!(
+    a_deleted_projects_network_goes,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::docker_service::Docker;
+        use rdockpanel::services::traefik_service::{Traefik, remove_orphan_networks};
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let traefik_networks = |fake: &FakeDocker| -> Vec<String> {
+            fake.services.lock().unwrap()["rdp-traefik"]
+                .spec
+                .clone()
+                .unwrap()
+                .task_template
+                .unwrap()
+                .networks
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|n| n.target)
+                .collect()
+        };
+        assert!(traefik_networks(&fake).contains(&"rdp_shop".to_owned()));
+        let docker = app.state().service::<Docker>().unwrap();
+        let traefik = app.state().service::<Traefik>();
+        // The project still there: its network stays.
+        assert_eq!(
+            remove_orphan_networks(app.state().db(), &docker, traefik.as_deref())
+                .await
+                .unwrap(),
+            0
+        );
+        // Destroyed, deleted with its project: Traefik detached, network removed.
+        assert_eq!(run(&app, &admin, "destroy", id).await.status, "succeeded");
+        let project = service_row(&app, id).await.project_id;
+        admin
+            .send(
+                rustcms::axum::http::Method::DELETE,
+                &format!("{}/{id}", records(&app, "services")),
+                None,
+            )
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        admin
+            .send(
+                rustcms::axum::http::Method::DELETE,
+                &format!("{}/{project}", records(&app, "projects")),
+                None,
+            )
+            .await
+            .assert_status(StatusCode::NO_CONTENT);
+        assert_eq!(
+            remove_orphan_networks(app.state().db(), &docker, traefik.as_deref())
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(!traefik_networks(&fake).contains(&"rdp_shop".to_owned()));
+        assert!(
+            !fake
+                .networks
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|n| n.name == "rdp_shop")
+        );
+    }
+);

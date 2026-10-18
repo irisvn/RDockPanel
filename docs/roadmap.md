@@ -28,8 +28,8 @@ arm64): Swarm, MySQL, Traefik with Let's Encrypt, the panel, secrets kept across
 Ubuntu 24.04 (install twice, reboot).
 
 Next:
-service logs and terminal, a projects overview, certificate status, and drift checks (RustCMS W4).
-Deleting a project will also detach Traefik from its network and remove it.
+certificate status and drift checks (RustCMS W4). A deleted project's network is now removed
+(Traefik detached first).
 
 - Projects and services from a Docker image: replicas, resources, health checks, volumes, ports.
 - Deployments as Swarm services: rolling updates (start-first), automatic rollback, deployment history

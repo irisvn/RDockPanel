@@ -242,6 +242,10 @@ impl DockerApi for FakeDocker {
     }
     async fn remove_network(&self, id: &str) -> DockerResult<()> {
         self.record(format!("remove-network {id}"));
+        self.networks
+            .lock()
+            .unwrap()
+            .retain(|n| n.id != id && n.name != id);
         Ok(())
     }
     /// A shell that echoes what it is sent, after a prompt.

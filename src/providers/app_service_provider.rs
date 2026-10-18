@@ -84,6 +84,22 @@ impl ServiceProvider for AppServiceProvider {
                 Ok(())
             }),
         );
+        // The networks of deleted projects: Traefik detached, then removed.
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "orphan-networks",
+                std::time::Duration::from_secs(300),
+            )
+            .run(|state| async move {
+                use crate::services::docker_service::Docker;
+                use crate::services::traefik_service::{Traefik, remove_orphan_networks};
+                if let Some(docker) = state.service::<Docker>() {
+                    let traefik = state.service::<Traefik>();
+                    remove_orphan_networks(state.db(), &docker, traefik.as_deref()).await?;
+                }
+                Ok(())
+            }),
+        );
         // A full disk, said to the channels that asked (each at most every 6 h).
         app.schedule(
             rustcms::schedule::Schedule::every("disk-check", std::time::Duration::from_secs(300))
