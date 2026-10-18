@@ -138,6 +138,15 @@ pub async fn service(
     } else {
         vec![]
     };
+    let scripts = if principal.can("service_scripts.view_any") {
+        crate::models::service_script::Entity::find()
+            .filter(crate::models::service_script::Column::ServiceId.eq(id))
+            .order_by_asc(crate::models::service_script::Column::Name)
+            .all(db)
+            .await?
+    } else {
+        vec![]
+    };
     // Users of its basic authentication: their names (never a hash).
     let auth_users: Vec<Value> = crate::models::service_basic_auth::Entity::find()
         .filter(crate::models::service_basic_auth::Column::ServiceId.eq(id))
@@ -252,6 +261,7 @@ pub async fn service(
         "env_readable": env_readable,
         "domains": domains,
         "redirects": redirects,
+        "scripts": scripts,
         "basic_auth": auth_users,
         "ports": ports,
         "mounts": mounts,
@@ -805,5 +815,98 @@ pub async fn github_webhook(
     Ok(Json(json!({
         "url": format!("{base}/api/v1/github/{id}"),
         "secret": secret,
+    })))
+}
+
+/// Runs a script of a service in one of its running containers (`sh -c`,
+/// at most 2 minutes, its output's last 64 KB): `{exit_code, output}`.
+/// Audited (its name, never its output).
+pub async fn run_script(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    use crate::models::service_script;
+    use crate::services::docker_service::{Docker, ExecChunk, TaskState};
+    use futures_util::StreamExt;
+    let script = service_script::Entity::find_by_id(id)
+        .one(app.db())
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let row = service_of(&app, script.service_id).await?;
+    if row.kind == "compose" {
+        return Err(AppError::BadRequest(
+            "a Compose service's scripts are not run by the panel".into(),
+        ));
+    }
+    let name = snapshot_without_env(app.db(), &row).await?.service_name();
+    let docker = app
+        .service::<Docker>()
+        .ok_or_else(|| AppError::BadRequest("Docker is not available".into()))?;
+    let tasks = docker
+        .engine()
+        .list_tasks(&name)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("the service's tasks: {e}")))?;
+    let container = tasks
+        .iter()
+        .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
+        .find_map(|t| {
+            t.status
+                .as_ref()?
+                .container_status
+                .as_ref()?
+                .container_id
+                .clone()
+        })
+        .ok_or_else(|| AppError::BadRequest("the service is not running".into()))?;
+    let entry = AuditEntry::new("services.script.run", "services")
+        .key(row.id.to_string())
+        .meta(json!({ "script": script.name }));
+    let txn = app.db().begin().await?;
+    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    txn.commit().await?;
+    let mark = format!(
+        "rdp-script-{}",
+        crate::services::database_service::random_string(20)
+    );
+    let cmd = vec!["sh".to_owned(), "-c".to_owned(), script.command.clone()];
+    let mut chunks = docker
+        .engine()
+        .run_in_container(&container, cmd, &mark, None)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("the script could not start: {e}")))?;
+    let mut output = Vec::new();
+    let mut code = None;
+    let read = async {
+        while let Some(chunk) = chunks.next().await {
+            match chunk {
+                Ok(ExecChunk::Out(bytes)) | Ok(ExecChunk::Err(bytes)) => {
+                    output.extend_from_slice(&bytes);
+                    if output.len() > 128 * 1024 {
+                        let cut = output.len() - 64 * 1024;
+                        output.drain(..cut);
+                    }
+                }
+                Ok(ExecChunk::Exit(c)) => code = Some(c),
+                Err(e) => {
+                    output.extend_from_slice(format!("\n{e}\n").as_bytes());
+                    break;
+                }
+            }
+        }
+    };
+    let timed_out = tokio::time::timeout(std::time::Duration::from_secs(120), read)
+        .await
+        .is_err();
+    if timed_out {
+        // Dropped above: its processes are killed in the container.
+        output.extend_from_slice(b"\n(stopped after 2 minutes)\n");
+    }
+    let start = output.len().saturating_sub(64 * 1024);
+    Ok(Json(json!({
+        "exit_code": code,
+        "output": String::from_utf8_lossy(&output[start..]),
     })))
 }

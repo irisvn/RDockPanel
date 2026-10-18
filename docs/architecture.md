@@ -283,6 +283,13 @@ its threshold (checked every 5 minutes, said at most every 6 hours per channel).
 background, 15 s per channel, never retried; a failure is logged (never the URL). "Send test
 notification" sends at once and answers why it failed.
 
+### Scripts
+
+As EasyPanel's Scripts. A service's scripts (`service_scripts`: a name, a shell command) run with
+`sh -c` in one of its running containers (`POST /apps/scripts/{id}/run`, `docker.exec` as a
+terminal), at most 2 minutes (then killed in the container), their output's last 64 KB returned;
+each run is audited (its name, never its output). Not for Compose services.
+
 ### Maintenance mode
 
 As EasyPanel's Maintenance tab. A service in maintenance (applied by its next deployment) has its

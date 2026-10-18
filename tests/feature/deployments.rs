@@ -1678,3 +1678,46 @@ db_test!(
             .assert_status(StatusCode::NOT_FOUND);
     }
 );
+
+db_test!(
+    a_script_runs_in_a_running_container,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        let script = create(
+            &app,
+            &admin,
+            "service_scripts",
+            json!({"service_id": id.to_string(), "name": "Migrate", "command": "php artisan migrate --force"}),
+        )
+        .await;
+        let url = app.admin_api(&format!("x/apps/scripts/{script}/run"));
+        // Not running yet.
+        admin
+            .post_json(&url, &json!({}))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let ran = admin.post_json(&url, &json!({})).await;
+        ran.assert_status(StatusCode::OK);
+        assert_eq!(ran.json()["exit_code"], 0);
+        assert!(
+            ran.json()["output"]
+                .as_str()
+                .unwrap()
+                .starts_with("dump of ctr-shop_web-")
+        );
+        assert!(
+            fake.calls()
+                .iter()
+                .any(|c| c.ends_with("sh -c php artisan migrate --force"))
+        );
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        assert_eq!(page["scripts"][0]["name"], "Migrate");
+    }
+);

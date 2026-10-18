@@ -7,13 +7,13 @@ import { Alert, Button, Checkbox, Dialog, ErrorState, Input, Loading, NativeSele
 import { CopyButton, ErrorNote, Facts, Field, Section, Sparkline, StatusBadge, Tabs, bytes, when } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 import { BackupsTab } from "./Backups";
-import { MaintenanceTab, RedirectsTab, SecurityTab } from "./Access";
+import { MaintenanceTab, RedirectsTab, ScriptsTab, SecurityTab } from "./Access";
 import type { Deployment, ServiceDetail } from "./types";
 
 type Props = PageProps<unknown> & { project: string; serviceId: number; tab: string };
 type T = (s: string) => string;
 
-const TABS = ["overview", "credentials", "backups", "deployments", "environment", "domains", "redirects", "security", "maintenance", "source", "storage", "advanced"] as const;
+const TABS = ["overview", "credentials", "backups", "deployments", "environment", "domains", "redirects", "security", "maintenance", "scripts", "source", "storage", "advanced"] as const;
 
 export function ServicePage(props: Props) {
   const t = props.t;
@@ -106,6 +106,7 @@ export function ServicePage(props: Props) {
                 { id: "redirects", label: t("Redirects") },
                 { id: "security", label: t("Security") },
                 { id: "maintenance", label: t("Maintenance") },
+                ...(d.service.kind === "compose" ? [] : [{ id: "scripts", label: t("Scripts") }]),
               ]),
           { id: "source", label: t("Source") },
           { id: "storage", label: t("Storage") },
@@ -123,6 +124,7 @@ export function ServicePage(props: Props) {
         {tab === "redirects" && <RedirectsTab {...props} d={d} onSaved={saved} />}
         {tab === "security" && <SecurityTab {...props} d={d} onSaved={saved} />}
         {tab === "maintenance" && <MaintenanceTab {...props} d={d} onSaved={saved} />}
+        {tab === "scripts" && <ScriptsTab {...props} d={d} onSaved={saved} />}
         {tab === "source" && <SourceTab t={t} d={d} api={props.api} onSaved={saved} />}
         {tab === "storage" && !d.can.mounts.view && <p className="rdp2-muted">{t("You may not see mounts.")}</p>}
         {tab === "storage" && d.can.mounts.view && <StorageTab t={t} d={d} onSaved={saved} onError={setError} />}

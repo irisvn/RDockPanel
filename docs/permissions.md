@@ -33,7 +33,8 @@ The Deploy group's resources use the panel's standard permissions, one set per r
   `backups.restore` (restore one, replacing the database's data; lists a provider's files);
 
 - notifications: `notification_channels.*` (Settings);
-- redirects: `service_redirects.*`; basic authentication users: `services.update`;
+- redirects: `service_redirects.*`; basic authentication users: `services.update`; scripts:
+  `service_scripts.*` to write them, `docker.exec` to run them (a command in the container);
 
 - a **host directory** (bind mount) needs `system.manage`, and a source under one of the
   `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, `/proc`,

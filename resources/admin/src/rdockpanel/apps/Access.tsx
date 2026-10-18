@@ -235,3 +235,106 @@ export function MaintenanceTab(props: Props) {
     </Section>
   );
 }
+
+/** Scripts, like EasyPanel's: named shell commands run in a running
+ * container of the service; their output shown. */
+export function ScriptsTab(props: Props) {
+  const { t, d } = props;
+  const [name, setName] = useState("");
+  const [command, setCommand] = useState("");
+  const [running, setRunning] = useState<number | null>(null);
+  const [result, setResult] = useState<{ name: string; exit_code: number | null; output: string } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const fields = error instanceof ResourceError ? error.fieldErrors : {};
+  return (
+    <Section
+      title={t("Scripts")}
+      description={t("Shell commands run with sh -c in a running container of the service (at most 2 minutes).")}
+    >
+      {d.scripts.length === 0 && <p className="rdp2-muted">{t("No script.")}</p>}
+      <ul className="rdp2-list">
+        {d.scripts.map((s) => (
+          <li key={s.id} className="rdp2-row">
+            <strong>{s.name}</strong>
+            <code className="rdp2-ellipsis rdp2-small">{s.command}</code>
+            {props.can("docker.exec") && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={running !== null || d.service.status !== "running"}
+                onClick={async () => {
+                  setRunning(s.id);
+                  setError(null);
+                  try {
+                    const out = await props.api.post<{ exit_code: number | null; output: string }>(`/apps/scripts/${s.id}/run`, {});
+                    setResult({ name: s.name, ...out });
+                  } catch (err) {
+                    setError(err);
+                  } finally {
+                    setRunning(null);
+                  }
+                }}
+              >
+                {running === s.id ? t("Running…") : t("Run")}
+              </Button>
+            )}
+            {props.can("service_scripts.delete") && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  try {
+                    await resources.remove("service_scripts", s.id);
+                    props.onSaved();
+                  } catch (err) {
+                    setError(err);
+                  }
+                }}
+              >
+                {t("Remove")}
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {result && (
+        <div className="rdp2-stack">
+          <p className="rdp2-small">
+            {result.name} · {t("exit code")} {result.exit_code ?? "?"}
+          </p>
+          <pre className="rdp2-log">{result.output}</pre>
+        </div>
+      )}
+      {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+      {props.can("service_scripts.create") && (
+        <form
+          className="rdp2-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setError(null);
+            try {
+              await resources.create("service_scripts", { service_id: String(d.service.id), name: name.trim(), command });
+              setName("");
+              setCommand("");
+              props.onSaved();
+            } catch (err) {
+              setError(err);
+            }
+          }}
+        >
+          <Field label={t("Name")} error={fields.name}>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Migrate" />
+          </Field>
+          <Field label={t("Command")} error={fields.command}>
+            <Input className="rdp2-mono" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="php artisan migrate --force" />
+          </Field>
+          <div className="rdp2-row rdp2-end">
+            <Button type="submit" disabled={!name.trim() || !command.trim()}>
+              {t("Add")}
+            </Button>
+          </div>
+        </form>
+      )}
+    </Section>
+  );
+}

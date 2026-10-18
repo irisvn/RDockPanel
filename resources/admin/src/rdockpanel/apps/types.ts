@@ -90,6 +90,7 @@ export type ServiceDetail = {
   domains: Domain[];
   redirects: Array<{ id: number; regex: string; replacement: string; permanent: boolean; enabled: boolean }>;
   basic_auth: Array<{ id: number; username: string }>;
+  scripts: Array<{ id: number; name: string; command: string }>;
   ports: Port[];
   mounts: Mount[];
   latest: Deployment | null;

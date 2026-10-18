@@ -183,6 +183,11 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("services.deploy"),
                     apps::github_webhook,
                 )
+                .post(
+                    "/scripts/{id}/run",
+                    AdminAccess::can("docker.exec"),
+                    apps::run_script,
+                )
                 .get(
                     "/actions",
                     AdminAccess::can("projects.view_any"),

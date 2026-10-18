@@ -364,6 +364,14 @@ window.rustcms?.registerTranslations?.("vi", {
   Subtitle: "Mô tả",
   "Under maintenance": "Đang bảo trì",
   "We will be back soon.": "Chúng tôi sẽ sớm quay lại.",
+  // Scripts.
+  Scripts: "Script",
+  "Shell commands run with sh -c in a running container of the service (at most 2 minutes).":
+    "Lệnh shell chạy bằng sh -c trong một container đang chạy của service (tối đa 2 phút).",
+  "No script.": "Chưa có script.",
+  Run: "Chạy",
+  "Running…": "Đang chạy…",
+  "exit code": "mã thoát",
 });
 
 export {};
