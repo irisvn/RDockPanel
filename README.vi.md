@@ -9,7 +9,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 > **Trạng thái: đang phát triển.**
 > - Phase 1 (giám sát server, quản lý Docker) đã chạy được.
 > - Phase 2 (deploy app) đã chạy được từ mã nguồn: project, service, deploy, domain, biến môi trường mã hoá, registry riêng.
-> - Phase 2 còn lại: installer (hiện chạy từ mã nguồn như hướng dẫn bên dưới).
+> - Đã có installer cài bằng một lệnh. Còn lại: build từ Git, backup, thông báo, Compose.
 > - Chưa dùng được cho production.
 
 ![Bảng điều khiển server](docs/images/server.png)
@@ -55,12 +55,23 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- **Phase 2:** Let's Encrypt khi chạy thật, installer cài bằng một lệnh.
+- Build từ Git và GitHub (Dockerfile, Nixpacks), backup database và volume, thông báo, Compose, giám sát từng service.
 - **Phase 3:** build từ Git, database kèm backup, Compose, template, thông báo, nhiều node, xác thực 2 lớp, API và CLI.
 
 | Container | Log trực tiếp | Terminal |
 |---|---|---|
 | ![Container](docs/images/containers.png) | ![Log](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |
+
+## Cài đặt
+
+Trên một server Ubuntu hoặc Debian mới (amd64 hoặc arm64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh \
+  | sudo sh -s -- --admin-email ban@example.com
+```
+
+Thêm `--domain panel.example.com --email ban@example.com` để panel chạy HTTPS (Let's Encrypt), và `--apps-domain apps.example.com` để có domain tự sinh cho app. Xem [docs/install.md](docs/install.md).
 
 ## Chạy thử (môi trường dev)
 

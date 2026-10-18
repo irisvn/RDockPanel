@@ -22,7 +22,11 @@ encrypted (RustCMS W8), kept with each deployment for rollback; the EasyPanel-li
 (dashboard, service pages and tabs, React); environment placeholders, generated domains, file
 mounts.
 
-Next: the installer, then
+The installer (`install/install.sh`, the image `ghcr.io/irisvn/rdockpanel`, built for amd64 and
+arm64): Swarm, MySQL, Traefik with Let's Encrypt, the panel, secrets kept across installs; tried on
+Ubuntu 24.04 (install twice, reboot).
+
+Next:
 service logs and terminal, a projects overview, certificate status, and drift checks (RustCMS W4).
 Deleting a project will also detach Traefik from its network and remove it.
 

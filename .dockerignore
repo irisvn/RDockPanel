@@ -1,0 +1,5 @@
+target
+.git
+.env
+storage
+resources/admin/node_modules

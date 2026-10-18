@@ -6,10 +6,9 @@ feature is free: no project limits, no paid tiers.
 
 [Tiếng Việt](README.vi.md) · [Docs](docs/) · [Roadmap](docs/roadmap.md)
 
-> **Status: early development.** Phase 1 (server monitoring and Docker management) works. Phase 2
-> (deploying apps) works from source: projects, services, deployments, domains, encrypted
-> environment variables and private registries. Still to come in Phase 2: the installer. Not for
-> production use.
+> **Status: early development.** Server monitoring, Docker management, apps and databases on
+> Docker Swarm with domains and HTTPS, EasyPanel templates, and a one-command installer work. Still
+> to come: builds from Git, backups, notifications, Compose. Try it on a test server first.
 
 ![Server dashboard](docs/images/server.png)
 
@@ -58,13 +57,26 @@ feature is free: no project limits, no paid tiers.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Phase 2: Let's Encrypt in production, a one-command installer.
+- Builds from Git and GitHub (Dockerfile, Nixpacks), database and volume backups, notifications,
+  Compose services, per-service monitoring.
 - Phase 3: builds from Git, databases with backups, Compose, templates, notifications, multiple
   nodes, two-factor authentication, an API and a CLI.
 
 | Containers | Live logs | Terminal |
 |---|---|---|
 | ![Containers](docs/images/containers.png) | ![Logs](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |
+
+## Install
+
+On a fresh Ubuntu or Debian server (amd64 or arm64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh \
+  | sudo sh -s -- --admin-email you@example.com
+```
+
+Add `--domain panel.example.com --email you@example.com` for the panel on HTTPS (Let's Encrypt)
+and `--apps-domain apps.example.com` for generated app domains. See [docs/install.md](docs/install.md).
 
 ## Quick start (development)
 
@@ -126,6 +138,7 @@ More in [docs/architecture.md](docs/architecture.md).
 | [Permissions](docs/permissions.md) | who can see and do what |
 | [Security](docs/security.md) | the Docker socket, protected objects, the terminal, CSP |
 | [API](docs/api.md) | the panel's JSON, event-stream and WebSocket routes |
+| [Install](docs/install.md) | the installer, upgrades, backups |
 | [Development](docs/development.md) | environment, tests, conventions |
 | [Roadmap](docs/roadmap.md) | phases and what they depend on |
 
