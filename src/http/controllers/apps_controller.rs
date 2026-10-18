@@ -238,6 +238,7 @@ pub async fn service(
             "cap_add": row.cap_add,
             "cap_drop": row.cap_drop,
             "sysctls": row.sysctls,
+            "groups": row.groups,
             "maintenance": row.maintenance,
             "maintenance_title": row.maintenance_title,
             "maintenance_subtitle": row.maintenance_subtitle,

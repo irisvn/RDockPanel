@@ -1768,7 +1768,7 @@ db_test!(
             .send(
                 rustcms::axum::http::Method::PATCH,
                 &url,
-                Some(&json!({"cap_add": "cap_net_admin, SYS_TIME", "sysctls": "net.ipv4.ip_forward=1"})),
+                Some(&json!({"cap_add": "cap_net_admin, SYS_TIME", "sysctls": "net.ipv4.ip_forward=1", "groups": "video"})),
             )
             .await
             .assert_status(StatusCode::OK);
@@ -1784,6 +1784,7 @@ db_test!(
         assert_eq!(spec.capability_add.unwrap(), ["NET_ADMIN", "SYS_TIME"]);
         assert_eq!(spec.capability_drop.unwrap(), ["NET_RAW"]);
         assert_eq!(spec.sysctls.unwrap()["net.ipv4.ip_forward"], "1");
+        assert_eq!(spec.groups.unwrap(), ["video"]);
         // Now privileged: what it runs is its administrators' to change.
         editor
             .send(

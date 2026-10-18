@@ -61,6 +61,7 @@ export type ServiceDetail = {
     cap_add: string | null;
     cap_drop: string | null;
     sysctls: string | null;
+    groups: string | null;
     maintenance: boolean;
     maintenance_title: string | null;
     maintenance_subtitle: string | null;

@@ -209,16 +209,6 @@ db_test!(
             "{}",
             page.text()
         );
-        // What it needs but cannot get (supplemental groups): never deployed at once.
-        let capped = json!({"services": [{"type": "app", "data": {"serviceName": "vpn", "source": {"type": "image", "image": "wg:1"}, "deploy": {"groups": ["docker"]}}}]});
-        let refused = admin
-            .post_json(
-                &app.admin_api(&format!("x/apps/projects/{project}/schema")),
-                &json!({"schema": capped, "deploy": true}),
-            )
-            .await;
-        refused.assert_status(StatusCode::BAD_REQUEST);
-        assert!(refused.text().contains("groups"), "{}", refused.text());
         // Domains need service_domains.create.
         let creator =
             support::user_with(&app, "creator", &["projects.view", "services.create"]).await;

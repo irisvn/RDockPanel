@@ -375,8 +375,9 @@ window.rustcms?.registerTranslations?.("vi", {
   Shell: "Shell",
   // Linux.
   Linux: "Linux",
-  "Tini runs as the containers' init. Adding capabilities or sysctls needs system.manage.":
-    "Tini chạy làm init của container. Thêm capability hoặc sysctl cần quyền system.manage.",
+  "Tini runs as the containers' init. Adding capabilities, groups or sysctls needs system.manage.":
+    "Tini chạy làm init của container. Thêm capability, group hoặc sysctl cần quyền system.manage.",
+  "Supplemental groups": "Group bổ sung",
   "Add capabilities": "Thêm capability",
   "Drop capabilities": "Bỏ capability",
   Sysctls: "Sysctl",

@@ -693,6 +693,7 @@ async fn desired_specs_run_on_a_real_swarm() {
         cap_add: vec![],
         cap_drop: vec![],
         sysctls: Default::default(),
+        groups: vec![],
         maintenance: false,
         redirects: vec![],
         basic_auth: vec![],

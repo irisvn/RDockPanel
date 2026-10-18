@@ -553,8 +553,6 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 warn(&mut plan, &format!("{unsupported} left out"));
             }
         }
-        // What it needs to be safe or to run: never deployed without.
-        let mut needs = vec![];
         // Capabilities and sysctls, as EasyPanel's (for the panel's
         // administrators: checked when the template is applied).
         for (field, list) in [("capAdd", &mut new.cap_add), ("capDrop", &mut new.cap_drop)] {
@@ -577,20 +575,17 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 new.sysctls.insert(k.clone(), value);
             }
         }
-        if deploy
+        for group in deploy
             .get("groups")
             .and_then(Value::as_array)
-            .is_some_and(|a| !a.is_empty())
+            .into_iter()
+            .flatten()
         {
-            needs.push("groups");
-        }
-        if !needs.is_empty() {
-            let what = format!(
-                "{name}: needs {} (not supported yet): created, not deployed",
-                needs.join(", ")
-            );
-            plan.warnings.push(what.clone());
-            plan.blocking.push(what);
+            let group = group
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| group.to_string());
+            new.groups.push(group);
         }
         apps.push(new);
     }
@@ -646,8 +641,11 @@ mod tests {
         // Basic auth and capabilities are made with it; only groups block.
         assert!(p.blocking.is_empty(), "{:?}", p.blocking);
         assert_eq!(p.services[0].cap_add, ["NET_ADMIN"]);
-        let grouped = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "image", "image": "x:1"}, "deploy": {"groups": ["docker"]}}}]});
-        assert!(super::plan(&grouped, "p", None).unwrap().blocking[0].contains("groups"));
+        let grouped = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "image", "image": "x:1"}, "deploy": {"groups": ["video"]}}}]});
+        assert_eq!(
+            super::plan(&grouped, "p", None).unwrap().services[0].groups,
+            ["video"]
+        );
     }
 
     #[test]

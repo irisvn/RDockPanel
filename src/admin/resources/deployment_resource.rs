@@ -151,7 +151,7 @@ fn privileged(record: &Data) -> bool {
         serde_json::Value::Object(o) => !o.is_empty(),
         _ => false,
     };
-    set("cap_add") || set("sysctls")
+    set("cap_add") || set("sysctls") || set("groups")
 }
 
 struct ReadOnly;

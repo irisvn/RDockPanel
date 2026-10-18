@@ -64,6 +64,9 @@ pub struct Model {
     pub cap_drop: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub sysctls: Option<String>,
+    /// Supplemental groups of its processes (`video, 1001`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub groups: Option<String>,
     /// Notes about the service (its Overview), for the team.
     #[sea_orm(column_type = "Text", nullable)]
     pub notes: Option<String>,

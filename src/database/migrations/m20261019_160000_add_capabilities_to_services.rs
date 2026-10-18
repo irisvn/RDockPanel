@@ -1,4 +1,5 @@
-//! A service's Linux capabilities (added, dropped) and sysctls (as
+//! A service's Linux capabilities (added, dropped), sysctls and supplemental
+//! groups (as
 //! EasyPanel's Advanced → Deploy).
 
 use rustcms::async_trait;
@@ -14,7 +15,12 @@ impl MigrationTrait for Migration {
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        for column in [Services::CapAdd, Services::CapDrop, Services::Sysctls] {
+        for column in [
+            Services::CapAdd,
+            Services::CapDrop,
+            Services::Sysctls,
+            Services::Groups,
+        ] {
             add_column(
                 manager,
                 Services::Table,
@@ -26,7 +32,12 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        for column in [Services::Sysctls, Services::CapDrop, Services::CapAdd] {
+        for column in [
+            Services::Groups,
+            Services::Sysctls,
+            Services::CapDrop,
+            Services::CapAdd,
+        ] {
             drop_column(manager, Services::Table, column).await?;
         }
         Ok(())
@@ -39,4 +50,5 @@ enum Services {
     CapAdd,
     CapDrop,
     Sysctls,
+    Groups,
 }

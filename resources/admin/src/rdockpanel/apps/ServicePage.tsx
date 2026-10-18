@@ -1047,6 +1047,7 @@ function AdvancedTab(props: {
   const [capAdd, setCapAdd] = useState(s.cap_add ?? "");
   const [capDrop, setCapDrop] = useState(s.cap_drop ?? "");
   const [sysctls, setSysctls] = useState(s.sysctls ?? "");
+  const [groups, setGroups] = useState(s.groups ?? "");
   const { save, error, busy, fields } = useServiceSave(s.id, props.onSaved);
   const [published, setPublished] = useState("");
   const [targetPort, setTargetPort] = useState("");
@@ -1076,6 +1077,7 @@ function AdvancedTab(props: {
               ...(capAdd !== (s.cap_add ?? "") ? { cap_add: capAdd.trim() || null } : {}),
               ...(capDrop !== (s.cap_drop ?? "") ? { cap_drop: capDrop.trim() || null } : {}),
               ...(sysctls !== (s.sysctls ?? "") ? { sysctls: sysctls.trim() || null } : {}),
+              ...(groups !== (s.groups ?? "") ? { groups: groups.trim() || null } : {}),
             });
           }}
         >
@@ -1126,7 +1128,7 @@ function AdvancedTab(props: {
           {s.kind !== "compose" && (
             <>
               <h4 className="rdp2-subtitle">{t("Linux")}</h4>
-              <p className="rdp2-muted rdp2-small">{t("Tini runs as the containers' init. Adding capabilities or sysctls needs system.manage.")}</p>
+              <p className="rdp2-muted rdp2-small">{t("Tini runs as the containers' init. Adding capabilities, groups or sysctls needs system.manage.")}</p>
               <div className="rdp2-grid2">
                 <Field label={t("Add capabilities")} help="NET_ADMIN, SYS_TIME" error={fields.cap_add}>
                   <Input className="rdp2-mono" value={capAdd} onChange={(e) => setCapAdd(e.target.value)} disabled={disabled} />
@@ -1135,6 +1137,9 @@ function AdvancedTab(props: {
                   <Input className="rdp2-mono" value={capDrop} onChange={(e) => setCapDrop(e.target.value)} disabled={disabled} />
                 </Field>
               </div>
+              <Field label={t("Supplemental groups")} help="video, 1001" error={fields.groups}>
+                <Input className="rdp2-mono" value={groups} onChange={(e) => setGroups(e.target.value)} disabled={disabled} />
+              </Field>
               <Field label={t("Sysctls")} help={t("One key=value a line, e.g. net.ipv4.ip_forward=1")} error={fields.sysctls}>
                 <Textarea className="rdp2-mono" rows={3} value={sysctls} onChange={(e) => setSysctls(e.target.value)} disabled={disabled} />
               </Field>

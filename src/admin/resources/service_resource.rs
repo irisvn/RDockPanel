@@ -74,6 +74,7 @@ impl Resource for ServiceResource {
             Field::column(service::Column::CapAdd).max_length(1000),
             Field::column(service::Column::CapDrop).max_length(1000),
             Field::column(service::Column::Sysctls).max_length(4000),
+            Field::column(service::Column::Groups).max_length(1000),
             Field::column(service::Column::Maintenance),
             Field::column(service::Column::MaintenanceTitle).max_length(200),
             Field::column(service::Column::MaintenanceSubtitle).max_length(1000),
@@ -252,6 +253,10 @@ pub(crate) fn privileged(service: &service::Model) -> bool {
             .sysctls
             .as_deref()
             .is_some_and(|s| !s.trim().is_empty())
+        || service
+            .groups
+            .as_deref()
+            .is_some_and(|g| !g.trim().is_empty())
 }
 
 /// The image as Docker takes it (no surrounding spaces).
@@ -311,6 +316,22 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
             } else if field == "cap_add" && !caps.trim().is_empty() && !system {
                 errors.add(field, ctx.t("needs system.manage"));
             }
+        }
+    }
+    // Supplemental groups (a group may open devices or sockets).
+    if let Some(list) = text(data, "groups") {
+        let words: Vec<&str> = list
+            .split([',', ' ', '\n'])
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+            .collect();
+        if !words
+            .iter()
+            .all(|g| crate::services::deploy_service::valid_group(g))
+        {
+            errors.add("groups", ctx.t("must be group names or ids"));
+        } else if !words.is_empty() && !system {
+            errors.add("groups", ctx.t("needs system.manage"));
         }
     }
     if let Some(lines) = text(data, "sysctls") {

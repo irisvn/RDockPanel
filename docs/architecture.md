@@ -287,7 +287,7 @@ notification" sends at once and answers why it failed.
 
 As EasyPanel's Advanced → Deploy. Tini is every container's init. A service's added and dropped
 Linux capabilities (`CAP_` prefix optional) and sysctls (`key=value` lines) become its container
-spec's `CapabilityAdd`, `CapabilityDrop` and `Sysctls`. Adding capabilities or sysctls reaches the
+spec's `CapabilityAdd`, `CapabilityDrop` and `Sysctls`. Adding capabilities, sysctls or supplemental groups reaches the
 host's kernel: it needs `system.manage` (in the panel and for templates); dropping does not.
 
 ### Scripts

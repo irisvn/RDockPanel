@@ -85,6 +85,9 @@ pub struct Snapshot {
     pub cap_drop: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sysctls: BTreeMap<String, String>,
+    /// Supplemental groups (names or ids).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
     /// In maintenance: its domains lead to the panel's page for it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub maintenance: bool,
@@ -347,6 +350,7 @@ impl Snapshot {
             cap_add: capabilities(service.cap_add.as_deref()),
             cap_drop: capabilities(service.cap_drop.as_deref()),
             sysctls: sysctls(service.sysctls.as_deref()).unwrap_or_default(),
+            groups: groups(service.groups.as_deref()),
             // Set from their tables ([`Snapshot::with_access`]).
             redirects: vec![],
             basic_auth: vec![],
@@ -682,6 +686,9 @@ pub fn desired(
     if !snapshot.sysctls.is_empty() {
         container["Sysctls"] = json!(snapshot.sysctls);
     }
+    if !snapshot.groups.is_empty() {
+        container["Groups"] = json!(snapshot.groups);
+    }
     if let Some(args) = snapshot.command.as_deref().and_then(command_args) {
         container["Args"] = json!(args);
     }
@@ -865,6 +872,29 @@ pub fn valid_capabilities(text: &str) -> bool {
         .map(str::trim)
         .filter(|c| !c.is_empty())
         .all(|c| c.len() <= 40 && c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_'))
+}
+
+/// Supplemental groups: names or ids, sorted, once each.
+pub fn groups(text: Option<&str>) -> Vec<String> {
+    let mut list: Vec<String> = text
+        .unwrap_or_default()
+        .split([',', ' ', '\n'])
+        .map(str::trim)
+        .filter(|g| valid_group(g))
+        .map(str::to_owned)
+        .collect();
+    list.sort();
+    list.dedup();
+    list
+}
+
+/// A group name or id (letters, digits, `_`, `-`, `.`).
+pub fn valid_group(group: &str) -> bool {
+    !group.is_empty()
+        && group.len() <= 32
+        && group
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
 /// Sysctls, one `key=value` a line (`#` comments): `None` when one is not
@@ -1225,6 +1255,7 @@ mod tests {
             cap_add: vec![],
             cap_drop: vec![],
             sysctls: BTreeMap::new(),
+            groups: vec![],
             maintenance: false,
             redirects: vec![],
             basic_auth: vec![],

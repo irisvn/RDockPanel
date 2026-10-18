@@ -113,6 +113,7 @@ pub struct NewService {
     pub cap_add: Vec<String>,
     pub cap_drop: Vec<String>,
     pub sysctls: BTreeMap<String, String>,
+    pub groups: Vec<String>,
     /// Its basic authentication: (user, password); hashed when made.
     pub basic_auth: Vec<(String, String)>,
     pub redirects: Vec<NewRedirect>,
@@ -141,6 +142,7 @@ impl NewService {
             cap_add: vec![],
             cap_drop: vec![],
             sysctls: BTreeMap::new(),
+            groups: vec![],
         }
     }
 
@@ -392,6 +394,13 @@ pub async fn create(
             errors.add("capabilities", "must be capability names like NET_ADMIN");
         }
     }
+    if !new
+        .groups
+        .iter()
+        .all(|g| crate::services::deploy_service::valid_group(g))
+    {
+        errors.add("groups", "must be group names or ids");
+    }
     let lines: Vec<String> = new
         .sysctls
         .iter()
@@ -464,6 +473,7 @@ pub async fn create(
         compose: Set(new.compose.clone().filter(|t| !t.trim().is_empty())),
         cap_add: Set((!new.cap_add.is_empty()).then(|| new.cap_add.join(", "))),
         cap_drop: Set((!new.cap_drop.is_empty()).then(|| new.cap_drop.join(", "))),
+        groups: Set((!new.groups.is_empty()).then(|| new.groups.join(", "))),
         sysctls: Set((!new.sysctls.is_empty()).then(|| {
             new.sysctls
                 .iter()
