@@ -21,11 +21,17 @@ Point `panel.example.com` and `*.apps.example.com` (a wildcard record) to the se
 
 | Option | |
 |---|---|
-| `--domain HOST` | the panel at `https://HOST` (its certificate from Let's Encrypt with `--email`) |
+| `--domain HOST` | the panel at `https://HOST` only (needs `--email`; point its DNS here first) |
 | `--email ADDRESS` | the Let's Encrypt account: certificates for the panel and every HTTPS app domain |
 | `--apps-domain HOST` | generated app domains `<project>-<service>.HOST` |
+| `--no-domain` | back to `http://<server-ip>:3000` |
 | `--admin-email EMAIL` | creates the first administrator and prints its password |
-| `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:latest`) |
+| `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:main` until the first release) |
+
+The options are kept in `/etc/rdockpanel/install.conf`: a later run changes only what it is given.
+Without a domain the panel answers on plain HTTP (port 3000), like EasyPanel before its domain is
+set: give it a domain before using it over the internet. With one, port 3000 is closed and the
+panel is reached over HTTPS only.
 
 ## What it sets up
 
@@ -35,17 +41,19 @@ Point `panel.example.com` and `*.apps.example.com` (a wildcard record) to the se
 - Docker secrets `rdp_app_key`, `rdp_database_url`, `rdp_mysql_root`, `rdp_mysql_password`, and the
   overlay network `rdp-internal`.
 - Three Swarm services, labelled `rdockpanel.system=true` (hidden from users without
-  `system.manage`):
+  `system.manage`), pinned to this node (`node.labels.rdockpanel.main`: their data lives here):
   - `rdp-mysql`: MySQL 8.4, data on the volume `rdp-mysql-data`, reachable on `rdp-internal` only;
   - `rdp-traefik`: Traefik v3 on ports 80 and 443;
-  - `rdockpanel`: the panel on port 3000, with the Docker socket, the host's `/proc` (server
+  - `rdockpanel`: the panel (port 3000 without a domain), with the Docker socket, the host's `/proc` (server
     metrics) and the routes directory. Its entrypoint migrates the database at each start.
 
 ## Upgrading and changing options
 
-Run the installer again: it pulls the image and updates the services, keeping the secrets, the
-database and the certificates. Options given again replace the old ones (the panel's domain, the
-apps' domain, the email).
+Run the installer again: it updates the panel, MySQL (8.4) and Traefik (v3.5) to their images and
+the options given, keeping the secrets, the database and the certificates. A secret file in
+`/etc/rdockpanel/secrets` that no longer matches its Docker secret stops the installer: restore
+the file from a backup (changing `APP_KEY` needs `rustcms key:reencrypt`; see
+[security](security.md)).
 
 ## Backups
 

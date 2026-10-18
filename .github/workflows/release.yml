@@ -1,12 +1,17 @@
 # The panel's image, ghcr.io/irisvn/rdockpanel: built natively for amd64 and
-# arm64 on pushes to main (`main`, `latest` until the first release) and on
-# version tags (`vX.Y.Z`, `latest`), then joined in one multi-arch tag.
+# arm64 on pushes to main (tag `main`) and on version tags (`vX.Y.Z` and
+# `latest`: releases only), then joined in one multi-arch tag.
 name: release
 
 on:
   push:
     branches: [main]
     tags: ["v*"]
+
+# One publication at a time per ref: tags are never written out of order.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -72,6 +77,6 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
             tags="-t $IMAGE:${GITHUB_REF_NAME} -t $IMAGE:latest"
           else
-            tags="-t $IMAGE:main -t $IMAGE:latest"
+            tags="-t $IMAGE:main"
           fi
           docker buildx imagetools create $tags $(printf "$IMAGE@sha256:%s " *)
