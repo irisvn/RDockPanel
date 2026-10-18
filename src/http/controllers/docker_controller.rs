@@ -4,7 +4,9 @@
 //! ([`scope`]), and every change is written to the actions log.
 
 use futures_util::StreamExt;
+use rustcms::Principal;
 use rustcms::audit::{self, AuditEntry, RequestMeta};
+use rustcms::auth::{EventStream, LiveSession};
 use rustcms::prelude::*;
 use rustcms::queue;
 use rustcms::{AppError, AppResult, Json, ValidationErrors};
@@ -15,6 +17,7 @@ use crate::jobs::pull_image::PullImage;
 use crate::models::action;
 use crate::services::action_service::{self, Initiator};
 use crate::services::docker_service::{ContainerAction, Docker, LogQuery, Scope};
+use crate::services::live_service::Live;
 
 /// Sees and touches the panel's own containers, volumes and networks.
 pub const SYSTEM_PERMISSION: &str = "system.manage";
@@ -35,7 +38,11 @@ fn cut(text: &str, max: usize) -> &str {
 }
 
 pub fn scope(auth: &Auth) -> Scope {
-    if auth.principal().can(SYSTEM_PERMISSION) {
+    scope_of(auth.principal())
+}
+
+pub fn scope_of(principal: &Principal) -> Scope {
+    if principal.can(SYSTEM_PERMISSION) {
         Scope::System
     } else {
         Scope::User
@@ -159,6 +166,67 @@ pub async fn logs(
         }
     }
     Ok(Json(json!({ "lines": lines, "truncated": truncated })))
+}
+
+/// The container's output as it comes (`lines` events): the last `tail`
+/// lines first (again after a reconnect: the page starts over on `open`).
+pub async fn follow_logs(
+    live: LiveSession,
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<LogParams>,
+) -> AppResult<EventStream> {
+    let docker = docker(&app)?;
+    let id = docker.container_id(&id, scope_of(live.principal())).await?;
+    let tail = params.tail.unwrap_or(500).min(MAX_LOG_LINES);
+    let query = LogQuery {
+        follow: true,
+        tail: Some(tail),
+        since: params.since,
+        timestamps: params.timestamps,
+    };
+    let lines = docker.logs(&id, query, Scope::System).await?;
+    let events = crate::services::live_service::log_events(lines);
+    Ok(live.stream(events).target(container_target(docker, id)))
+}
+
+/// The container's resources about every second (`stats` events), one
+/// Docker stream for all its viewers.
+pub async fn live_stats(
+    live: LiveSession,
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<EventStream> {
+    let docker = docker(&app)?;
+    let id = docker.container_id(&id, scope_of(live.principal())).await?;
+    let hub = app
+        .service::<Live>()
+        .ok_or_else(|| AppError::internal("Live is not bound"))?;
+    let stats = hub.container_stats((*docker).clone(), id.clone())?;
+    Ok(live
+        .stream(stats.into_events())
+        .target(container_target(docker, id)))
+}
+
+/// Ends a container's stream once its viewer may no longer see it (the
+/// panel's own: `system.manage`) or it is gone.
+fn container_target(
+    docker: std::sync::Arc<Docker>,
+    id: String,
+) -> impl Fn(Principal) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send>>
++ Send
++ Sync
++ 'static {
+    move |principal| {
+        let (docker, id) = (docker.clone(), id.clone());
+        Box::pin(async move {
+            docker
+                .container_id(&id, scope_of(&principal))
+                .await
+                .map(drop)
+                .map_err(AppError::from)
+        })
+    }
 }
 
 pub async fn images(State(app): State<AppState>) -> AppResult<Json<Value>> {

@@ -12,6 +12,8 @@ impl ServiceProvider for AppServiceProvider {
         // Tests bind fakes over these (`bind` replaces by type).
         app.bind(crate::services::docker_service::Docker::from_env());
         app.bind(crate::services::system_stats_service::SystemStats::from_env());
+        let shutdown = app.shutdown();
+        app.bind(crate::services::live_service::Live::new(shutdown));
         // `rustcms db:seed` runs this one (it calls the others).
         app.seeder(crate::database::seeders::DatabaseSeeder);
         // rustcms:seeders

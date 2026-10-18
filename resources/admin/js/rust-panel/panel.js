@@ -204,7 +204,18 @@
     return { body, note };
   }
 
-  window.rustPanel = { api, ApiError, h, bytes, percent, date, duration, shortId, poll, table, badge, button, act, page };
+  // A live stream's state on the page's notice line (`ctx.realtime.events`).
+  function showState(note, t, state) {
+    if (state.state === "open") note.clear();
+    else if (state.state === "reconnecting") note.error(t("Live updates interrupted, reconnecting…"));
+    else if (state.reason === "forbidden" || state.status === 403) note.error(t("You may no longer see this."));
+    else if (state.reason === "signed_out" || state.status === 401) note.error(t("Signed out."));
+    else if (state.status === 404) note.error(t("It no longer exists."));
+    else if (state.status === 429) note.error(t("Too many live views open: close some tabs."));
+    else note.error(t("Live updates stopped."));
+  }
+
+  window.rustPanel = { showState, api, ApiError, h, bytes, percent, date, duration, shortId, poll, table, badge, button, act, page };
 
   window.rustcms.registerTranslations("vi", {
     Server: "Máy chủ",
@@ -281,6 +292,17 @@
     "Removed.": "Đã xoá.",
     "Done.": "Xong.",
     "bridge (this server)": "bridge (máy này)",
+    "Live updates interrupted, reconnecting…": "Mất kết nối cập nhật trực tiếp, đang kết nối lại…",
+    "You may no longer see this.": "Bạn không còn quyền xem mục này.",
+    "Signed out.": "Đã đăng xuất.",
+    "It no longer exists.": "Mục này không còn tồn tại.",
+    "Too many live views open: close some tabs.": "Mở quá nhiều luồng trực tiếp: hãy đóng bớt tab.",
+    "Live updates stopped.": "Cập nhật trực tiếp đã dừng.",
+    Live: "Trực tiếp",
+    Stats: "Tài nguyên",
+    Read: "Đọc",
+    Written: "Ghi",
+    "CPU (%)": "CPU (%)",
     "overlay (the swarm)": "overlay (cả swarm)",
   });
 })();

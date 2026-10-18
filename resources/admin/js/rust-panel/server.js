@@ -1,10 +1,10 @@
 // The `server` page: the host's CPU, memory, network and disk over the last
-// minutes, like EasyPanel's dashboard. Polls `/server/samples` every sample
-// interval (server-sent events replace this once the framework has them).
+// minutes, like EasyPanel's dashboard, live from `/server/live` (server-sent
+// events: the history first, then each sample).
 window.rustcms.registerPage("rust-panel/server", {
   apiVersion: 1,
   mount(element, ctx) {
-    const { api, h, bytes, percent, duration, poll, page } = window.rustPanel;
+    const { api, h, bytes, percent, duration, page, showState } = window.rustPanel;
     const t = ctx.t;
     const { body, note } = page(element, t, "Server");
 
@@ -110,32 +110,34 @@ window.rustcms.registerPage("rust-panel/server", {
       }
     }
 
-    let alive = true;
-    let stop = () => {};
-    loadInfo().then(async () => {
-      let interval = 2000;
-      try {
-        interval = (await api("GET", "/server/samples")).interval_ms || interval;
-      } catch {
-        // Reported by the first poll.
-      }
-      if (!alive) return;
-      stop = poll(async () => {
-        try {
-          render((await api("GET", "/server/samples")).samples);
-          note.clear();
-        } catch (err) {
-          note.error(err);
-        }
-      }, interval);
+    // The samples shown: the server's history, then each new one live.
+    const KEEP = 150;
+    let samples = [];
+    // Samples by time, once each: the history and the live ones can overlap.
+    const merge = (more) => {
+      const byTime = new Map(samples.map((s) => [s.at, s]));
+      for (const s of more) byTime.set(s.at, s);
+      samples = [...byTime.values()].sort((a, b) => a.at - b.at).slice(-KEEP);
+    };
+    loadInfo();
+    const live = ctx.realtime.events("/server/live", {
+      onEvent(name, data) {
+        if (name === "history") merge(data.samples);
+        else if (name === "sample") merge([data]);
+        else if (name === "resync") {
+          // Samples were missed: read the history again (merged, so what came meanwhile stays).
+          api("GET", "/server/samples").then((r) => render((merge(r.samples), samples)), (err) => note.error(err));
+          return;
+        } else return;
+        render(samples);
+      },
+      onState: (state) => showState(note, t, state),
     });
 
     return {
       update() {},
       unmount() {
-        alive = false;
-        stop();
-        stop = () => {};
+        live.close();
         element.replaceChildren();
       },
     };

@@ -405,6 +405,11 @@ impl Docker {
         self.0.remove_network(&network.id).await
     }
 
+    /// The full id of the container `id` names, if `scope` may see it.
+    pub async fn container_id(&self, id: &str, scope: Scope) -> DockerResult<String> {
+        self.resolve_container(id, scope).await.map(|(id, _)| id)
+    }
+
     /// The container `id` names (id, short id or name), checked against
     /// `scope`: its full id, which every later call uses so a rename can't
     /// swap the target, and its inspect document.

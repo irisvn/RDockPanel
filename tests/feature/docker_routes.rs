@@ -53,6 +53,10 @@ db_test!(
                 read("/docker/volumes"),
                 read("/docker/networks"),
                 read("/server/info"),
+                // Streams: admitted with a 200 (the body is not read here).
+                read("/server/live"),
+                read("/docker/containers/web/stats"),
+                read("/docker/containers/web/logs/follow"),
                 Case::new(Method::GET, "/docker/actions/1")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)

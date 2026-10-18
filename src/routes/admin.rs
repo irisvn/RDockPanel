@@ -29,6 +29,12 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("docker.logs"),
                     docker::logs,
                 )
+                .events(
+                    "/containers/{id}/logs/follow",
+                    AdminAccess::can("docker.logs"),
+                    docker::follow_logs,
+                )
+                .events("/containers/{id}/stats", view(), docker::live_stats)
                 .get("/images", view(), docker::images)
                 .post("/images/pull", manage(), docker::pull_image)
                 .delete("/images/{id}", manage(), docker::remove_image)
@@ -45,6 +51,7 @@ pub fn routes() -> AdminRoutes {
             "/server",
             AdminRoutes::scope()
                 .get("/info", AdminAccess::can("server.view"), server::info)
-                .get("/samples", AdminAccess::can("server.view"), server::samples),
+                .get("/samples", AdminAccess::can("server.view"), server::samples)
+                .events("/live", AdminAccess::can("server.view"), server::live),
         )
 }

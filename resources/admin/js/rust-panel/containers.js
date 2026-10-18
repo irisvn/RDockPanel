@@ -1,11 +1,11 @@
 // The `containers` page: every container with its state, start/stop/…
-// buttons, and a panel with its logs or its inspect document. The list
-// refreshes every 5 s; logs every 3 s while "Follow" is on (server-sent
-// events replace the polling once the framework has them).
+// buttons, and a panel with its logs, its live stats or its inspect
+// document. The list refreshes every 5 s; logs and stats are server-sent
+// events.
 window.rustcms.registerPage("rust-panel/containers", {
   apiVersion: 1,
   mount(element, ctx) {
-    const { api, h, date, badge, button, act, poll, table, page } = window.rustPanel;
+    const { api, h, bytes, date, badge, button, act, poll, table, page, showState } = window.rustPanel;
     const t = ctx.t;
     const can = ctx.data?.can ?? {};
     let alive = true;
@@ -87,6 +87,7 @@ window.rustcms.registerPage("rust-panel/containers", {
       open = { id: c.id, name: c.name, tab };
       const tabs = [];
       if (can["docker.logs"]) tabs.push(["logs", "Logs"]);
+      if (c.state === "running") tabs.push(["stats", "Stats"]);
       tabs.push(["inspect", "Inspect"]);
       const nav = h(
         "div",
@@ -102,44 +103,71 @@ window.rustcms.registerPage("rust-panel/containers", {
       );
       detail.hidden = false;
       if (tab === "logs") showLogs(c, content);
+      else if (tab === "stats") showStats(c, content);
       else showInspect(c, content);
       detail.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
 
+    // Logs: the last lines, then new ones as they come while "Follow" is on.
     function showLogs(c, content) {
+      const MAX_LINES = 5000;
       const lines = h("select", { className: "rp-input" }, [100, 500, 2000].map((n) => h("option", { value: n }, String(n))));
       lines.value = "500";
       const follow = h("input", { type: "checkbox", checked: true });
-      const output = h("pre", { className: "rp-log", tabindex: "0" });
-      const info = h("p", { className: "rp-muted", hidden: true });
+      const output = h("pre", { className: "rp-log", tabindex: "0", "aria-live": "off" });
       content.replaceChildren(
         h("div", { className: "rp-toolbar" }, h("label", { className: "rp-check" }, t("Lines"), lines), h("label", { className: "rp-check" }, follow, t("Follow"))),
-        info,
         output,
       );
-      const load = async () => {
-        if (!follow.checked && output.childNodes.length) return;
-        try {
-          const result = await api("GET", path(c.id, `/logs?tail=${lines.value}`));
-          if (open?.id !== c.id) return;
-          const stick = output.scrollTop + output.clientHeight >= output.scrollHeight - 8;
-          output.replaceChildren(
-            ...(result.lines.length
-              ? result.lines.map((l) => h("span", { className: l.stream === "stderr" ? "rp-log-err" : "" }, l.text.endsWith("\n") ? l.text : `${l.text}\n`))
-              : [h("span", { className: "rp-muted" }, t("No output."))]),
-          );
-          info.hidden = !result.truncated;
-          info.textContent = t("Output cut: too large.");
-          if (stick) output.scrollTop = output.scrollHeight;
-        } catch (err) {
-          note.error(err);
-        }
+      const append = (batch) => {
+        const stick = output.scrollTop + output.clientHeight >= output.scrollHeight - 8;
+        output.querySelector(".rp-log-empty")?.remove();
+        output.append(...batch.map((l) => h("span", { className: l.stream === "stderr" ? "rp-log-err" : "" }, l.text.endsWith("\n") ? l.text : `${l.text}\n`)));
+        while (output.childNodes.length > MAX_LINES) output.firstChild.remove();
+        if (stick) output.scrollTop = output.scrollHeight;
       };
-      lines.addEventListener("change", () => {
-        output.replaceChildren();
-        load();
+      let stream = null;
+      const start = () => {
+        stream?.close();
+        stream = ctx.realtime.events(path(c.id, `/logs/follow?tail=${lines.value}`), {
+          onEvent(name, data) {
+            if (name === "lines") append(data.lines);
+          },
+          onState(state) {
+            // The server sends the last lines again after each (re)connect.
+            if (state.state === "open") output.replaceChildren(h("span", { className: "rp-muted rp-log-empty" }, t("No output.")));
+            showState(note, t, state);
+          },
+        });
+      };
+      follow.addEventListener("change", () => (follow.checked ? start() : stream?.close()));
+      lines.addEventListener("change", () => (follow.checked ? start() : null));
+      start();
+      stopLogs = () => stream?.close();
+    }
+
+    // Stats: CPU, memory, network and disk I/O, live.
+    function showStats(c, content) {
+      const value = (label) => {
+        const out = h("div", { className: "rp-card-value" }, "–");
+        return [h("section", { className: "rp-card" }, h("h3", { className: "rp-card-title" }, t(label)), out), out];
+      };
+      const [cpuCard, cpu] = value("CPU");
+      const [memCard, mem] = value("Memory");
+      const [netCard, net] = value("Network");
+      const [diskCard, disk] = value("Disk");
+      content.replaceChildren(h("div", { className: "rp-cards" }, cpuCard, memCard, netCard, diskCard));
+      const stream = ctx.realtime.events(path(c.id, "/stats"), {
+        onEvent(name, s) {
+          if (name !== "stats") return;
+          cpu.textContent = `${s.cpu_percent.toFixed(1)}%`;
+          mem.textContent = s.mem_limit ? `${bytes(s.mem_used)} / ${bytes(s.mem_limit)}` : bytes(s.mem_used);
+          net.textContent = `${t("In")} ${bytes(s.net_rx)} · ${t("Out")} ${bytes(s.net_tx)}`;
+          disk.textContent = `${t("Read")} ${bytes(s.blk_read)} · ${t("Written")} ${bytes(s.blk_write)}`;
+        },
+        onState: (state) => showState(note, t, state),
       });
-      stopLogs = poll(load, 3000);
+      stopLogs = () => stream.close();
     }
 
     async function showInspect(c, content) {

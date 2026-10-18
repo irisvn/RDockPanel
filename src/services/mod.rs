@@ -2,5 +2,6 @@
 
 pub mod action_service;
 pub mod docker_service;
+pub mod live_service;
 pub mod system_stats_service;
 // rustcms:services

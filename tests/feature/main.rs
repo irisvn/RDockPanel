@@ -7,4 +7,5 @@ mod support;
 mod docker;
 mod docker_routes;
 mod health;
+mod live;
 // rustcms:tests
