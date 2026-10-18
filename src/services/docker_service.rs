@@ -561,7 +561,9 @@ impl Docker {
     pub async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
         checked_name(&request.name)?;
         let network = self.0.ensure_network(request.clone()).await?;
-        let same = network.driver == request.driver
+        // Swarm reports a just-created overlay without its driver for a moment:
+        // the labels (set only at creation) decide; a different driver refuses.
+        let same = (network.driver.is_empty() || network.driver == request.driver)
             && request
                 .labels
                 .iter()
@@ -570,8 +572,8 @@ impl Docker {
             Ok(network)
         } else {
             Err(DockerError::Conflict(format!(
-                "network {} is not this panel's",
-                request.name
+                "network {} is not this panel's (driver {}, labels {:?})",
+                request.name, network.driver, network.labels
             )))
         }
     }
