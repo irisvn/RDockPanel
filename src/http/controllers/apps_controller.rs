@@ -108,6 +108,21 @@ async fn service_of(app: &AppState, id: i64) -> AppResult<service::Model> {
 /// mounts, state and recent deployments.
 /// A service with added capabilities, sysctls or groups (or a Compose
 /// service): what it runs or how is the panel's administrators' only.
+/// [`forbid_privileged`] on the service locked in `txn`: what is checked
+/// stays so until the write commits.
+async fn lock_unprivileged(
+    txn: &sea_orm::DatabaseTransaction,
+    auth: &Auth,
+    id: i64,
+) -> AppResult<()> {
+    let row = service::Entity::find_by_id(id)
+        .lock_exclusive()
+        .one(txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    forbid_privileged(auth, &row)
+}
+
 pub(crate) fn forbid_privileged(auth: &Auth, row: &service::Model) -> AppResult<()> {
     if (row.kind == "compose" || crate::admin::resources::service_resource::privileged(row))
         && !auth
@@ -612,6 +627,7 @@ pub async fn deploy_key(
         &private.trim().to_owned(),
     )?;
     let txn = app.db().begin().await?;
+    lock_unprivileged(&txn, &auth, row.id).await?;
     service::Entity::update_many()
         .col_expr(
             service::Column::DeployKey,
@@ -641,6 +657,7 @@ pub async fn trigger(
     forbid_privileged(&auth, &row)?;
     let token = crate::services::database_service::random_string(40);
     let txn = app.db().begin().await?;
+    lock_unprivileged(&txn, &auth, row.id).await?;
     service::Entity::update_many()
         .col_expr(
             service::Column::TriggerHash,
@@ -770,6 +787,7 @@ pub async fn add_basic_auth(
         .map_err(AppError::internal)?
         .map_err(AppError::internal)?;
     let txn = app.db().begin().await?;
+    lock_unprivileged(&txn, &auth, row.id).await?;
     service_basic_auth::Entity::delete_many()
         .filter(service_basic_auth::Column::ServiceId.eq(row.id))
         .filter(service_basic_auth::Column::Username.eq(username.as_str()))
@@ -807,6 +825,7 @@ pub async fn remove_basic_auth(
     let row = service_of(&app, id).await?;
     forbid_privileged(&auth, &row)?;
     let txn = app.db().begin().await?;
+    lock_unprivileged(&txn, &auth, row.id).await?;
     let removed = service_basic_auth::Entity::delete_many()
         .filter(service_basic_auth::Column::ServiceId.eq(row.id))
         .filter(service_basic_auth::Column::Id.eq(user))
@@ -835,6 +854,7 @@ pub async fn github_webhook(
     let secret = crate::services::database_service::random_string(40);
     let sealed = Encrypted::seal(app.keyring(), &service::webhook_secret_context(), &secret)?;
     let txn = app.db().begin().await?;
+    lock_unprivileged(&txn, &auth, row.id).await?;
     service::Entity::update_many()
         .col_expr(
             service::Column::WebhookSecret,

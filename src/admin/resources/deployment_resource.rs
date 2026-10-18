@@ -20,6 +20,8 @@ impl Resource for DeploymentResource {
     fn meta() -> ResourceMeta {
         ResourceMeta::new("Deployment")
             .icon("history")
+            // A rollback's checks hold the service until it is asked for.
+            .lock_parent("service_id", "services")
             .group("Deploy")
             .audit(false)
     }

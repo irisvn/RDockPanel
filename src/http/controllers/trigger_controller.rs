@@ -9,7 +9,7 @@ use rustcms::audit::{self, AuditActor, AuditContext, AuditEntry, RequestMeta};
 use rustcms::prelude::*;
 use rustcms::queue;
 use rustcms::{AppError, AppResult, Json};
-use sea_orm::EntityTrait;
+use sea_orm::{EntityTrait, QuerySelect};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -36,7 +36,9 @@ pub async fn deploy(
     let id: i64 = id.parse().map_err(|_| AppError::NotFound)?;
     let token = query.get("token").ok_or(AppError::NotFound)?;
     let txn = rustcms::db::begin_write(app.db()).await?;
+    // Locked: what is checked is what deploys.
     let row = service::Entity::find_by_id(id)
+        .lock_exclusive()
         .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
@@ -175,9 +177,14 @@ pub async fn github(
     }
     let txn = rustcms::db::begin_write(app.db()).await?;
     let row = service::Entity::find_by_id(id)
+        .lock_exclusive()
         .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
+    // Checked again on the locked row (it may have become privileged).
+    if crate::admin::resources::service_resource::privileged(&row) {
+        return Err(AppError::Forbidden);
+    }
     let deployment =
         match deployment_service::request(&txn, &row, Trigger::Deploy, None, None, app.keyring())
             .await
