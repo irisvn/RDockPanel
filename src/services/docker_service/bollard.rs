@@ -493,13 +493,29 @@ impl DockerApi for BollardDocker {
     }
 
     async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
-        if let Some(found) = self
-            .networks()
-            .await?
-            .into_iter()
-            .find(|n| n.name == request.name)
+        // By its exact name, inspected (lists may leave out the labels).
+        match self
+            .client
+            .inspect_network(
+                &request.name,
+                None::<::bollard::query_parameters::InspectNetworkOptions>,
+            )
+            .await
         {
-            return Ok(found);
+            Ok(found) if found.name.as_deref() == Some(request.name.as_str()) => {
+                return Ok(NetworkItem {
+                    id: found.id.unwrap_or_default(),
+                    name: request.name,
+                    driver: found.driver.unwrap_or_default(),
+                    scope: found.scope.unwrap_or_default(),
+                    labels: found.labels.unwrap_or_default(),
+                });
+            }
+            Ok(_)
+            | Err(Error::DockerResponseServerError {
+                status_code: 404, ..
+            }) => {}
+            Err(err) => return Err(map_err(err)),
         }
         let create = NetworkCreateRequest {
             name: request.name.clone(),
