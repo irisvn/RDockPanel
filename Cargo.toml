@@ -9,7 +9,7 @@ version = "0.3.2"
 
 [dependencies]
 # Core v0.4 is on main, not tagged yet: pin the commit.
-rustcms = { git = "https://github.com/irisvn/RustCMS-Core", rev = "a3531cd" }
+rustcms = { git = "https://github.com/irisvn/RustCMS-Core", rev = "e69032c" }
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "with-chrono", "with-uuid", "with-rust_decimal", "with-json"] }
 sea-orm-migration = { version = "=2.0.4", default-features = false }
 anyhow = "1"
@@ -25,6 +25,6 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", rev = "a3531cd" }
+rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", rev = "e69032c" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 [workspace]
