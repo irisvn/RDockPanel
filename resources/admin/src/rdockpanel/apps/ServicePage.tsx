@@ -280,12 +280,12 @@ function Monitor(props: Props & { d: ServiceDetail }) {
       actions={
         container && (
           <>
-            {props.can("docker.logs") && (
+            {props.can("docker.view") && props.can("docker.logs") && (
               <a className="rdp2-button-link" href={`${document.baseURI.replace(/\/$/, "")}/p/containers?open=${container}&tab=logs`}>
                 {t("Logs")}
               </a>
             )}
-            {props.can("docker.exec") && (
+            {props.can("docker.view") && props.can("docker.exec") && (
               <a className="rdp2-button-link" href={`${document.baseURI.replace(/\/$/, "")}/p/containers?open=${container}&tab=terminal`}>
                 {t("Shell")}
               </a>

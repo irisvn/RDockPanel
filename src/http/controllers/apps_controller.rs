@@ -642,7 +642,13 @@ pub async fn trigger(
 /// A service's resources now (its Overview's monitor): CPU and memory of each
 /// running task on this node, and their sum. Two samples of Docker's stats
 /// (the first has no CPU delta), at most 3 s.
-pub async fn stats(State(app): State<AppState>, Path(id): Path<i64>) -> AppResult<Json<Value>> {
+pub async fn stats(
+    State(app): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    // Container ids (the Logs and Shell links) only for who sees containers.
+    let show_ids = auth.principal().can("docker.view");
     use crate::services::docker_service::{Docker, TaskState};
     use futures_util::StreamExt;
     let row = service_of(&app, id).await?;
@@ -669,7 +675,11 @@ pub async fn stats(State(app): State<AppState>, Path(id): Path<i64>) -> AppResul
             Some((t.slot.unwrap_or(0), container))
         })
         .collect();
-    let ids: std::collections::HashMap<i64, String> = containers.iter().cloned().collect();
+    let ids: std::collections::HashMap<i64, String> = if show_ids {
+        containers.iter().cloned().collect()
+    } else {
+        Default::default()
+    };
     let samples = futures_util::future::join_all(containers.iter().map(|(slot, container)| {
         let stream = docker.engine().stats(container);
         async move {
