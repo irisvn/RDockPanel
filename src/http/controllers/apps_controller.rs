@@ -317,6 +317,15 @@ pub async fn put_env(
     Json(body): Json<EnvText>,
 ) -> AppResult<Json<Value>> {
     let row = service_of(&app, id).await?;
+    // A Compose file reads its environment (`${VAR}`, even in its volumes):
+    // the panel's administrators only, as the file itself.
+    if row.kind == "compose"
+        && !auth
+            .principal()
+            .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+    {
+        return Err(AppError::Forbidden);
+    }
     let env: BTreeMap<String, String> = dotenv::parse(&body.text).map_err(|e| {
         AppError::from(ValidationErrors::field(
             "text",

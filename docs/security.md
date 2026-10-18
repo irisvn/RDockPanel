@@ -83,7 +83,8 @@ leaks.
 ## Compose services
 
 A Compose file can run privileged containers and mount any host directory: creating or editing a
-Compose service needs `system.manage`. Its `.env` holds its environment in clear (`0600`, in the
+Compose service needs `system.manage`, and so does its environment (the file reads it with
+`${VAR}`, even in its volumes). Its `.env` holds its environment in clear (`0600`, in the
 Compose directory, root's).
 
 ## Backups

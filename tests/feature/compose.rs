@@ -93,6 +93,31 @@ db_test!(
             .await
             .assert_status(StatusCode::OK);
 
+        // Only its administrators change what the file reads.
+        let editor = support::user_with(
+            &app,
+            "editor",
+            &["projects.view", "services.view", "services.update"],
+        )
+        .await;
+        let editor = app.acting_as(&editor).await;
+        editor
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &env,
+                Some(&json!({"text": "GREETING=x\n"})),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        editor
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{}/{id}", records(&app, "services")),
+                Some(&json!({"compose": FILE})),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+
         run(&app, &admin, "deploy", id).await;
         let calls = fake.calls();
         assert!(
