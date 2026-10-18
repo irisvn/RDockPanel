@@ -669,6 +669,7 @@ pub async fn stats(State(app): State<AppState>, Path(id): Path<i64>) -> AppResul
             Some((t.slot.unwrap_or(0), container))
         })
         .collect();
+    let ids: std::collections::HashMap<i64, String> = containers.iter().cloned().collect();
     let samples = futures_util::future::join_all(containers.iter().map(|(slot, container)| {
         let stream = docker.engine().stats(container);
         async move {
@@ -691,7 +692,7 @@ pub async fn stats(State(app): State<AppState>, Path(id): Path<i64>) -> AppResul
             let s = s?;
             cpu += s.cpu_percent;
             mem += s.mem_used;
-            Some(json!({ "slot": slot, "cpu_percent": s.cpu_percent, "mem_used": s.mem_used, "mem_limit": s.mem_limit }))
+            Some(json!({ "slot": slot, "container": ids.get(&slot), "cpu_percent": s.cpu_percent, "mem_used": s.mem_used, "mem_limit": s.mem_limit }))
         })
         .collect();
     // Tasks without a sample (stats failed or too slow): said, not counted as 0.

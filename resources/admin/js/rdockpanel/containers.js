@@ -63,11 +63,20 @@ window.rustcms.registerPage("rdockpanel/containers", {
       list.replaceChildren(table([t("Name"), t("Image"), t("State"), t("Status"), t("Ports"), t("Actions")], rows, t("No containers.")));
     }
 
+    // `?open=<id>&tab=logs|terminal|stats|inspect`: a service's Logs and
+    // Shell buttons open its container here.
+    const wanted = new URLSearchParams(window.location.search);
+    let deepLink = wanted.get("open");
     async function loadList() {
       try {
         containers = (await api("GET", "/docker/containers")).containers;
         containers.sort((a, b) => a.name.localeCompare(b.name));
         if (alive) renderList();
+        if (alive && deepLink) {
+          const c = containers.find((x) => x.id === deepLink || x.id.startsWith(deepLink));
+          deepLink = null;
+          if (c) openDetail(c, wanted.get("tab") || "logs");
+        }
       } catch (err) {
         note.error(err);
       }

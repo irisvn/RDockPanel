@@ -966,8 +966,31 @@ sleep 1
     let id = match client.create_exec(container, config).await.map_err(map_err) {
         Ok(created) => created.id,
         // The container is gone, with its processes.
-        // The container is gone, or stopped: so are its processes.
-        Err(DockerError::NotFound) | Err(DockerError::Conflict(_)) => return Ok(()),
+        Err(DockerError::NotFound) => return Ok(()),
+        // Not running: stopped (its processes ended) or paused (they live:
+        // not done, tried again).
+        Err(DockerError::Conflict(why)) => {
+            let state = client
+                .inspect_container(
+                    container,
+                    None::<::bollard::query_parameters::InspectContainerOptions>,
+                )
+                .await
+                .map_err(map_err);
+            let status = match state {
+                Err(DockerError::NotFound) => return Ok(()),
+                Err(err) => return Err(err),
+                Ok(found) => found
+                    .state
+                    .and_then(|s| s.status)
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+            };
+            return match status.as_str() {
+                "exited" | "dead" | "created" => Ok(()),
+                _ => Err(DockerError::Conflict(format!("{why} ({status})"))),
+            };
+        }
         Err(err) => return Err(err),
     };
     let start = StartExecOptions {

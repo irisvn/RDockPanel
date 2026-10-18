@@ -245,7 +245,12 @@ function Notes(props: Props & { d: ServiceDetail }) {
   );
 }
 
-type Stats = { cpu_percent: number; mem_used: number; missing: number; tasks: Array<{ slot: number; cpu_percent: number; mem_used: number; mem_limit: number }> };
+type Stats = {
+  cpu_percent: number;
+  mem_used: number;
+  missing: number;
+  tasks: Array<{ slot: number; container: string | null; cpu_percent: number; mem_used: number; mem_limit: number }>;
+};
 
 /** CPU and memory of the service's tasks, every few seconds (EasyPanel's monitor). */
 function Monitor(props: Props & { d: ServiceDetail }) {
@@ -261,6 +266,7 @@ function Monitor(props: Props & { d: ServiceDetail }) {
     setMem((v) => [...v.slice(-59), stats.data!.mem_used]);
   }, [stats.data]);
   const data = stats.data;
+  const container = data?.tasks.find((task) => task.container)?.container ?? null;
   if (stats.error)
     return (
       <Section title={t("Monitor")}>
@@ -269,7 +275,25 @@ function Monitor(props: Props & { d: ServiceDetail }) {
     );
   if (!data) return null;
   return (
-    <Section title={t("Monitor")}>
+    <Section
+      title={t("Monitor")}
+      actions={
+        container && (
+          <>
+            {props.can("docker.logs") && (
+              <a className="rdp2-button-link" href={`${document.baseURI.replace(/\/$/, "")}/p/containers?open=${container}&tab=logs`}>
+                {t("Logs")}
+              </a>
+            )}
+            {props.can("docker.exec") && (
+              <a className="rdp2-button-link" href={`${document.baseURI.replace(/\/$/, "")}/p/containers?open=${container}&tab=terminal`}>
+                {t("Shell")}
+              </a>
+            )}
+          </>
+        )
+      }
+    >
       <div className="rdp2-tiles">
         <div className="rdp2-tile">
           <span className="rdp2-muted rdp2-small">{t("CPU")}</span>

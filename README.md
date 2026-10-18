@@ -148,6 +148,7 @@ More in [docs/architecture.md](docs/architecture.md).
 | [Security](docs/security.md) | the Docker socket, protected objects, the terminal, CSP |
 | [API](docs/api.md) | the panel's JSON, event-stream and WebSocket routes |
 | [Install](docs/install.md) | the installer, upgrades, backups |
+| [EasyPanel comparison](docs/easypanel-comparison.md) | what RDockPanel has of EasyPanel, feature by feature |
 | [Development](docs/development.md) | environment, tests, conventions |
 | [Roadmap](docs/roadmap.md) | phases and what they depend on |
 

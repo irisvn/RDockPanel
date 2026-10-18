@@ -372,6 +372,7 @@ window.rustcms?.registerTranslations?.("vi", {
   Run: "Chạy",
   "Running…": "Đang chạy…",
   "exit code": "mã thoát",
+  Shell: "Shell",
 });
 
 export {};
