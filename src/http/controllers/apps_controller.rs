@@ -626,7 +626,7 @@ pub async fn deploy_key(
         &service::deploy_key_context(),
         &private.trim().to_owned(),
     )?;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     lock_unprivileged(&txn, &auth, row.id).await?;
     service::Entity::update_many()
         .col_expr(
@@ -656,7 +656,7 @@ pub async fn trigger(
     let row = service_of(&app, id).await?;
     forbid_privileged(&auth, &row)?;
     let token = crate::services::database_service::random_string(40);
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     lock_unprivileged(&txn, &auth, row.id).await?;
     service::Entity::update_many()
         .col_expr(
@@ -786,7 +786,7 @@ pub async fn add_basic_auth(
         .await
         .map_err(AppError::internal)?
         .map_err(AppError::internal)?;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     lock_unprivileged(&txn, &auth, row.id).await?;
     service_basic_auth::Entity::delete_many()
         .filter(service_basic_auth::Column::ServiceId.eq(row.id))
@@ -824,7 +824,7 @@ pub async fn remove_basic_auth(
     use crate::models::service_basic_auth;
     let row = service_of(&app, id).await?;
     forbid_privileged(&auth, &row)?;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     lock_unprivileged(&txn, &auth, row.id).await?;
     let removed = service_basic_auth::Entity::delete_many()
         .filter(service_basic_auth::Column::ServiceId.eq(row.id))
@@ -853,7 +853,7 @@ pub async fn github_webhook(
     forbid_privileged(&auth, &row)?;
     let secret = crate::services::database_service::random_string(40);
     let sealed = Encrypted::seal(app.keyring(), &service::webhook_secret_context(), &secret)?;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     lock_unprivileged(&txn, &auth, row.id).await?;
     service::Entity::update_many()
         .col_expr(
