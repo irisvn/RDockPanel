@@ -2,13 +2,16 @@
 //! running container with the engine's own tool (`pg_dump`, `mysqldump`,
 //! `mariadb-dump`, `mongodump`) and the credentials of its environment (never
 //! passed by the panel), gzipped, written to a storage provider as
-//! `<path>/<database>-<UTC time>.<ext>`; the oldest files of that database in
-//! that path deleted beyond the retention. A restore feeds a file back to
-//! the engine's client, in place. Each run is a `backup_runs` row with its
-//! log; scheduled runs come from each configuration's cron ([`tick`]).
+//! `<path>/<project>_<service>.<database>.<UTC time>.r<run>.<ext>`; the oldest
+//! files of that service's database in that path deleted beyond the
+//! retention. A restore feeds a file back to the engine's client, in place.
+//! Each run is a `backup_runs` row with its log, its file, provider and
+//! retention fixed when it is asked for; one run of a service at a time;
+//! scheduled runs come from each configuration's cron ([`tick`]).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
@@ -17,7 +20,7 @@ use rustcms::{AppError, AppResult, AppState};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, QueryFilter, Set, TransactionTrait,
+    IntoActiveModel, PaginatorTrait, QueryFilter, QuerySelect, Set, TransactionTrait,
 };
 
 use crate::jobs::run_backup::RunBackup;
@@ -26,6 +29,11 @@ use crate::services::database_service::{Engine, random_string};
 use crate::services::deploy_service::service_name;
 use crate::services::docker_service::{Docker, ExecChunk, TaskState};
 use crate::services::storage_service::{Store, valid_key};
+
+/// A running run says it is alive this often…
+const HEARTBEAT: Duration = Duration::from_secs(30);
+/// …and is taken for dead (its process stopped) after this long without.
+const STALE: Duration = Duration::from_secs(150);
 
 /// A database name as the engines take it (passed as an argument anyway;
 /// never an option).
@@ -56,9 +64,18 @@ pub fn parse_schedule(expr: &str) -> Option<croner::Cron> {
         .ok()
 }
 
-/// The command dumping `database`, the file's extension, and whether the
-/// panel gzips its output (`mongodump` does it).
-fn dump_command(engine: Engine, database: &str) -> Option<(Vec<String>, &'static str, bool)> {
+/// A backup file's extension, and whether the panel gzips the dump
+/// (`mongodump` does it).
+fn format_of(engine: Engine) -> Option<(&'static str, bool)> {
+    match engine {
+        Engine::Redis => None,
+        Engine::Mongo => Some(("archive.gz", false)),
+        _ => Some(("sql.gz", true)),
+    }
+}
+
+/// The command dumping `database`.
+fn dump_command(engine: Engine, database: &str) -> Option<Vec<String>> {
     let script = match engine {
         Engine::Postgres => {
             r#"PGPASSWORD="$POSTGRES_PASSWORD" exec pg_dump -h 127.0.0.1 -U "$POSTGRES_USER" --clean --if-exists --no-owner -d "$1""#
@@ -74,19 +91,16 @@ fn dump_command(engine: Engine, database: &str) -> Option<(Vec<String>, &'static
         }
         Engine::Redis => return None,
     };
-    let (ext, gzip) = match engine {
-        Engine::Mongo => ("archive.gz", false),
-        _ => ("sql.gz", true),
-    };
-    Some((sh(script, &[database]), ext, gzip))
+    Some(sh(script, &[database]))
 }
 
 /// The command restoring into `database` (a Mongo archive of `source`
-/// renamed to it).
+/// renamed to it). PostgreSQL's in one transaction: a restore cut short
+/// changes nothing.
 fn restore_command(engine: Engine, database: &str, source: Option<&str>) -> Option<Vec<String>> {
     let script = match engine {
         Engine::Postgres => {
-            r#"PGPASSWORD="$POSTGRES_PASSWORD" exec psql -q -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$POSTGRES_USER" -d "$1""#
+            r#"PGPASSWORD="$POSTGRES_PASSWORD" exec psql -q -v ON_ERROR_STOP=1 --single-transaction -h 127.0.0.1 -U "$POSTGRES_USER" -d "$1""#
         }
         Engine::Mysql => r#"exec mysql -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" "$1""#,
         Engine::Mariadb => r#"exec mariadb -h 127.0.0.1 -uroot -p"$MARIADB_ROOT_PASSWORD" "$1""#,
@@ -110,26 +124,57 @@ fn sh(script: &str, args: &[&str]) -> Vec<String> {
     cmd
 }
 
-/// `<database>-<YYYYmmddTHHMMSSZ>.<ext>`.
-fn file_name(database: &str, ext: &str, at: DateTime<Utc>) -> String {
-    format!("{database}-{}.{ext}", at.format("%Y%m%dT%H%M%SZ"))
+/// `<project>_<service>.<database>.`: what a service's files of a database
+/// start with (names have no `.`).
+fn file_prefix(owner: &str, database: &str) -> String {
+    format!("{owner}.{database}.")
+}
+
+/// `<owner>.<database>.<YYYYmmddTHHMMSSZ>.r<run>.<ext>` (the run padded:
+/// names sort as they were made).
+fn file_name(owner: &str, database: &str, at: DateTime<Utc>, run: i64, ext: &str) -> String {
+    format!(
+        "{}{}.r{run:010}.{ext}",
+        file_prefix(owner, database),
+        at.format("%Y%m%dT%H%M%SZ")
+    )
 }
 
 /// The database a file of [`file_name`] holds.
 fn database_of(file: &str) -> Option<&str> {
     let name = file.rsplit('/').next()?;
-    let (stem, _) = name.split_once('.')?;
-    let (database, time) = stem.rsplit_once('-')?;
-    (time.len() == 16 && time.ends_with('Z')).then_some(database)
+    let parts: Vec<&str> = name.split('.').collect();
+    (parts.len() >= 5 && parts[2].len() == 16 && parts[3].starts_with('r')).then(|| parts[1])
 }
 
-/// Asks for a run of `backup` (in `txn`, with its job).
+async fn owner_of<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    service_id: i64,
+) -> AppResult<(service::Model, String)> {
+    let service = service::Entity::find_by_id(service_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let project = project::Entity::find_by_id(service.project_id)
+        .one(db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let owner = service_name(&project.name, &service.name);
+    Ok((service, owner))
+}
+
+/// Asks for a run of `backup` (in `txn`, with its job): its file, provider
+/// and retention fixed now (a later edit changes later runs only).
 pub async fn request(
     txn: &DatabaseTransaction,
     backup: &database_backup::Model,
     trigger: &str,
     user_id: Option<i64>,
 ) -> AppResult<backup_run::Model> {
+    let (service, owner) = owner_of(txn, backup.service_id).await?;
+    let (ext, _) = Engine::parse(&service.kind)
+        .and_then(format_of)
+        .ok_or_else(|| AppError::BadRequest("this service has no database to back up".into()))?;
     let now = Utc::now();
     let run = backup_run::ActiveModel {
         service_id: Set(backup.service_id),
@@ -139,6 +184,7 @@ pub async fn request(
         trigger: Set(trigger.to_owned()),
         status: Set("queued".to_owned()),
         database_name: Set(backup.database_name.clone()),
+        retention: Set(Some(backup.retention)),
         user_id: Set(user_id),
         created_at: Set(now),
         updated_at: Set(now),
@@ -146,6 +192,14 @@ pub async fn request(
     }
     .insert(txn)
     .await?;
+    let key = format!(
+        "{}/{}",
+        backup.path.trim_matches('/'),
+        file_name(&owner, &backup.database_name, now, run.id, ext)
+    );
+    let mut active = run.into_active_model();
+    active.file = Set(Some(key));
+    let run = active.update(txn).await?;
     queue::dispatch(txn, &RunBackup { run_id: run.id }).await?;
     Ok(run)
 }
@@ -199,7 +253,7 @@ impl Log<'_> {
         if self.text.len() > 2 * crate::models::action::LOG_LIMIT {
             self.text = crate::models::action::tail(&self.text).to_owned();
         }
-        if self.saved.elapsed() >= std::time::Duration::from_secs(1) {
+        if self.saved.elapsed() >= Duration::from_secs(1) {
             self.save().await;
         }
     }
@@ -217,73 +271,132 @@ impl Log<'_> {
     }
 }
 
-/// A temporary file, removed when dropped.
+/// A private scratch directory (`0700`), removed when dropped.
 struct Scratch(PathBuf);
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
-fn scratch() -> Scratch {
-    Scratch(std::env::temp_dir().join(format!("rdp-backup-{}", random_string(16).to_lowercase())))
+impl Scratch {
+    fn new() -> Result<Self, String> {
+        use std::os::unix::fs::DirBuilderExt;
+        let dir =
+            std::env::temp_dir().join(format!("rdp-backup-{}", random_string(16).to_lowercase()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .map_err(|e| format!("the scratch directory: {e}"))?;
+        Ok(Self(dir))
+    }
+
+    fn file(&self) -> PathBuf {
+        self.0.join("dump")
+    }
 }
 
 /// What a finished run reports.
 struct Done {
-    file: Option<String>,
     size: Option<i64>,
 }
 
 /// Runs the queued run `id` (a job): once; a run not queued is left alone.
+/// One run of a service at a time: another one running fails this one.
 pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
     let db = state.db();
+    let Some(row) = backup_run::Entity::find_by_id(id).one(db).await? else {
+        return Ok(());
+    };
+    if row.status != "queued" {
+        return Ok(());
+    }
     let now = Utc::now();
+    let txn = db.begin().await?;
+    // The service locked: two runs claim one after the other.
+    service::Entity::find_by_id(row.service_id)
+        .lock_exclusive()
+        .one(&txn)
+        .await?;
+    let busy = backup_run::Entity::find()
+        .filter(backup_run::Column::ServiceId.eq(row.service_id))
+        .filter(backup_run::Column::Status.eq("running"))
+        .filter(backup_run::Column::UpdatedAt.gt(now - stale()))
+        .count(&txn)
+        .await?
+        > 0;
     let claimed = backup_run::Entity::update_many()
-        .col_expr(backup_run::Column::Status, Expr::value("running"))
+        .col_expr(
+            backup_run::Column::Status,
+            Expr::value(if busy { "failed" } else { "running" }),
+        )
+        .col_expr(
+            backup_run::Column::Error,
+            Expr::value(busy.then_some("another backup or restore of this service is running")),
+        )
         .col_expr(backup_run::Column::StartedAt, Expr::value(now))
+        .col_expr(
+            backup_run::Column::FinishedAt,
+            Expr::value(busy.then_some(now)),
+        )
         .col_expr(backup_run::Column::UpdatedAt, Expr::value(now))
         .filter(backup_run::Column::Id.eq(id))
         .filter(backup_run::Column::Status.eq("queued"))
-        .exec(db)
+        .exec(&txn)
         .await?;
+    txn.commit().await?;
     if claimed.rows_affected == 0 {
         return Ok(());
     }
-    let row = backup_run::Entity::find_by_id(id)
-        .one(db)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    if busy {
+        if let Some(done) = backup_run::Entity::find_by_id(id).one(db).await? {
+            crate::services::notify_service::backup_finished(state, &done).await;
+        }
+        return Ok(());
+    }
     let mut log = Log {
         db,
         id,
         text: String::new(),
         saved: std::time::Instant::now(),
     };
-    let result = match row.kind.as_str() {
-        "restore" => restore(state, &row, &mut log).await,
-        _ => backup(state, &row, &mut log).await,
+    // Alive meanwhile (a run whose process died is found: `recover`).
+    let result = {
+        let work = async {
+            match row.kind.as_str() {
+                "restore" => restore(state, &row, &mut log).await,
+                _ => backup(state, &row, &mut log).await,
+            }
+        };
+        tokio::pin!(work);
+        let mut beat = tokio::time::interval(HEARTBEAT);
+        beat.tick().await;
+        loop {
+            tokio::select! {
+                result = &mut work => break result,
+                _ = beat.tick() => {
+                    let _ = backup_run::Entity::update_many()
+                        .col_expr(backup_run::Column::UpdatedAt, Expr::value(Utc::now()))
+                        .filter(backup_run::Column::Id.eq(id))
+                        .filter(backup_run::Column::Status.eq("running"))
+                        .exec(db)
+                        .await;
+                }
+            }
+        }
     };
-    let (status, error, done) = match result {
-        Ok(done) => ("succeeded", None, done),
+    let (status, error, size) = match result {
+        Ok(done) => ("succeeded", None, done.size),
         Err(error) => {
             log.line(format!("failed: {error}")).await;
-            (
-                "failed",
-                Some(error),
-                Done {
-                    file: row.file.clone(),
-                    size: None,
-                },
-            )
+            ("failed", Some(error), None)
         }
     };
     let mut active = row.into_active_model();
     active.status = Set(status.to_owned());
     active.error = Set(error);
-    active.file = Set(done.file);
-    active.size = Set(done.size);
+    active.size = Set(size);
     active.log = Set(Some(crate::models::action::tail(&log.text).to_owned()));
     active.finished_at = Set(Some(Utc::now()));
     active.updated_at = Set(Utc::now());
@@ -292,26 +405,23 @@ pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
     Ok(())
 }
 
+fn stale() -> chrono::Duration {
+    chrono::Duration::from_std(STALE).unwrap_or_default()
+}
+
 /// The service, its engine, the provider (opened) and the running container.
 async fn target(
     state: &AppState,
     run: &backup_run::Model,
     log: &mut Log<'_>,
-) -> Result<(Engine, Store, String), String> {
+) -> Result<(Engine, Store, String, String), String> {
     let db = state.db();
-    let service = service::Entity::find_by_id(run.service_id)
-        .one(db)
+    let (service, owner) = owner_of(db, run.service_id)
         .await
-        .map_err(|e| e.to_string())?
-        .ok_or("the service is gone")?;
+        .map_err(|_| "the service is gone")?;
     let engine = Engine::parse(&service.kind)
         .filter(|e| supported(*e))
         .ok_or("this service has no database to back up")?;
-    let project = project::Entity::find_by_id(service.project_id)
-        .one(db)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or("the project is gone")?;
     let provider = storage_provider::Entity::find_by_id(run.storage_provider_id.unwrap_or(0))
         .one(db)
         .await
@@ -319,10 +429,9 @@ async fn target(
         .ok_or("the storage provider is gone")?;
     let store = Store::open(&provider, state.keyring())?;
     let docker = state.service::<Docker>().ok_or("Docker is not available")?;
-    let name = service_name(&project.name, &service.name);
     let tasks = docker
         .engine()
-        .list_tasks(&name)
+        .list_tasks(&owner)
         .await
         .map_err(|e| format!("the service's tasks: {e}"))?;
     let container = tasks
@@ -338,12 +447,17 @@ async fn target(
         })
         .ok_or("the database is not running (deploy it first)")?;
     log.line(format!(
-        "{} {name}, provider {}",
+        "{} {owner}, provider {}",
         engine.kind(),
         provider.name
     ))
     .await;
-    Ok((engine, store, container))
+    Ok((engine, store, container, owner))
+}
+
+/// The engines warn about a password on the command line: not worth a line.
+fn noise(line: &str) -> bool {
+    line.contains("password on the command line")
 }
 
 async fn backup(
@@ -351,28 +465,24 @@ async fn backup(
     run: &backup_run::Model,
     log: &mut Log<'_>,
 ) -> Result<Done, String> {
-    let db = state.db();
-    let config = database_backup::Entity::find_by_id(run.backup_id.unwrap_or(0))
-        .one(db)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or("the backup configuration is gone")?;
-    let (engine, store, container) = target(state, run, log).await?;
-    let (cmd, ext, gzip) =
-        dump_command(engine, &run.database_name).ok_or("this engine is not backed up")?;
-    let key = format!(
-        "{}/{}",
-        config.path.trim_matches('/'),
-        file_name(&run.database_name, ext, Utc::now())
-    );
+    let (engine, store, container, owner) = target(state, run, log).await?;
+    let (ext, gzip) = format_of(engine).ok_or("this engine is not backed up")?;
+    let cmd = dump_command(engine, &run.database_name).ok_or("this engine is not backed up")?;
+    let key = run.file.clone().unwrap_or_default();
     if !valid_key(&key) {
         return Err(format!("{key} is not a valid path"));
     }
     log.line(format!("dumping {} to {key}", run.database_name))
         .await;
     let docker = state.service::<Docker>().ok_or("Docker is not available")?;
-    let file = scratch();
-    let mut out = std::fs::File::create(&file.0).map_err(|e| e.to_string())?;
+    let scratch = Scratch::new()?;
+    let path = scratch.file();
+    let mut out = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode_private()
+        .open(&path)
+        .map_err(|e| e.to_string())?;
     let mut encoder =
         gzip.then(|| flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default()));
     let mut chunks = docker
@@ -392,12 +502,8 @@ async fn backup(
                 None => out.write_all(&bytes).map_err(|e| e.to_string())?,
             },
             ExecChunk::Err(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                // The engines warn about a password on the command line.
-                for line in text
-                    .lines()
-                    .filter(|l| !l.contains("password on the command line"))
-                {
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                for line in text.lines().filter(|l| !noise(l)) {
                     log.line(line).await;
                 }
             }
@@ -415,23 +521,24 @@ async fn backup(
         Some(code) => return Err(format!("the dump exited with {code}")),
         None => return Err("the dump ended without an exit code".to_owned()),
     }
-    let size = store.put(&key, &file.0).await?;
+    let size = store.put(&key, &path).await?;
     log.line(format!("uploaded {key} ({} KB)", size / 1024))
         .await;
-    // Retention: this database's files in this path, oldest first. A failure
-    // is logged, the backup stands.
-    let folder = config.path.trim_matches('/');
+    // Retention: this service's files of this database in this folder,
+    // oldest first. A failure is logged, the backup stands.
+    let (folder, _) = key.rsplit_once('/').unwrap_or(("", ""));
+    let prefix = file_prefix(&owner, &run.database_name);
     match store.list(folder).await {
         Ok(files) => {
             let mine: Vec<String> = files
                 .into_iter()
                 .map(|(k, _)| k)
                 .filter(|k| {
-                    k.ends_with(&format!(".{ext}"))
-                        && database_of(k) == Some(run.database_name.as_str())
+                    let name = k.rsplit('/').next().unwrap_or_default();
+                    name.starts_with(&prefix) && name.ends_with(&format!(".{ext}"))
                 })
                 .collect();
-            let keep = usize::try_from(config.retention.max(1)).unwrap_or(1);
+            let keep = usize::try_from(run.retention.unwrap_or(1).max(1)).unwrap_or(1);
             for old in mine.iter().take(mine.len().saturating_sub(keep)) {
                 match store.delete(old).await {
                     Ok(()) => log.line(format!("deleted {old} (retention {keep})")).await,
@@ -442,9 +549,20 @@ async fn backup(
         Err(e) => log.line(format!("retention: {e}")).await,
     }
     Ok(Done {
-        file: Some(key),
         size: i64::try_from(size).ok(),
     })
+}
+
+/// `0600` for a new file.
+trait Private {
+    fn mode_private(&mut self) -> &mut Self;
+}
+
+impl Private for std::fs::OpenOptions {
+    fn mode_private(&mut self) -> &mut Self {
+        use std::os::unix::fs::OpenOptionsExt;
+        self.mode(0o600)
+    }
 }
 
 async fn restore(
@@ -452,7 +570,7 @@ async fn restore(
     run: &backup_run::Model,
     log: &mut Log<'_>,
 ) -> Result<Done, String> {
-    let (engine, store, container) = target(state, run, log).await?;
+    let (engine, store, container, _) = target(state, run, log).await?;
     let key = run.file.clone().unwrap_or_default();
     if !valid_key(&key) {
         return Err(format!("{key} is not a valid path"));
@@ -461,16 +579,17 @@ async fn restore(
     if !gzip && !(engine == Engine::Mongo && key.ends_with(".archive.gz")) {
         return Err("the file is not a backup of this engine (.sql.gz, .archive.gz)".to_owned());
     }
-    let file = scratch();
-    let size = store.get(&key, &file.0).await?;
+    let scratch = Scratch::new()?;
+    let path = scratch.file();
+    let size = store.get(&key, &path).await?;
     log.line(format!("downloaded {key} ({} KB)", size / 1024))
         .await;
     let cmd = restore_command(engine, &run.database_name, database_of(&key))
         .ok_or("this engine is not restored")?;
     // The file, decompressed when the panel compressed it, as the client's input.
     let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
-    let path: PathBuf = file.0.clone();
-    let reader = tokio::task::spawn_blocking(move || feed(&path, gzip, &tx));
+    let reading = path.clone();
+    let reader = tokio::task::spawn_blocking(move || feed(&reading, gzip, &tx));
     let input = futures_util::stream::unfold(rx, |mut rx| async move {
         rx.recv().await.map(|chunk| (chunk, rx))
     })
@@ -488,10 +607,7 @@ async fn restore(
         match chunk.map_err(|e| format!("the restore: {e}"))? {
             ExecChunk::Out(bytes) | ExecChunk::Err(bytes) => {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
-                for line in text
-                    .lines()
-                    .filter(|l| !l.contains("password on the command line"))
-                {
+                for line in text.lines().filter(|l| !noise(l)) {
                     log.line(line).await;
                 }
             }
@@ -506,7 +622,6 @@ async fn restore(
         Some(0) => {
             log.line("restored").await;
             Ok(Done {
-                file: Some(key),
                 size: i64::try_from(size).ok(),
             })
         }
@@ -533,11 +648,16 @@ fn feed(path: &Path, gzip: bool, tx: &tokio::sync::mpsc::Sender<Vec<u8>>) -> std
     }
 }
 
-/// The scheduler's tick: each enabled configuration whose cron fired since
-/// its last slot gets one run (missed slots are not caught up). Claimed with
-/// the slot, so two instances never run one twice.
+/// The scheduler's tick: runs whose process died marked failed, then each
+/// enabled configuration whose cron fired since its last slot gets one run
+/// (missed slots are not caught up). Claimed with the slot, so two
+/// instances never run one twice.
 pub async fn tick(state: &AppState) -> AppResult<usize> {
     let db = state.db();
+    let n = recover_interrupted(db).await?;
+    if n > 0 {
+        tracing::warn!(n, "backups interrupted (their run stopped)");
+    }
     let now = Utc::now();
     let mut started = 0;
     let configs = database_backup::Entity::find()
@@ -589,18 +709,20 @@ fn latest_slot(
     Some(slot)
 }
 
-/// Runs cut by a stop (still `running` at boot): failed.
+/// Runs whose process stopped (no heartbeat for a while): failed. At boot
+/// and every minute; a run still alive elsewhere keeps beating.
 pub async fn recover_interrupted(db: &DatabaseConnection) -> AppResult<u64> {
     let now = Utc::now();
     Ok(backup_run::Entity::update_many()
         .col_expr(backup_run::Column::Status, Expr::value("failed"))
         .col_expr(
             backup_run::Column::Error,
-            Expr::value("interrupted (the panel stopped)"),
+            Expr::value("interrupted (its run stopped)"),
         )
         .col_expr(backup_run::Column::FinishedAt, Expr::value(now))
         .col_expr(backup_run::Column::UpdatedAt, Expr::value(now))
         .filter(backup_run::Column::Status.eq("running"))
+        .filter(backup_run::Column::UpdatedAt.lt(now - stale()))
         .exec(db)
         .await?
         .rows_affected)
@@ -615,24 +737,28 @@ mod tests {
         let at = DateTime::parse_from_rfc3339("2026-10-19T02:00:05Z")
             .unwrap()
             .with_timezone(&Utc);
-        let name = file_name("shop", "sql.gz", at);
-        assert_eq!(name, "shop-20261019T020005Z.sql.gz");
+        let name = file_name("shop_db", "shop", at, 7, "sql.gz");
+        assert_eq!(name, "shop_db.shop.20261019T020005Z.r0000000007.sql.gz");
         assert_eq!(database_of(&format!("prod/{name}")), Some("shop"));
         assert_eq!(
-            database_of("prod/my-db-20261019T020005Z.archive.gz"),
+            database_of("prod/a_b.my-db.20261019T020005Z.r1.archive.gz"),
             Some("my-db")
         );
         assert_eq!(database_of("prod/notes.txt"), None);
         assert!(valid_database("shop_1") && !valid_database("a b") && !valid_database("--all"));
         // The database is an argument, never part of the script.
-        let (cmd, ext, gzip) = dump_command(Engine::Postgres, "x'; rm -rf /").unwrap();
-        assert_eq!((ext, gzip), ("sql.gz", true));
+        let cmd = dump_command(Engine::Postgres, "x'; rm -rf /").unwrap();
         assert_eq!(cmd[..2], ["sh", "-c"]);
         assert_eq!(cmd[4], "x'; rm -rf /");
         assert!(!cmd[2].contains("rm -rf"));
         assert!(dump_command(Engine::Redis, "x").is_none());
+        assert_eq!(format_of(Engine::Mongo), Some(("archive.gz", false)));
         let restore = restore_command(Engine::Mongo, "copy", Some("shop")).unwrap();
         assert_eq!(restore[4..], ["copy", "shop"]);
+        assert!(
+            restore_command(Engine::Postgres, "x", None).unwrap()[2]
+                .contains("--single-transaction")
+        );
     }
 
     #[test]

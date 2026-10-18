@@ -106,6 +106,9 @@ db_test!(
                 Case::new(Method::POST, "/apps/services/1/restore")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/actions")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
                 Case::new(Method::GET, "/apps/notification-channels")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

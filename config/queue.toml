@@ -1,3 +1,5 @@
 # Workers take jobs from these queues (the default is only "default"):
 # "docker" pulls images, "deploy" deploys services (Phase 2).
 queues = ["default", "docker", "deploy", "backup"]
+# A database backup or restore may take up to 3 hours (backup.run).
+max_timeout_secs = 10800

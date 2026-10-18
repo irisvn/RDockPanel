@@ -83,6 +83,12 @@ resources.
 | GET | `/storage-providers/{id}/files?path=` | backups.restore | the files of a folder, newest first |
 | POST | `/storage-providers/{id}/check` | storage_providers.update | writes, lists and deletes a small file: `{"ok","error"?}` |
 
+## Actions (`/apps`)
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/actions` | projects.view_any | the last 100 deployments (with deployments.view_any), backup runs (database_backups.view_any) and Docker actions (docker.view; own unless system.manage): `{type, id, what, status, error, detail?, target?: {project, service}, created_at, finished_at}` |
+
 ## Notifications (`/apps`)
 
 Channels are written through the `notification_channels` resource.

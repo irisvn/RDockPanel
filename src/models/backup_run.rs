@@ -18,9 +18,12 @@ pub struct Model {
     /// `queued`, `running`, `succeeded`, `failed`.
     pub status: String,
     pub database_name: String,
-    /// The file in the provider (written, or restored from).
+    /// The file in the provider (written, or restored from), named when the
+    /// run is asked for.
     pub file: Option<String>,
     pub size: Option<i64>,
+    /// A backup: the files kept, as configured when it was asked for.
+    pub retention: Option<i32>,
     #[sea_orm(column_type = "Text", nullable)]
     pub log: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]

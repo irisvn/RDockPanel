@@ -197,20 +197,34 @@ installed panel under `/var/lib/rdockpanel/backups`, a host directory) or an S3-
 keeps its append-only file) has **backup configurations**: a database, a five-field cron schedule
 (UTC), a provider, a path (folders of letters, digits, `.`, `_`, `-`) and a retention.
 
-A run (`backup_runs`, the `backup.run` job on the `backup` queue, one attempt) finds the service's
-running task and runs the engine's own dump in its container (`docker exec`, no TTY):
+A run (`backup_runs`, the `backup.run` job on the `backup` queue, one attempt, up to 3 hours) has
+its file, provider and retention fixed when it is asked for (a later edit changes later runs). One
+run of a service at a time (claimed with the service's row locked; another one running fails it).
+A running run beats every 30 s; one silent for 150 s (its process stopped) is marked failed by the
+every-minute tick and at boot. It finds the service's running task and runs the engine's own dump in its container (`docker exec`, no TTY):
 `pg_dump --clean --if-exists`, `mysqldump`/`mariadb-dump` as root with `--single-transaction`,
 `mongodump --archive --gzip`. The credentials are the container's own environment (the panel
 passes none); the database is `$1` of `sh -c` (never parsed). The panel gzips SQL dumps as they
-come, writes `<path>/<database>-<YYYYmmddTHHMMSSZ>.sql.gz` (`.archive.gz` for MongoDB), then deletes
-the oldest files of that database in that path beyond the retention (other files are left alone; a
-failed deletion is logged, the backup stands). A **restore** downloads a file, gunzips SQL, feeds
-it to `psql -v ON_ERROR_STOP=1`, `mysql` or `mariadb` (`mongorestore --drop`, the archive's database
-renamed to the one asked), in place.
+come (scratch files in a private `0700` directory), writes
+`<path>/<project>_<service>.<database>.<YYYYmmddTHHMMSSZ>.r<run>.sql.gz` (`.archive.gz` for MongoDB),
+then deletes the oldest files of that service's database in that path beyond the retention (other
+files are left alone; a failed deletion is logged, the backup stands). Under a local root every
+folder is opened without following links (`openat`, `O_NOFOLLOW`), files are written aside
+(`0600`, a new file) and renamed. A **restore** downloads a file, gunzips SQL, feeds it to
+`psql -v ON_ERROR_STOP=1 --single-transaction`, `mysql` or `mariadb` (`mongorestore --drop`, the
+archive's database renamed to the one asked), in place. A command whose caller goes away (a job
+timeout) is killed in the container (its processes carry a mark), never left half fed.
 
 Schedules: every minute the `database-backups` tick (RustCMS W4) queues one run per enabled
 configuration whose cron fired since its last slot (missed slots are not caught up), the slot
-claimed in the database. Runs cut by a stop are marked failed at boot.
+claimed in the database.
+
+### Actions
+
+The Actions page (`/admin/p/actions`, like EasyPanel's) lists the last 100 deployments, backup runs
+and Docker actions (pulls, prunes, container actions), newest first, each kind with its permission
+(Docker actions: the caller's own, every one with `system.manage`); a row opens its service's tab or
+its log.
 
 ### Notifications
 

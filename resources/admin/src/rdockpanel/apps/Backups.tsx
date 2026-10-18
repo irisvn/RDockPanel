@@ -1,7 +1,7 @@
 // A database's Backups tab, like EasyPanel's: its backup configurations
 // (database, schedule, provider, path, retention) with "Run now", the last
 // runs with their logs, and Restore (a file of a provider, into a database).
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field, Section, StatusBadge, bytes, when } from "../lib/ui";
@@ -144,12 +144,21 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
   const [database, setDatabase] = useState(d.database?.database ?? "");
   const [fields, setFields] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<unknown>(null);
+  // The listing shown is the last asked for, of the provider and folder shown.
+  const asked = useRef(0);
+  const reset = () => {
+    asked.current += 1;
+    setFiles(null);
+    setFile("");
+  };
   const list = async () => {
     setError(null);
+    const ticket = ++asked.current;
     try {
       const out = await props.api.get<{ files: Array<{ file: string; size: number }> }>(
         `/apps/storage-providers/${provider}/files?path=${encodeURIComponent(folder.trim())}`,
       );
+      if (ticket !== asked.current) return;
       setFiles(out.files);
       setFile(out.files[0]?.file ?? "");
     } catch (err) {
@@ -180,7 +189,13 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
       >
         <Alert variant="warning">{t("A restore replaces the database's data. Stop the apps writing to it, and take a backup first.")}</Alert>
         <Field label={t("Storage provider")}>
-          <NativeSelect value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <NativeSelect
+            value={provider}
+            onChange={(e) => {
+              setProvider(e.target.value);
+              reset();
+            }}
+          >
             {props.tab.providers.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -190,7 +205,13 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
         </Field>
         <Field label={t("Folder")}>
           <div className="rdp2-row">
-            <Input value={folder} onChange={(e) => setFolder(e.target.value)} />
+            <Input
+              value={folder}
+              onChange={(e) => {
+                setFolder(e.target.value);
+                reset();
+              }}
+            />
             <Button type="button" variant="outline" onClick={list} disabled={!provider || !folder.trim()}>
               {t("List files")}
             </Button>

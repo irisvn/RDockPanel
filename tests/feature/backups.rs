@@ -162,7 +162,7 @@ db_test!(
         );
         let file = first.file.clone().unwrap();
         assert!(
-            file.starts_with("prod/shop/shop-") && file.ends_with(".sql.gz"),
+            file.starts_with("prod/shop/shop_db.shop.") && file.ends_with(".sql.gz"),
             "{file}"
         );
         assert_eq!(gunzip(&root.join(&file)), "dump of ctr-shop_db-1\n");
@@ -177,10 +177,15 @@ db_test!(
         );
         assert!(!dump.contains("PASSWORD=") || dump.contains("\"$POSTGRES_PASSWORD\""));
 
-        // Retention: two files of this database kept; others left alone.
+        // Retention: two files of this service's database kept; others
+        // (another service's, or not a backup) left alone.
         std::fs::write(root.join("prod/shop/notes.txt"), "mine").unwrap();
+        std::fs::write(
+            root.join("prod/shop/other_db.shop.20200101T000000Z.r0000000001.sql.gz"),
+            "theirs",
+        )
+        .unwrap();
         for _ in 0..2 {
-            tokio::time::sleep(Duration::from_millis(1100)).await;
             admin
                 .post_json(
                     &app.admin_api(&format!("x/apps/backups/{backup}/run")),
@@ -195,8 +200,9 @@ db_test!(
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         kept.sort();
-        assert_eq!(kept.len(), 3, "{kept:?}");
+        assert_eq!(kept.len(), 4, "{kept:?}");
         assert!(kept.contains(&"notes.txt".to_owned()));
+        assert!(kept.iter().any(|k| k.starts_with("other_db.")));
         assert!(
             !kept.iter().any(|k| file.ends_with(k.as_str())),
             "the oldest went"
@@ -266,6 +272,43 @@ db_test!(
             "dump of ctr-shop_db-1\n"
         );
         assert!(fake.calls().iter().any(|c| c.contains("psql")));
+
+        // One run of a service at a time: another one running fails this one.
+        let mut busy = backup_run::Entity::find_by_id(restored.id)
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        busy.status = Set("running".to_owned());
+        busy.updated_at = Set(Utc::now());
+        busy.update(app.state().db()).await.unwrap();
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/backups/{backup}/run")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        let refused = run_last(&app, id).await;
+        assert_eq!(refused.status, "failed");
+        assert!(refused.error.unwrap().contains("another backup"));
+        // A run whose process died (no heartbeat) is failed by the tick.
+        let mut dead = backup_run::Entity::find_by_id(restored.id)
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        dead.updated_at = Set(Utc::now() - chrono::Duration::minutes(10));
+        dead.update(app.state().db()).await.unwrap();
+        backup_service::tick(app.state()).await.unwrap();
+        let dead = backup_run::Entity::find_by_id(restored.id)
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(dead.status, "failed");
 
         // A failing dump fails the run, with the engine's message.
         *fake.exec_exit.lock().unwrap() = 1;

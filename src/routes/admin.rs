@@ -6,9 +6,10 @@
 use rustcms::prelude::*;
 
 use crate::http::controllers::{
-    apps_controller as apps, backups_controller as backups, deploy_controller as deploy,
-    docker_controller as docker, notifications_controller as notifications,
-    server_controller as server, templates_controller as templates,
+    actions_controller as actions, apps_controller as apps, backups_controller as backups,
+    deploy_controller as deploy, docker_controller as docker,
+    notifications_controller as notifications, server_controller as server,
+    templates_controller as templates,
 };
 
 /// Every admin route, with the access it requires.
@@ -161,6 +162,11 @@ pub fn routes() -> AdminRoutes {
                     "/backup-runs/{id}",
                     AdminAccess::can("database_backups.view_any"),
                     backups::show_run,
+                )
+                .get(
+                    "/actions",
+                    AdminAccess::can("projects.view_any"),
+                    actions::index,
                 )
                 .get(
                     "/notification-channels",

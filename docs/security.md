@@ -86,8 +86,10 @@ A backup holds the database's data in clear (gzipped, not encrypted): keep the b
 the local directory (`0700` by the installer) to root. The S3 secret key is sealed with `APP_KEY`
 and never shown again. Dumps run in the database's own container with its own credentials; the
 database name is an argument, never part of the shell script. Provider paths are checked (no `..`,
-no absolute path) and a local provider's directory must be absolute and not `/`; it is written as
-the panel's user, so `storage_providers.*` is an administrator's permission. A restore replaces
+no absolute path) and a local provider's directory must be absolute and not `/`; under it no link
+is followed (`openat` with `O_NOFOLLOW`), so a link planted in the root never leads elsewhere. It is
+written as the panel's user, so `storage_providers.*` is an administrator's permission. Dumps are
+staged in a private (`0700`) scratch directory; S3 errors never include the signed URLs. A restore replaces
 data in place: `backups.restore` is separate from `backups.run`.
 
 ## Notifications

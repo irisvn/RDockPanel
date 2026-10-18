@@ -1,5 +1,6 @@
 //! Admin pages that are not resources (`rustcms make:settings <Name>`).
 
+pub mod actions_page;
 pub mod containers_page;
 pub mod dashboard_page;
 pub mod images_page;

@@ -213,6 +213,7 @@ impl MigrationTrait for Migration {
                 )
                 .col(ColumnDef::new(BackupRuns::File).string_len(1024).null())
                 .col(ColumnDef::new(BackupRuns::Size).big_integer().null())
+                .col(ColumnDef::new(BackupRuns::Retention).integer().null())
                 .col(ColumnDef::new(BackupRuns::Log).text().null())
                 .col(ColumnDef::new(BackupRuns::Error).text().null())
                 .col(ColumnDef::new(BackupRuns::UserId).big_integer().null())
@@ -323,6 +324,7 @@ enum BackupRuns {
     DatabaseName,
     File,
     Size,
+    Retention,
     Log,
     Error,
     UserId,

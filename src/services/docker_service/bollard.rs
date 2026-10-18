@@ -502,11 +502,14 @@ impl DockerApi for BollardDocker {
         cmd: Vec<String>,
         input: Option<BoxStream<'static, Vec<u8>>>,
     ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>> {
+        // Its processes carry a mark: killed if the caller goes away.
+        let token = crate::services::database_service::random_string(24);
         let config = CreateExecOptions {
             attach_stdin: Some(input.is_some()),
             attach_stdout: Some(true),
             attach_stderr: Some(true),
             tty: Some(false),
+            env: Some(vec![format!("{SESSION_ENV}={token}")]),
             cmd: Some(cmd),
             ..Default::default()
         };
@@ -536,6 +539,7 @@ impl DockerApi for BollardDocker {
         };
         let (tx, rx) = tokio::sync::mpsc::channel(16);
         let client = self.client.clone();
+        let container = container.to_owned();
         tokio::spawn(async move {
             use tokio::io::AsyncWriteExt;
             // Fed while its output is read (a full pipe would block both).
@@ -549,6 +553,7 @@ impl DockerApi for BollardDocker {
                 }
                 let _ = stdin.shutdown().await;
             };
+            // Whether the output was read to its end (else the caller left).
             let read = async {
                 loop {
                     let item = tokio::select! {
@@ -572,7 +577,15 @@ impl DockerApi for BollardDocker {
                     }
                 }
             };
-            let (_, finished) = tokio::join!(feed, read);
+            tokio::pin!(feed);
+            tokio::pin!(read);
+            let mut fed = false;
+            let finished = loop {
+                tokio::select! {
+                    () = &mut feed, if !fed => fed = true,
+                    finished = &mut read => break finished,
+                }
+            };
             if finished {
                 let code = client
                     .inspect_exec(&id)
@@ -580,6 +593,9 @@ impl DockerApi for BollardDocker {
                     .map_err(map_err)
                     .map(|e| e.exit_code.unwrap_or(-1));
                 let _ = tx.send(code.map(ExecChunk::Exit)).await;
+            } else {
+                // Never left running (a restore half fed): its processes killed.
+                let _ = kill_marked(&client, &container, &token).await;
             }
         });
         Ok(futures_util::stream::unfold(rx, |mut rx| async move {
@@ -587,7 +603,6 @@ impl DockerApi for BollardDocker {
         })
         .boxed())
     }
-
     async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
         // By its exact name, inspected (lists may leave out the labels).
         match self
@@ -893,6 +908,36 @@ fn credentials(auth: RegistryAuth) -> ::bollard::auth::DockerCredentials {
         serveraddress: Some(auth.server),
         ..Default::default()
     }
+}
+
+/// Kills the container's processes carrying `SESSION_ENV=token` (a command
+/// run by [`DockerApi::run_in_container`] and what it started).
+async fn kill_marked(client: &Client, container: &str, token: &str) -> DockerResult<()> {
+    let script = format!(
+        r#"m='{SESSION_ENV}={token}'
+for p in /proc/[0-9]*; do
+  tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -qx "$m" && kill -KILL "${{p#/proc/}}" 2>/dev/null
+done; true"#
+    );
+    let config = CreateExecOptions {
+        cmd: Some(vec!["/bin/sh".to_owned(), "-c".to_owned(), script]),
+        ..Default::default()
+    };
+    let id = client
+        .create_exec(container, config)
+        .await
+        .map_err(map_err)?
+        .id;
+    let start = StartExecOptions {
+        detach: true,
+        tty: false,
+        output_capacity: None,
+    };
+    client
+        .start_exec(&id, Some(start))
+        .await
+        .map(drop)
+        .map_err(map_err)
 }
 
 /// The build's lines, from a task owning its client (the stream outlives

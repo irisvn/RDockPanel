@@ -2,6 +2,8 @@
 //! directory of this server (`local`) or an S3-compatible bucket (`s3`,
 //! requests signed by `rusty-s3`, sent by `reqwest`). Keys are folders and
 //! file names the panel checks ([`valid_key`]): never `..`, never absolute.
+//! Under a local root every folder is opened without following symlinks
+//! (`openat`, `O_NOFOLLOW`): a link in the root never leads elsewhere.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -119,20 +121,9 @@ impl Store {
             .len();
         match self {
             Self::Local(root) => {
-                let to = Self::local_path(root, key)?;
-                if let Some(dir) = to.parent() {
-                    tokio::fs::create_dir_all(dir)
-                        .await
-                        .map_err(|e| format!("{}: {e}", dir.display()))?;
-                }
-                // Written aside, then renamed: never a half file under its name.
-                let partial = to.with_extension("partial");
-                tokio::fs::copy(file, &partial)
-                    .await
-                    .map_err(|e| format!("{}: {e}", partial.display()))?;
-                tokio::fs::rename(&partial, &to)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                Self::local_path(root, key)?;
+                let (root, key, file) = (root.clone(), key.to_owned(), file.to_path_buf());
+                blocking(move || local::put(&root, &key, &file)).await?;
             }
             Self::S3 {
                 bucket,
@@ -153,7 +144,7 @@ impl Store {
                     .body(reqwest::Body::wrap_stream(stream))
                     .send()
                     .await
-                    .map_err(|e| format!("the upload: {e}"))?;
+                    .map_err(|e| format!("the upload: {}", e.without_url()))?;
                 ok(response, "the upload").await?;
             }
         }
@@ -164,10 +155,9 @@ impl Store {
     pub async fn get(&self, key: &str, to: &Path) -> Result<u64, String> {
         match self {
             Self::Local(root) => {
-                let from = Self::local_path(root, key)?;
-                tokio::fs::copy(&from, to)
-                    .await
-                    .map_err(|e| format!("{key}: {e}"))
+                Self::local_path(root, key)?;
+                let (root, key, to) = (root.clone(), key.to_owned(), to.to_path_buf());
+                blocking(move || local::get(&root, &key, &to)).await
             }
             Self::S3 {
                 bucket,
@@ -182,15 +172,20 @@ impl Store {
                     .get(url.as_str())
                     .send()
                     .await
-                    .map_err(|e| format!("the download: {e}"))?;
+                    .map_err(|e| format!("the download: {}", e.without_url()))?;
                 let response = ok(response, "the download").await?;
-                let mut file = tokio::fs::File::create(to)
+                let mut file = tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .open(to)
                     .await
                     .map_err(|e| e.to_string())?;
                 let mut size = 0;
                 let mut body = response.bytes_stream();
                 while let Some(chunk) = body.next().await {
-                    let chunk = chunk.map_err(|e| format!("the download: {e}"))?;
+                    let chunk = chunk.map_err(|e| format!("the download: {}", e.without_url()))?;
                     size += chunk.len() as u64;
                     file.write_all(&chunk).await.map_err(|e| e.to_string())?;
                 }
@@ -205,19 +200,9 @@ impl Store {
         let mut found = vec![];
         match self {
             Self::Local(root) => {
-                let dir = Self::local_path(root, folder)?;
-                let mut entries = match tokio::fs::read_dir(&dir).await {
-                    Ok(entries) => entries,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-                    Err(e) => return Err(format!("{}: {e}", dir.display())),
-                };
-                while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
-                    let meta = entry.metadata().await.map_err(|e| e.to_string())?;
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    if meta.is_file() && !name.ends_with(".partial") {
-                        found.push((format!("{folder}/{name}"), meta.len()));
-                    }
-                }
+                Self::local_path(root, folder)?;
+                let (root, key) = (root.clone(), folder.to_owned());
+                found = blocking(move || local::list(&root, &key)).await?;
             }
             Self::S3 {
                 bucket,
@@ -241,12 +226,12 @@ impl Store {
                         .get(url.as_str())
                         .send()
                         .await
-                        .map_err(|e| format!("the listing: {e}"))?;
+                        .map_err(|e| format!("the listing: {}", e.without_url()))?;
                     let text = ok(response, "the listing")
                         .await?
                         .text()
                         .await
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| e.without_url().to_string())?;
                     let page = rusty_s3::actions::ListObjectsV2::parse_response(&text)
                         .map_err(|e| format!("the listing: {e}"))?;
                     found.extend(page.contents.into_iter().map(|c| (c.key, c.size)));
@@ -264,10 +249,9 @@ impl Store {
     pub async fn delete(&self, key: &str) -> Result<(), String> {
         match self {
             Self::Local(root) => {
-                let path = Self::local_path(root, key)?;
-                tokio::fs::remove_file(&path)
-                    .await
-                    .map_err(|e| format!("{key}: {e}"))
+                Self::local_path(root, key)?;
+                let (root, key) = (root.clone(), key.to_owned());
+                blocking(move || local::delete(&root, &key)).await
             }
             Self::S3 {
                 bucket,
@@ -284,7 +268,7 @@ impl Store {
                     .delete(url.as_str())
                     .send()
                     .await
-                    .map_err(|e| format!("the deletion: {e}"))?;
+                    .map_err(|e| format!("the deletion: {}", e.without_url()))?;
                 ok(response, "the deletion").await.map(|_| ())
             }
         }
@@ -296,9 +280,17 @@ impl Store {
             "rdp-probe-{}",
             crate::services::database_service::random_string(12).to_lowercase()
         ));
-        tokio::fs::write(&probe, b"rdockpanel")
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&probe)
             .await
             .map_err(|e| e.to_string())?;
+        file.write_all(b"rdockpanel")
+            .await
+            .map_err(|e| e.to_string())?;
+        drop(file);
         let key = format!(
             "rdockpanel-check/{}.txt",
             crate::services::database_service::random_string(12).to_lowercase()
@@ -318,6 +310,153 @@ impl Store {
         .await;
         let _ = tokio::fs::remove_file(&probe).await;
         result
+    }
+}
+
+/// `work` on a blocking thread; its error in words.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> std::io::Result<T> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// A local root's files, every folder opened without following links.
+mod local {
+    use std::fs::File;
+    use std::io::{self, Read, Write};
+    use std::os::fd::OwnedFd;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::path::Path;
+
+    use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags};
+
+    const DIR: OFlags = OFlags::DIRECTORY
+        .union(OFlags::RDONLY)
+        .union(OFlags::NOFOLLOW)
+        .union(OFlags::CLOEXEC);
+
+    /// The folders of `key` and its last name.
+    fn split(key: &str) -> (Vec<&str>, &str) {
+        let mut parts: Vec<&str> = key.split('/').collect();
+        let name = parts.pop().unwrap_or_default();
+        (parts, name)
+    }
+
+    /// The folder `dirs` under `root`, made (`0700`) when `create`.
+    fn folder(root: &Path, dirs: &[&str], create: bool) -> io::Result<OwnedFd> {
+        if create {
+            std::fs::create_dir_all(root)?;
+        }
+        let mut fd = rustix::fs::open(
+            root,
+            OFlags::DIRECTORY | OFlags::RDONLY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        for dir in dirs {
+            if create {
+                match rustix::fs::mkdirat(&fd, *dir, Mode::from_raw_mode(0o700)) {
+                    Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            fd = rustix::fs::openat(&fd, *dir, DIR, Mode::empty())?;
+        }
+        Ok(fd)
+    }
+
+    /// Writes `source` as `key`: aside (`0600`, a new file), then renamed.
+    pub fn put(root: &Path, key: &str, source: &Path) -> io::Result<()> {
+        let (dirs, name) = split(key);
+        let dir = folder(root, &dirs, true)?;
+        let partial = format!(
+            ".{name}.{}.partial",
+            crate::services::database_service::random_string(8).to_lowercase()
+        );
+        let fd = rustix::fs::openat(
+            &dir,
+            partial.as_str(),
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o600),
+        )?;
+        let written = (|| {
+            let mut out = File::from(fd);
+            io::copy(&mut File::open(source)?, &mut out)?;
+            out.sync_all()?;
+            rustix::fs::renameat(&dir, partial.as_str(), &dir, name)?;
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = rustix::fs::unlinkat(&dir, partial.as_str(), AtFlags::empty());
+        }
+        written
+    }
+
+    /// Reads `key` (a regular file, not a link) into `to` (`0600`).
+    pub fn get(root: &Path, key: &str, to: &Path) -> io::Result<u64> {
+        let (dirs, name) = split(key);
+        let dir = folder(root, &dirs, false)?;
+        let fd = rustix::fs::openat(
+            &dir,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        let mut from = File::from(fd);
+        if !from.metadata()?.is_file() {
+            return Err(io::Error::other(format!("{key} is not a file")));
+        }
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(to)?;
+        let mut buf = vec![0; 256 * 1024];
+        let mut size = 0;
+        loop {
+            let n = from.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            out.write_all(&buf[..n])?;
+            size += n as u64;
+        }
+        Ok(size)
+    }
+
+    /// The regular files of `folder` (none when it does not exist).
+    pub fn list(root: &Path, folder_key: &str) -> io::Result<Vec<(String, u64)>> {
+        let dirs: Vec<&str> = folder_key.split('/').collect();
+        let dir = match folder(root, &dirs, false) {
+            Ok(dir) => dir,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
+            Err(e) => return Err(e),
+        };
+        let mut found = vec![];
+        for entry in Dir::read_from(&dir)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // Dot files: the panel's own writes in progress, or hidden.
+            if name.starts_with('.') {
+                continue;
+            }
+            let stat = rustix::fs::statat(&dir, name.as_str(), AtFlags::SYMLINK_NOFOLLOW)?;
+            if FileType::from_raw_mode(stat.st_mode as _) == FileType::RegularFile {
+                found.push((format!("{folder_key}/{name}"), stat.st_size as u64));
+            }
+        }
+        Ok(found)
+    }
+
+    /// Removes `key` (a link is removed, never followed).
+    pub fn delete(root: &Path, key: &str) -> io::Result<()> {
+        let (dirs, name) = split(key);
+        let dir = folder(root, &dirs, false)?;
+        rustix::fs::unlinkat(&dir, name, AtFlags::empty())?;
+        Ok(())
     }
 }
 
@@ -397,6 +536,28 @@ mod tests {
         store.delete("db/a-1.sql.gz").await.unwrap();
         assert_eq!(store.list("db").await.unwrap().len(), 1);
         assert!(store.put("../x", &file).await.is_err());
+        // A link in the root never leads out of it.
+        let outside = root.with_extension("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.sql.gz"), "theirs").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
+        assert!(store.put("escape/x.sql.gz", &file).await.is_err());
+        assert!(store.get("escape/secret.sql.gz", &back).await.is_err());
+        assert!(store.list("escape").await.is_err());
+        assert!(store.delete("escape/secret.sql.gz").await.is_err());
+        std::os::unix::fs::symlink(outside.join("secret.sql.gz"), root.join("db/link.sql.gz"))
+            .unwrap();
+        assert!(store.get("db/link.sql.gz", &back).await.is_err());
+        assert!(
+            !store
+                .list("db")
+                .await
+                .unwrap()
+                .iter()
+                .any(|(k, _)| k.contains("link"))
+        );
+        assert!(outside.join("secret.sql.gz").exists());
+        let _ = std::fs::remove_dir_all(&outside);
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&file);
         let _ = std::fs::remove_file(&back);

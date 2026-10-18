@@ -10,6 +10,7 @@ import { Dashboard, NewService } from "./apps/Dashboard";
 import { ServicePage } from "./apps/ServicePage";
 import { Templates } from "./apps/Templates";
 import { Settings } from "./settings/Settings";
+import { Actions } from "./actions/Actions";
 import type { Overview } from "./apps/types";
 import { StatusDot } from "./lib/ui";
 import { bindSession } from "./lib/resources";
@@ -117,3 +118,10 @@ function SettingsRoute(props: PageProps<{ user?: string | number }>) {
 }
 
 registerPage("rdockpanel/settings", SettingsRoute as (p: PageProps<unknown>) => ReturnType<typeof SettingsRoute>);
+
+function ActionsRoute(props: PageProps<{ user?: string | number }>) {
+  bindSession(String(props.data.user ?? ""));
+  return <Actions {...props} />;
+}
+
+registerPage("rdockpanel/actions", ActionsRoute as (p: PageProps<unknown>) => ReturnType<typeof ActionsRoute>);

@@ -20,6 +20,7 @@ pub fn provider() -> AdminProvider {
         // rustcms:resources
         // The apps interface first (React, host API v2).
         .page::<crate::admin::pages::dashboard_page::DashboardPage>()
+        .page::<crate::admin::pages::actions_page::ActionsPage>()
         .page::<crate::admin::pages::settings_page::SettingsPage>()
         .page::<crate::admin::pages::server_page::ServerPage>()
         .page::<crate::admin::pages::containers_page::ContainersPage>()

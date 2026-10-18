@@ -1,5 +1,6 @@
 //! Request handlers, one module per model (`rustcms make:api <Model>`).
 
+pub mod actions_controller;
 pub mod apps_controller;
 pub mod backups_controller;
 pub mod deploy_controller;

@@ -299,6 +299,12 @@ window.rustcms?.registerTranslations?.("vi", {
   deployments: "deploy",
   backups: "backup",
   disk: "ổ đĩa",
+  // Actions.
+  Actions: "Hoạt động",
+  All: "Tất cả",
+  "Nothing yet.": "Chưa có gì.",
+  Where: "Ở đâu",
+  ok: "xong",
 });
 
 export {};
