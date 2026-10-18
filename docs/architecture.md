@@ -188,6 +188,23 @@ A service's trigger URL (`/api/v1/deploy/{id}?token={token}`) deploys it without
 (40 characters) is shown once, only its SHA-256 is stored and compared in constant time; a new
 one replaces it. Unknown, wrong or malformed answers 404 the same; a deployment under way, 409.
 
+### Compose services
+
+As EasyPanel's. A service of kind `compose` (made by the panel's administrators only:
+`system.manage`, since a Compose file can run anything on the host) is the containers of a Compose
+file, written in the panel or a file of its Git repository (cloned once into its directory, then
+fetched: files the repository does not track, such as `./data`, stay). They run with `docker
+compose` (the Docker CLI's plugin, in the panel's image) on this node, not as Swarm services, from
+`compose_dir/<project>_<service>` (`/var/lib/rdockpanel/compose`, the same path on the host and in
+the panel, since the daemon reads the file's relative paths on the host). The panel writes the file
+again as `.rdockpanel-compose.yml`: each container also joins the project's network with the alias
+`<project>_<service>_<container>` (what a domain naming that container leads to) and carries the
+panel's labels; `container_name`, `ports` and `network_mode` are warned about. The service's
+environment (placeholders resolved) is the Compose project's `.env` (`0600`), read by `${VAR}`.
+Deploy runs `up -d --build --remove-orphans`, Start `up -d`, Stop `stop`, Restart `restart`,
+Destroy `down --remove-orphans` (named volumes kept); Rollback is refused. A domain must name a
+service of the file.
+
 ### Database backups
 
 As EasyPanel's. A **storage provider** (Settings) is a local directory (absolute; in the

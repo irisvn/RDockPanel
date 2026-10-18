@@ -77,6 +77,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
         <NewService
           t={t}
           api={props.api}
+          canCompose={props.can("system.manage")}
           project={project}
           onClose={() => setAdding(false)}
           onDone={(name) => {

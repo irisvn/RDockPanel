@@ -34,6 +34,9 @@ use crate::services::storage_service::{Store, valid_key};
 const HEARTBEAT: Duration = Duration::from_secs(30);
 /// …and is taken for dead (its process stopped) after this long without.
 const STALE: Duration = Duration::from_secs(150);
+/// A run taken for dead whose command is being killed: its service stays
+/// blocked until it is.
+const KILLING: &str = "killing";
 
 /// A database name as the engines take it (passed as an argument anyway;
 /// never an option).
@@ -323,8 +326,15 @@ pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
         .await?;
     let busy = backup_run::Entity::find()
         .filter(backup_run::Column::ServiceId.eq(row.service_id))
-        .filter(backup_run::Column::Status.eq("running"))
-        .filter(backup_run::Column::UpdatedAt.gt(now - stale()))
+        .filter(
+            sea_orm::Condition::any()
+                .add(backup_run::Column::Status.eq(KILLING))
+                .add(
+                    sea_orm::Condition::all()
+                        .add(backup_run::Column::Status.eq("running"))
+                        .add(backup_run::Column::UpdatedAt.gt(now - stale())),
+                ),
+        )
         .count(&txn)
         .await?
         > 0;
@@ -467,15 +477,22 @@ async fn target(
 
 /// A mark for a run's command, recorded with the container before it runs
 /// (a run found dead has its command killed: [`recover_interrupted`]).
+/// Only while the run is still its own (`running`): one taken for dead
+/// meanwhile starts nothing.
 async fn marked(db: &DatabaseConnection, run: i64, container: &str) -> Result<String, String> {
     let mark = format!("rdp-backup-{}", random_string(20));
-    backup_run::Entity::update_many()
+    let owned = backup_run::Entity::update_many()
         .col_expr(backup_run::Column::Container, Expr::value(container))
         .col_expr(backup_run::Column::Mark, Expr::value(mark.as_str()))
+        .col_expr(backup_run::Column::UpdatedAt, Expr::value(Utc::now()))
         .filter(backup_run::Column::Id.eq(run))
+        .filter(backup_run::Column::Status.eq("running"))
         .exec(db)
         .await
         .map_err(|e| e.to_string())?;
+    if owned.rows_affected == 0 {
+        return Err("the run was taken for dead (no heartbeat)".to_owned());
+    }
     Ok(mark)
 }
 
@@ -758,45 +775,61 @@ fn latest_slot(
     Some(slot)
 }
 
-/// Runs whose process stopped (no heartbeat for a while): their command
-/// killed in its container (a restore never goes on unattended), then
-/// failed. At boot, every minute, and before a run starts; a run still alive
-/// elsewhere keeps beating.
+/// Runs whose process stopped (no heartbeat for a while): taken first
+/// (`killing`: their runner, if alive, can start nothing more and stops at
+/// its next heartbeat), then their command killed in its container and
+/// checked dead, then failed. A command that cannot be killed keeps its run
+/// `killing`, the service blocked, and is tried again. At boot, every
+/// minute, and before a run starts.
 pub async fn recover_interrupted(
     db: &DatabaseConnection,
     docker: Option<&Docker>,
 ) -> AppResult<u64> {
     let now = Utc::now();
-    let dead = backup_run::Entity::find()
+    backup_run::Entity::update_many()
+        .col_expr(backup_run::Column::Status, Expr::value(KILLING))
+        .col_expr(backup_run::Column::UpdatedAt, Expr::value(now))
         .filter(backup_run::Column::Status.eq("running"))
         .filter(backup_run::Column::UpdatedAt.lt(now - stale()))
+        .exec(db)
+        .await?;
+    let taken = backup_run::Entity::find()
+        .filter(backup_run::Column::Status.eq(KILLING))
         .all(db)
         .await?;
-    if dead.is_empty() {
-        return Ok(0);
-    }
-    if let Some(docker) = docker {
-        for run in &dead {
-            if let (Some(container), Some(mark)) = (&run.container, &run.mark)
-                && let Err(err) = docker.engine().kill_marked(container, mark).await
-            {
-                tracing::debug!(%err, run = run.id, "a dead run's command not killed");
-            }
+    let mut failed = 0;
+    for run in taken {
+        let dead = match (&run.container, &run.mark) {
+            (Some(container), Some(mark)) => match docker {
+                Some(docker) => match docker.engine().kill_marked(container, mark).await {
+                    Ok(()) => true,
+                    Err(err) => {
+                        tracing::warn!(%err, run = run.id, "a dead run's command not killed yet");
+                        false
+                    }
+                },
+                None => false,
+            },
+            // Nothing was started.
+            _ => true,
+        };
+        if dead {
+            failed += backup_run::Entity::update_many()
+                .col_expr(backup_run::Column::Status, Expr::value("failed"))
+                .col_expr(
+                    backup_run::Column::Error,
+                    Expr::value("interrupted (its run stopped)"),
+                )
+                .col_expr(backup_run::Column::FinishedAt, Expr::value(Utc::now()))
+                .col_expr(backup_run::Column::UpdatedAt, Expr::value(Utc::now()))
+                .filter(backup_run::Column::Id.eq(run.id))
+                .filter(backup_run::Column::Status.eq(KILLING))
+                .exec(db)
+                .await?
+                .rows_affected;
         }
     }
-    Ok(backup_run::Entity::update_many()
-        .col_expr(backup_run::Column::Status, Expr::value("failed"))
-        .col_expr(
-            backup_run::Column::Error,
-            Expr::value("interrupted (its run stopped)"),
-        )
-        .col_expr(backup_run::Column::FinishedAt, Expr::value(now))
-        .col_expr(backup_run::Column::UpdatedAt, Expr::value(now))
-        .filter(backup_run::Column::Id.is_in(dead.iter().map(|r| r.id)))
-        .filter(backup_run::Column::Status.eq("running"))
-        .exec(db)
-        .await?
-        .rows_affected)
+    Ok(failed)
 }
 
 #[cfg(test)]

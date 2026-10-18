@@ -80,6 +80,12 @@ Nixpacks run is limited to 10 minutes, the context to 1 GB. A trigger URL's toke
 request log records paths only) and stored as its SHA-256 only; anyone with the URL can deploy the service (not change it): make a new one when it
 leaks.
 
+## Compose services
+
+A Compose file can run privileged containers and mount any host directory: creating or editing a
+Compose service needs `system.manage`. Its `.env` holds its environment in clear (`0600`, in the
+Compose directory, root's).
+
 ## Backups
 
 A backup holds the database's data in clear (gzipped, not encrypted): keep the bucket private, or

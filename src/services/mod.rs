@@ -3,6 +3,7 @@
 pub mod action_service;
 pub mod backup_service;
 pub mod build_service;
+pub mod compose_service;
 pub mod creation_service;
 pub mod database_service;
 pub mod deploy_rules_service;

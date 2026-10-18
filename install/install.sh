@@ -21,6 +21,8 @@ set -eu
 ETC=/etc/rdockpanel
 # Backups to a "Local directory" storage provider (the same path in the panel).
 BACKUPS=/var/lib/rdockpanel/backups
+# Compose services' files (relative paths of a Compose file resolve on the host).
+COMPOSE=/var/lib/rdockpanel/compose
 CONF="$ETC/install.conf"
 SYSTEM=rdockpanel.system=true
 MYSQL_IMAGE=mysql:8.4
@@ -89,8 +91,8 @@ docker node update --label-add rdockpanel.main=true "$NODE" >/dev/null
 PLACE=node.labels.rdockpanel.main==true
 
 # --- Directories, options and secrets (made once, kept) -----------------------
-mkdir -p "$ETC/secrets" "$ETC/traefik/dynamic" "$ETC/traefik/acme" "$BACKUPS"
-chmod 0700 "$BACKUPS"
+mkdir -p "$ETC/secrets" "$ETC/traefik/dynamic" "$ETC/traefik/acme" "$BACKUPS" "$COMPOSE"
+chmod 0700 "$BACKUPS" "$COMPOSE"
 chmod 0700 "$ETC" "$ETC/secrets" "$ETC/traefik/acme"
 touch "$ETC/traefik/acme/acme.json"
 chmod 0600 "$ETC/traefik/acme/acme.json"
@@ -226,9 +228,10 @@ set -- --env-add "APP_URL=$APP_URL" \
   --env-add "RUSTCMS_PANEL__CERT_RESOLVER=$RESOLVER" \
   --env-add "RUSTCMS_PANEL__SERVICE_DOMAIN=$APPS_DOMAIN" \
   --env-add "RUSTCMS_PANEL__PUBLIC_IP=$ADDRESS" \
-  --env-add HOST_PROC=/host/proc
+  --env-add HOST_PROC=/host/proc \
+  --env-add "RUSTCMS_PANEL__COMPOSE_DIR=$COMPOSE"
 
-mounted() { docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{.Target}} {{end}}' rdockpanel | grep -qw "$BACKUPS"; }
+mounted() { docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{.Target}} {{end}}' rdockpanel | grep -qw "$1"; }
 published() { docker service inspect --format '{{range .Endpoint.Ports}}{{.PublishedPort}} {{end}}' rdockpanel | grep -qw 3000; }
 if exists rdockpanel; then
   say "Updating RDockPanel ($IMAGE)"
@@ -238,7 +241,8 @@ if exists rdockpanel; then
   elif [ -z "$DOMAIN" ] && ! published; then
     set -- "$@" --publish-add mode=host,published=3000,target=3000
   fi
-  mounted || set -- "$@" --mount-add "type=bind,source=$BACKUPS,target=$BACKUPS"
+  mounted "$BACKUPS" || set -- "$@" --mount-add "type=bind,source=$BACKUPS,target=$BACKUPS"
+  mounted "$COMPOSE" || set -- "$@" --mount-add "type=bind,source=$COMPOSE,target=$COMPOSE"
   docker service update --quiet --image "$IMAGE" "$@" rdockpanel >/dev/null
 else
   say "Starting RDockPanel ($IMAGE)"
@@ -264,6 +268,7 @@ else
     --mount type=bind,source="$ETC/traefik/dynamic",target=/etc/rdockpanel/traefik/dynamic \
     --mount type=bind,source=/proc,target=/host/proc,readonly \
     --mount type=bind,source="$BACKUPS",target="$BACKUPS" \
+    --mount type=bind,source="$COMPOSE",target="$COMPOSE" \
     --secret rdp_app_key --secret rdp_database_url \
     --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-retries 60 \
     "$@" "$IMAGE" >/dev/null

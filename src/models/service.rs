@@ -19,7 +19,8 @@ pub struct Model {
     pub id: i64,
     pub project_id: i64,
     pub name: String,
-    /// `app`, or a database: `postgres`, `mysql`, `mariadb`, `mongo`, `redis`.
+    /// `app`, a database (`postgres`, `mysql`, `mariadb`, `mongo`, `redis`),
+    /// or `compose` (containers of a Compose file, run by `docker compose`).
     pub kind: String,
     pub image: String,
     /// Where the image comes from: `image`, `git` (built), `dockerfile`
@@ -44,6 +45,11 @@ pub struct Model {
     pub deploy_key_public: Option<String>,
     /// SHA-256 of the deployment trigger's token (`/api/deploy/…`).
     pub trigger_hash: Option<String>,
+    /// A Compose service's file, written in the panel (`source = image`), or
+    /// its path in the repository (`compose_file`, `source = git`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub compose: Option<String>,
+    pub compose_file: Option<String>,
     pub command: Option<String>,
     pub replicas: i32,
     pub cpu_limit_millis: Option<i32>,

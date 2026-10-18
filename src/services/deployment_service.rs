@@ -643,12 +643,60 @@ pub fn deploy_options(force_update: u64) -> DeployOptions {
     }
 }
 
+/// The project's network (made when missing), and Traefik on it when the
+/// service runs with domains: Traefik reaches the service there.
+pub(crate) async fn project_network(
+    docker: &Docker,
+    traefik: Option<&Traefik>,
+    snapshot: &Snapshot,
+    log: &mut RunLog<'_>,
+) -> Result<(), Outcome> {
+    let fail = |err: DockerError| Outcome::Failed(err.to_string());
+    let network = NetworkRequest {
+        name: network_name(&snapshot.project),
+        driver: "overlay".to_owned(),
+        labels: [
+            (MANAGED_LABEL.to_owned(), "true".to_owned()),
+            ("rdockpanel.project".to_owned(), snapshot.project.clone()),
+        ]
+        .into(),
+        attachable: true,
+        internal: false,
+    };
+    log.hold().await?;
+    let network = docker.ensure_network(network).await.map_err(fail)?;
+    // Traefik reaches the service on its project's network.
+    if snapshot.running
+        && !snapshot.domains.is_empty()
+        && let Some(traefik) = traefik
+    {
+        match traefik.attach(docker, &network.name, &network.id).await {
+            Ok(true) => {
+                log.line(format!(
+                    "attached Traefik to {} (it restarts)",
+                    network.name
+                ))
+                .await;
+            }
+            Ok(false) => {}
+            // Its domains would lead nowhere: not deployed.
+            Err(err) => {
+                return Err(Outcome::Failed(format!(
+                    "Traefik ({}) could not join {}: {err}",
+                    traefik.service, network.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Applies `row` to Docker: the outcome and the image it ran, or how it failed.
 /// What a run applies besides its snapshot, opened: never logged.
-struct Secrets {
-    env: BTreeMap<String, String>,
+pub(crate) struct Secrets {
+    pub(crate) env: BTreeMap<String, String>,
     /// The service's deploy key (a private repository's).
-    deploy_key: Option<String>,
+    pub(crate) deploy_key: Option<String>,
     /// Its file mounts' contents by path.
     files: BTreeMap<String, String>,
     /// Keys the digest of the environment as resolved (the task template's).
@@ -888,6 +936,20 @@ async fn apply(
     let trigger =
         Trigger::parse(&row.trigger).ok_or_else(|| Outcome::Failed("unknown trigger".into()))?;
     let name = snapshot.service_name();
+    // Not routed any more before its containers go (a Compose service too).
+    if let Some(source) = &snapshot.compose {
+        if !snapshot.running
+            && let Some(traefik) = traefik
+            && let Err(err) = traefik.remove(&name).await
+        {
+            log.line(format!("warning: routes not removed: {err}"))
+                .await;
+        }
+        return crate::services::compose_service::apply(
+            docker, traefik, &snapshot, source, trigger, secrets, log,
+        )
+        .await;
+    }
     let existing = docker
         .managed_service(&name, &snapshot.project, &snapshot.service)
         .await
@@ -933,42 +995,7 @@ async fn apply(
         }
     }
 
-    let network = NetworkRequest {
-        name: network_name(&snapshot.project),
-        driver: "overlay".to_owned(),
-        labels: [
-            (MANAGED_LABEL.to_owned(), "true".to_owned()),
-            ("rdockpanel.project".to_owned(), snapshot.project.clone()),
-        ]
-        .into(),
-        attachable: true,
-        internal: false,
-    };
-    log.hold().await?;
-    let network = docker.ensure_network(network).await.map_err(fail)?;
-    // Traefik reaches the service on its project's network.
-    if snapshot.running
-        && !snapshot.domains.is_empty()
-        && let Some(traefik) = traefik
-    {
-        match traefik.attach(docker, &network.name, &network.id).await {
-            Ok(true) => {
-                log.line(format!(
-                    "attached Traefik to {} (it restarts)",
-                    network.name
-                ))
-                .await;
-            }
-            Ok(false) => {}
-            // Its domains would lead nowhere: not deployed.
-            Err(err) => {
-                return Err(Outcome::Failed(format!(
-                    "Traefik ({}) could not join {}: {err}",
-                    traefik.service, network.name
-                )));
-            }
-        }
-    }
+    project_network(docker, traefik, &snapshot, log).await?;
 
     let auth = secrets.auth(&snapshot);
     let image = match &snapshot.build {

@@ -85,6 +85,8 @@ pub struct NewService {
     pub database: DatabaseOptions,
     /// An app built by the panel (its `image` then empty).
     pub build: Option<NewBuild>,
+    /// A Compose service's file (`kind` `compose`).
+    pub compose: Option<String>,
 }
 
 impl NewService {
@@ -103,6 +105,7 @@ impl NewService {
             ports: vec![],
             database: DatabaseOptions::default(),
             build: None,
+            compose: None,
         }
     }
 
@@ -141,13 +144,13 @@ pub async fn create(
         errors.add("name", "is already taken in this project");
     }
     let engine = match new.kind.as_str() {
-        "app" => None,
+        "app" | "compose" => None,
         kind => match Engine::parse(kind) {
             Some(engine) => Some(engine),
             None => {
                 errors.add(
                     "kind",
-                    "must be app, postgres, mysql, mariadb, mongo or redis",
+                    "must be app, compose, postgres, mysql, mariadb, mongo or redis",
                 );
                 None
             }
@@ -204,7 +207,22 @@ pub async fn create(
         }
         None => new.image.clone().unwrap_or_default().trim().to_owned(),
     };
+    if new.kind == "compose" {
+        if let Some(text) = new.compose.as_deref().filter(|t| !t.trim().is_empty())
+            && let Err(e) =
+                crate::services::compose_service::prepare(text, &project.name, &new.name)
+        {
+            errors.add("compose", e);
+        }
+        if new.build.is_some() {
+            errors.add(
+                "source",
+                "a Compose service's repository is set on its Source tab",
+            );
+        }
+    }
     match &new.build {
+        None if new.kind == "compose" => {}
         None if !valid_image_reference(&image) => {
             errors.add("image", "is not an image reference (e.g. nginx:1.27)");
         }
@@ -335,6 +353,7 @@ pub async fn create(
             .map_or_else(|| "dockerfile".to_owned(), |b| b.builder.clone())),
         dockerfile_path: Set(new.build.as_ref().and_then(|b| b.dockerfile_path.clone())),
         dockerfile: Set(new.build.as_ref().and_then(|b| b.dockerfile.clone())),
+        compose: Set(new.compose.clone().filter(|t| !t.trim().is_empty())),
         command: Set(command),
         replicas: Set(replicas),
         zero_downtime: Set(new.zero_downtime && engine.is_none()),

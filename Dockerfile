@@ -14,7 +14,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM debian:bookworm-slim
 ARG TARGETARCH
 # Git and SSH clone the services' repositories (and make deploy keys);
-# Nixpacks writes a Dockerfile for a repository without one.
+# Nixpacks writes a Dockerfile for a repository without one; Docker's CLI
+# runs Compose services.
 ARG NIXPACKS_VERSION=1.41.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini curl git openssh-client \
@@ -27,7 +28,13 @@ RUN apt-get update \
  && curl -fsSL -o /tmp/nixpacks.tgz "https://github.com/railwayapp/nixpacks/releases/download/v${NIXPACKS_VERSION}/nixpacks-v${NIXPACKS_VERSION}-${arch}-unknown-linux-musl.tar.gz" \
  && echo "${sum}  /tmp/nixpacks.tgz" | sha256sum -c - \
  && tar -xzf /tmp/nixpacks.tgz -C /usr/local/bin nixpacks \
- && rm /tmp/nixpacks.tgz
+ && rm /tmp/nixpacks.tgz \
+ && install -m 0755 -d /etc/apt/keyrings \
+ && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+ && echo "deb [arch=${TARGETARCH:-amd64} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /rdockpanel /app/rdockpanel
 COPY config /app/config

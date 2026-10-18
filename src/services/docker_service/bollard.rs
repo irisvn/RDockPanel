@@ -607,6 +607,35 @@ impl DockerApi for BollardDocker {
         kill_marked(&self.client, container, mark).await
     }
 
+    async fn compose(
+        &self,
+        dir: &std::path::Path,
+        project: &str,
+        file: &str,
+        args: &[&str],
+    ) -> DockerResult<(i32, String)> {
+        let mut command = tokio::process::Command::new("docker");
+        command
+            .arg("compose")
+            .arg("--project-directory")
+            .arg(dir)
+            .args(["-p", project, "-f", file])
+            .args(args)
+            .current_dir(dir)
+            .kill_on_drop(true);
+        let output =
+            tokio::time::timeout(std::time::Duration::from_secs(30 * 60), command.output())
+                .await
+                .map_err(|_| DockerError::Other("docker compose took too long".into()))?
+                .map_err(|e| DockerError::Other(format!("docker compose could not start: {e}")))?;
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok((output.status.code().unwrap_or(-1), text))
+    }
+
     async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
         // By its exact name, inspected (lists may leave out the labels).
         match self
@@ -915,33 +944,48 @@ fn credentials(auth: RegistryAuth) -> ::bollard::auth::DockerCredentials {
 }
 
 /// Kills the container's processes carrying `SESSION_ENV=token` (a command
-/// run by [`DockerApi::run_in_container`] and what it started).
+/// run by [`DockerApi::run_in_container`] and what it started), and checks
+/// none is left: an error otherwise. A container gone: nothing left.
 async fn kill_marked(client: &Client, container: &str, token: &str) -> DockerResult<()> {
     let script = format!(
         r#"m='{SESSION_ENV}={token}'
-for p in /proc/[0-9]*; do
-  tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -qx "$m" && kill -KILL "${{p#/proc/}}" 2>/dev/null
-done; true"#
+marked() {{ for p in /proc/[0-9]*; do
+  [ "${{p#/proc/}}" = "$$" ] && continue
+  tr '\0' '\n' < "$p/environ" 2>/dev/null | grep -qx "$m" && echo "${{p#/proc/}}"
+done; }}
+for p in $(marked); do kill -KILL "$p" 2>/dev/null; done
+sleep 1
+[ -z "$(marked)" ]"#
     );
     let config = CreateExecOptions {
         cmd: Some(vec!["/bin/sh".to_owned(), "-c".to_owned(), script]),
+        attach_stdout: Some(true),
+        attach_stderr: Some(true),
         ..Default::default()
     };
-    let id = client
-        .create_exec(container, config)
-        .await
-        .map_err(map_err)?
-        .id;
+    let id = match client.create_exec(container, config).await.map_err(map_err) {
+        Ok(created) => created.id,
+        // The container is gone, with its processes.
+        Err(DockerError::NotFound) => return Ok(()),
+        Err(err) => return Err(err),
+    };
     let start = StartExecOptions {
-        detach: true,
+        detach: false,
         tty: false,
         output_capacity: None,
     };
-    client
-        .start_exec(&id, Some(start))
-        .await
-        .map(drop)
-        .map_err(map_err)
+    // Waited for: the processes are dead (or not) when this returns.
+    if let StartExecResults::Attached { mut output, .. } =
+        client.start_exec(&id, Some(start)).await.map_err(map_err)?
+    {
+        while output.next().await.is_some() {}
+    }
+    match client.inspect_exec(&id).await.map_err(map_err)?.exit_code {
+        Some(0) => Ok(()),
+        _ => Err(DockerError::Other(
+            "the command's processes could not all be killed".into(),
+        )),
+    }
 }
 
 /// The build's lines, from a task owning its client (the stream outlives

@@ -376,6 +376,15 @@ pub trait DockerApi: Send + Sync {
     ) -> DockerResult<BoxStream<'static, DockerResult<ExecChunk>>>;
     /// Kills the container's processes carrying [`SESSION_ENV`]`=mark`.
     async fn kill_marked(&self, container: &str, mark: &str) -> DockerResult<()>;
+    /// `docker compose --project-directory dir -p project -f file args…`
+    /// (the Docker CLI's Compose): its exit code and output.
+    async fn compose(
+        &self,
+        dir: &std::path::Path,
+        project: &str,
+        file: &str,
+        args: &[&str],
+    ) -> DockerResult<(i32, String)>;
     /// Ends every process of the container's sessions marked with `token`:
     /// hangs them up, then kills what is left.
     async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()>;
@@ -914,6 +923,15 @@ impl DockerApi for Unavailable {
         Err(self.err())
     }
     async fn kill_marked(&self, _: &str, _: &str) -> DockerResult<()> {
+        Err(self.err())
+    }
+    async fn compose(
+        &self,
+        _: &std::path::Path,
+        _: &str,
+        _: &str,
+        _: &[&str],
+    ) -> DockerResult<(i32, String)> {
         Err(self.err())
     }
 }

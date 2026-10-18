@@ -66,6 +66,10 @@ impl Resource for ServiceResource {
             Field::column(service::Column::Builder),
             Field::column(service::Column::DockerfilePath).max_length(255),
             Field::column(service::Column::Dockerfile).max_length(65_535),
+            // A Compose service's file (written here), or its path in the repository.
+            Field::column(service::Column::Compose)
+                .max_length(crate::services::compose_service::MAX_FILE),
+            Field::column(service::Column::ComposeFile).max_length(255),
             Field::column(service::Column::Command).max_length(1000),
             Field::column(service::Column::Replicas).required(),
             Field::column(service::Column::CpuLimitMillis),
@@ -219,6 +223,12 @@ impl Resource for ServiceResource {
             .one(txn)
             .await?
             .ok_or(rustcms::AppError::NotFound)?;
+        // A Compose file runs anything on the host: its administrators only.
+        if record.kind == "compose"
+            && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+        {
+            return Err(rustcms::AppError::Forbidden);
+        }
         check(ctx, &data, Some(&record))?;
         Ok(data)
     }
@@ -271,7 +281,27 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
     };
     let source =
         after("source", record.map(|r| r.source.as_str())).unwrap_or_else(|| "image".to_owned());
+    let compose = record.is_some_and(|r| r.kind == "compose");
+    if compose {
+        // Its file written here (`image`) or its repository's (`git`).
+        if !matches!(source.as_str(), "image" | "git") {
+            errors.add(
+                "source",
+                ctx.t("a Compose file is written here or comes from Git"),
+            );
+        }
+        if let (Some(text), Some(r)) = (text(data, "compose"), record)
+            && !text.trim().is_empty()
+            && let Err(e) = crate::services::compose_service::prepare(text, "p", &r.name)
+        {
+            errors.add("compose", e);
+        }
+        if text(data, "compose_file").is_some_and(|p| inside(p).is_none()) {
+            errors.add("compose_file", ctx.t("must stay inside the repository"));
+        }
+    }
     match source.as_str() {
+        "image" if compose => {}
         "image" => {
             if !after("image", record.map(|r| r.image.as_str()))
                 .is_some_and(|i| valid_image_reference(i.trim()))
@@ -306,7 +336,7 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
         _ => errors.add("source", ctx.t("must be image, git or dockerfile")),
     }
     // A database runs its engine's image (its volume and check are the engine's).
-    if record.is_some_and(|r| r.kind != "app") && source != "image" {
+    if record.is_some_and(|r| !matches!(r.kind.as_str(), "app" | "compose")) && source != "image" {
         errors.add("source", ctx.t("a database runs its engine's image"));
     }
     if text(data, "dockerfile").is_some_and(|d| d.len() > 65_535) {

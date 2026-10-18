@@ -48,6 +48,7 @@ impl Resource for ServiceDomainResource {
                 .max_length(255),
             Field::column(service_domain::Column::Port).required(),
             Field::column(service_domain::Column::Https),
+            Field::column(service_domain::Column::ComposeService).max_length(64),
         ]
     }
 
@@ -76,19 +77,62 @@ impl Resource for ServiceDomainResource {
 
     async fn mutate_before_create(
         ctx: &Ctx,
-        _txn: &DatabaseTransaction,
+        txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        check(ctx, data)
+        let data = check(ctx, data)?;
+        check_container(ctx, txn, &data, None).await?;
+        Ok(data)
     }
 
     async fn mutate_before_update(
         ctx: &Ctx,
-        _txn: &DatabaseTransaction,
-        _record: &service_domain::Model,
+        txn: &DatabaseTransaction,
+        record: &service_domain::Model,
         data: Data,
     ) -> AppResult<Data> {
-        check(ctx, data)
+        let data = check(ctx, data)?;
+        check_container(ctx, txn, &data, Some(record)).await?;
+        Ok(data)
+    }
+}
+
+/// A Compose service's domain leads to one of its containers (named); any
+/// other service's to the service itself (none named).
+async fn check_container(
+    ctx: &Ctx,
+    txn: &DatabaseTransaction,
+    data: &Data,
+    record: Option<&service_domain::Model>,
+) -> AppResult<()> {
+    use sea_orm::EntityTrait;
+    let service_id = int(data, "service_id").or(record.map(|r| r.service_id));
+    let Some(service_id) = service_id else {
+        return Ok(());
+    };
+    let compose = crate::models::service::Entity::find_by_id(service_id)
+        .one(txn)
+        .await?
+        .is_some_and(|s| s.kind == "compose");
+    let container = if data.contains_key("compose_service") {
+        text(data, "compose_service")
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_owned)
+    } else {
+        record.and_then(|r| r.compose_service.clone())
+    };
+    let error = match (compose, container) {
+        (true, None) => Some("names the Compose file's service it leads to"),
+        (true, Some(c)) if !crate::services::deploy_service::valid_compose_service(&c) => {
+            Some("is not a service name of a Compose file")
+        }
+        (false, Some(_)) => Some("is only for a Compose service"),
+        _ => None,
+    };
+    match error {
+        Some(error) => Err(ValidationErrors::field("compose_service", ctx.t(error)).into()),
+        None => Ok(()),
     }
 }
 

@@ -37,6 +37,10 @@ pub struct PanelConfig {
     /// Where EasyPanel's templates are fetched from (their repository's
     /// `templates/` folder, raw files).
     pub templates_url: String,
+    /// Compose services' files (one directory each). The Docker daemon
+    /// reads relative paths of a Compose file there: the same path on the
+    /// host and in the panel (the installer: /var/lib/rdockpanel/compose).
+    pub compose_dir: PathBuf,
 }
 
 impl Default for PanelConfig {
@@ -52,6 +56,7 @@ impl Default for PanelConfig {
             public_ip: String::new(),
             templates_url:
                 "https://raw.githubusercontent.com/easypanel-io/templates/main/templates".to_owned(),
+            compose_dir: PathBuf::from("storage/compose"),
         }
     }
 }

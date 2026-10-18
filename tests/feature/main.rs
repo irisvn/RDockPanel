@@ -6,6 +6,7 @@ mod support;
 
 mod apps;
 mod backups;
+mod compose;
 mod databases;
 mod deployments;
 mod docker;

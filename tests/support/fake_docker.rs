@@ -37,6 +37,8 @@ pub struct FakeDocker {
     pub update_state: Arc<Mutex<Option<ServiceUpdateStatusStateEnum>>>,
     /// A stopped service's task that Swarm wants shut down but still runs.
     pub lingering: Arc<Mutex<bool>>,
+    /// The last Compose file given to `docker compose`.
+    pub composed: Arc<Mutex<Option<String>>>,
     /// What commands run in containers were fed (a restore's dump).
     pub fed: Arc<Mutex<Vec<u8>>>,
     /// The exit code of commands run in containers (default 0).
@@ -303,6 +305,21 @@ impl DockerApi for FakeDocker {
         }
         chunks.push(Ok(ExecChunk::Exit(code)));
         Ok(stream::iter(chunks).boxed())
+    }
+
+    /// Records `compose <project> <args>`; keeps the file it was given.
+    async fn compose(
+        &self,
+        dir: &std::path::Path,
+        project: &str,
+        file: &str,
+        args: &[&str],
+    ) -> DockerResult<(i32, String)> {
+        self.record(format!("compose {project} {}", args.join(" ")));
+        if let Ok(text) = std::fs::read_to_string(dir.join(file)) {
+            *self.composed.lock().unwrap() = Some(text);
+        }
+        Ok((0, format!("{project}: {}\n", args.join(" "))))
     }
 
     async fn kill_marked(&self, container: &str, mark: &str) -> DockerResult<()> {

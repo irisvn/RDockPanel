@@ -206,6 +206,8 @@ pub async fn service(
             "builder": row.builder,
             "dockerfile_path": row.dockerfile_path,
             "dockerfile": row.dockerfile,
+            "compose": row.compose,
+            "compose_file": row.compose_file,
             "deploy_key_public": row.deploy_key_public,
             "trigger_set": row.trigger_hash.is_some(),
             "registry_password_set": row.registry_password.is_some(),
@@ -442,6 +444,8 @@ pub struct NewServiceBody {
     pub kind: String,
     pub image: Option<String>,
     pub database: Option<DatabaseBody>,
+    /// A Compose service's file.
+    pub compose: Option<String>,
 }
 
 fn app_kind() -> String {
@@ -461,6 +465,15 @@ pub async fn create_service(
     if !auth.principal().can("projects.view") {
         return Err(AppError::NotFound);
     }
+    // A Compose file runs anything on the host (privileged containers, host
+    // directories): the panel's own administrators only.
+    if body.kind == "compose"
+        && !auth
+            .principal()
+            .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+    {
+        return Err(AppError::Forbidden);
+    }
     let txn = app.db().begin().await?;
     let project = project::Entity::find_by_id(id)
         .one(&txn)
@@ -473,6 +486,10 @@ pub async fn create_service(
     new.kind = body.kind.clone();
     if Engine::parse(&body.kind).is_some() {
         new.image = body.image.clone();
+    }
+    if body.kind == "compose" {
+        new.image = None;
+        new.compose = body.compose.clone();
     }
     if let Some(db) = body.database {
         new.database = DatabaseOptions {
@@ -589,7 +606,11 @@ pub async fn stats(State(app): State<AppState>, Path(id): Path<i64>) -> AppResul
     let docker = app
         .service::<Docker>()
         .ok_or_else(|| AppError::BadRequest("Docker is not available".into()))?;
-    let tasks = docker.engine().list_tasks(&name).await.unwrap_or_default();
+    let tasks = docker
+        .engine()
+        .list_tasks(&name)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("the service's tasks: {e}")))?;
     let containers: Vec<(i64, String)> = tasks
         .iter()
         .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
@@ -629,7 +650,9 @@ pub async fn stats(State(app): State<AppState>, Path(id): Path<i64>) -> AppResul
             Some(json!({ "slot": slot, "cpu_percent": s.cpu_percent, "mem_used": s.mem_used, "mem_limit": s.mem_limit }))
         })
         .collect();
+    // Tasks without a sample (stats failed or too slow): said, not counted as 0.
+    let missing = containers.len() - tasks.len();
     Ok(Json(
-        json!({ "cpu_percent": cpu, "mem_used": mem, "tasks": tasks }),
+        json!({ "cpu_percent": cpu, "mem_used": mem, "tasks": tasks, "missing": missing }),
     ))
 }

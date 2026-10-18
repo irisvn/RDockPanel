@@ -164,7 +164,7 @@ pub async fn remove_orphan_networks(
     docker: &Docker,
     traefik: Option<&Traefik>,
 ) -> rustcms::AppResult<usize> {
-    use sea_orm::EntityTrait;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     let projects: std::collections::HashSet<String> = crate::models::project::Entity::find()
         .all(db)
         .await?
@@ -190,6 +190,15 @@ pub async fn remove_orphan_networks(
         if !ours
             || projects.contains(project)
             || network.name != crate::services::deploy_service::network_name(project)
+        {
+            continue;
+        }
+        // Checked again just before (a project made meanwhile keeps it).
+        if crate::models::project::Entity::find()
+            .filter(crate::models::project::Column::Name.eq(project.as_str()))
+            .one(db)
+            .await?
+            .is_some()
         {
             continue;
         }

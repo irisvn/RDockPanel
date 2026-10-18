@@ -75,6 +75,27 @@ pub struct Snapshot {
     /// How its image is built (`None`: pulled, `image`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<Build>,
+    /// A Compose service: run by `docker compose`, not as a Swarm service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compose: Option<Compose>,
+}
+
+/// A Compose service's file: written in the panel, or of its repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Compose {
+    /// The file written in the panel (`None`: the repository's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// The Compose project's directory in the repository (`/`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_path: Option<String>,
+    /// The file in that directory (`docker-compose.yml`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
 }
 
 /// A service's image built by the panel: from a Git repository, or from a
@@ -141,6 +162,9 @@ pub struct Domain {
     pub path: String,
     pub port: u16,
     pub https: bool,
+    /// A Compose service's container the domain leads to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compose_service: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -232,6 +256,7 @@ impl Snapshot {
                     path: d.path.clone(),
                     port: u16::try_from(d.port).ok()?,
                     https: d.https,
+                    compose_service: d.compose_service.clone(),
                 })
             })
             .collect();
@@ -292,8 +317,25 @@ impl Snapshot {
             env_names: vec![],
             env_digest: None,
             primary_domain,
+            compose: (service.kind == "compose").then(|| Compose {
+                inline: (service.source != "git")
+                    .then(|| service.compose.clone())
+                    .flatten(),
+                git_url: (service.source == "git")
+                    .then(|| service.git_url.clone())
+                    .flatten(),
+                git_branch: (service.source == "git")
+                    .then(|| service.git_branch.clone())
+                    .flatten(),
+                git_path: (service.source == "git")
+                    .then(|| service.git_path.clone())
+                    .flatten(),
+                file: (service.source == "git")
+                    .then(|| service.compose_file.clone())
+                    .flatten(),
+            }),
             build: match service.source.as_str() {
-                "git" | "dockerfile" => Some(Build {
+                "git" | "dockerfile" if service.kind != "compose" => Some(Build {
                     source: service.source.clone(),
                     git_url: (service.source == "git")
                         .then(|| service.git_url.clone())
@@ -732,9 +774,25 @@ impl TraefikFile {
     }
 }
 
+/// A Compose service's container on its project's network:
+/// `<project>_<service>_<container>`.
+pub fn compose_alias(base: &str, container: &str) -> String {
+    format!("{base}_{container}")
+}
+
+/// A container of a Compose file as the panel names it (letters, digits,
+/// `_`, `-`, `.`).
+pub fn valid_compose_service(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
 /// One router per domain (HTTPS ones with an HTTP router redirecting to
 /// them), one Traefik service per container port, reached through the
-/// service's name on the project network. Names start with the Swarm
+/// service's name (a Compose container's alias) on the project network. Names start with the Swarm
 /// service's, so files never collide.
 pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFile> {
     if snapshot.domains.is_empty() {
@@ -748,9 +806,16 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
     };
     let redirect = format!("{base}-https");
     for (index, domain) in snapshot.domains.iter().enumerate() {
-        let target = format!("{base}-{}", domain.port);
+        // A Compose service's container: its alias on the project network.
+        let (target, host) = match (&snapshot.compose, &domain.compose_service) {
+            (Some(_), Some(sub)) => (
+                format!("{base}-{sub}-{}", domain.port),
+                compose_alias(&base, sub),
+            ),
+            _ => (format!("{base}-{}", domain.port), base.clone()),
+        };
         http.services.entry(target.clone()).or_insert_with(|| LoadBalanced {
-            load_balancer: json!({"servers": [{"url": format!("http://{base}:{}", domain.port)}]}),
+            load_balancer: json!({"servers": [{"url": format!("http://{host}:{}", domain.port)}]}),
         });
         // Host and path were checked (no backticks, nothing that ends a rule).
         let mut rule = format!("Host(`{}`)", domain.host);
@@ -856,18 +921,21 @@ mod tests {
                     path: "/".to_owned(),
                     port: 80,
                     https: true,
+                    compose_service: None,
                 },
                 Domain {
                     host: "shop.example.com".to_owned(),
                     path: "/api".to_owned(),
                     port: 8080,
                     https: true,
+                    compose_service: None,
                 },
                 Domain {
                     host: "shop.localhost".to_owned(),
                     path: "/".to_owned(),
                     port: 80,
                     https: false,
+                    compose_service: None,
                 },
             ],
             ports: vec![],
@@ -883,6 +951,7 @@ mod tests {
             registry_username: None,
             primary_domain: None,
             build: None,
+            compose: None,
         }
     }
 

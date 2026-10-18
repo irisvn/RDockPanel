@@ -13,6 +13,8 @@ pub struct Model {
     pub path: String,
     pub port: i32,
     pub https: bool,
+    /// A Compose service's container (its service in the Compose file).
+    pub compose_service: Option<String>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

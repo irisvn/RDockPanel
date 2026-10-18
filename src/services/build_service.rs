@@ -203,6 +203,113 @@ async fn clone(
     Ok(commit.trim().to_owned())
 }
 
+/// Brings `checkout` to `branch` of `url` (cloned the first time, fetched
+/// after: files the repository does not track, such as a Compose service's
+/// `./data`, stay): its commit. The deploy key lives in a temporary
+/// directory meanwhile.
+pub(crate) async fn sync_repo(
+    url: &str,
+    branch: Option<&str>,
+    checkout: &Path,
+    deploy_key: Option<&str>,
+    log: &mut RunLog<'_>,
+) -> Result<String, Outcome> {
+    if !valid_git_url(url) {
+        return Err(failed("the repository's URL is not an https or ssh URL"));
+    }
+    let branch = branch.map(str::trim).filter(|b| !b.is_empty());
+    if branch.is_some_and(|b| !valid_ref(b)) {
+        return Err(failed("the branch is not a branch, tag or commit"));
+    }
+    let keys =
+        WorkDir(std::env::temp_dir().join(format!("rdp-git-{}", random_string(16).to_lowercase())));
+    let ssh = keys.0.join("ssh");
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&ssh)
+            .map_err(|e| failed(format!("the deploy key: {e}")))?;
+    }
+    if let Some(key) = deploy_key {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(ssh.join("key"))
+            .map_err(|e| failed(format!("the deploy key: {e}")))?;
+        file.write_all(key.as_bytes())
+            .and_then(|()| file.write_all(b"\n"))
+            .map_err(|e| failed(format!("the deploy key: {e}")))?;
+    }
+    let git = |args: &[&str]| {
+        let mut command = tokio::process::Command::new("git");
+        command
+            .args(args)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("HOME", &ssh)
+            .env("GIT_TERMINAL_PROMPT", "0");
+        if deploy_key.is_some() {
+            command.env(
+                "GIT_SSH_COMMAND",
+                format!(
+                    "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={}",
+                    ssh.join("key").display(),
+                    ssh.join("known_hosts").display()
+                ),
+            );
+        }
+        command
+    };
+    let at = checkout.to_string_lossy().into_owned();
+    let reference = branch.unwrap_or("HEAD");
+    if checkout.join(".git").is_dir() {
+        log.line(format!("fetching {url} ({reference})")).await;
+        run(
+            log,
+            "setting the URL",
+            &mut git(&["-C", &at, "remote", "set-url", "origin", "--", url]),
+        )
+        .await?;
+        run(
+            log,
+            "the fetch",
+            &mut git(&[
+                "-C", &at, "fetch", "--depth", "1", "origin", "--", reference,
+            ]),
+        )
+        .await?;
+        run(
+            log,
+            "the checkout",
+            &mut git(&["-C", &at, "checkout", "--force", "--detach", "FETCH_HEAD"]),
+        )
+        .await?;
+    } else {
+        log.line(format!("cloning {url} ({reference})")).await;
+        if let Some(parent) = checkout.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| failed(e.to_string()))?;
+        }
+        let mut args = vec!["clone", "--depth", "1", "--single-branch"];
+        if let Some(branch) = branch {
+            args.extend(["--branch", branch]);
+        }
+        args.extend(["--", url, &at]);
+        run(log, "the clone", &mut git(&args)).await?;
+    }
+    let commit = run(
+        log,
+        "reading the commit",
+        &mut git(&["-C", &at, "rev-parse", "HEAD"]),
+    )
+    .await?;
+    Ok(commit.trim().to_owned())
+}
+
 /// A `.dockerignore`: its rules in order, the last that matches wins.
 struct Ignore(Vec<(globset::GlobMatcher, bool)>);
 

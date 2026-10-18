@@ -310,6 +310,17 @@ window.rustcms?.registerTranslations?.("vi", {
   "Search projects, services, pages": "Tìm project, service, trang",
   Page: "Trang",
   Project: "Project",
+  "Some tasks gave no figures: the totals leave them out.": "Một số task không có số liệu: tổng không tính chúng.",
+  killing: "đang dừng",
+  // Compose.
+  Compose: "Compose",
+  compose: "compose",
+  "Compose file": "File Compose",
+  "Compose service": "Service trong Compose",
+  "The service of the Compose file it leads to": "Service trong file Compose mà domain trỏ tới",
+  "The Compose project's folder": "Thư mục của project Compose",
+  "docker-compose.yml; a repository can be set later on its Source tab": "docker-compose.yml; có thể đổi sang repo Git ở tab Source",
+  "${VAR} reads the Environment tab. Domains lead to one of its services.": "${VAR} lấy từ tab Environment. Domain trỏ tới một service trong file.",
 });
 
 export {};

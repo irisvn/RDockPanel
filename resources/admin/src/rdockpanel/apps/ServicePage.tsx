@@ -201,7 +201,7 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
   );
 }
 
-type Stats = { cpu_percent: number; mem_used: number; tasks: Array<{ slot: number; cpu_percent: number; mem_used: number; mem_limit: number }> };
+type Stats = { cpu_percent: number; mem_used: number; missing: number; tasks: Array<{ slot: number; cpu_percent: number; mem_used: number; mem_limit: number }> };
 
 /** CPU and memory of the service's tasks, every few seconds (EasyPanel's monitor). */
 function Monitor(props: Props & { d: ServiceDetail }) {
@@ -217,6 +217,12 @@ function Monitor(props: Props & { d: ServiceDetail }) {
     setMem((v) => [...v.slice(-59), stats.data!.mem_used]);
   }, [stats.data]);
   const data = stats.data;
+  if (stats.error)
+    return (
+      <Section title={t("Monitor")}>
+        <ErrorNote error={stats.error} />
+      </Section>
+    );
   if (!data) return null;
   return (
     <Section title={t("Monitor")}>
@@ -232,6 +238,7 @@ function Monitor(props: Props & { d: ServiceDetail }) {
           <Sparkline values={mem} />
         </div>
       </div>
+      {data.missing > 0 && <p className="rdp2-muted rdp2-small">{t("Some tasks gave no figures: the totals leave them out.")}</p>}
       {data.tasks.length > 1 && (
         <p className="rdp2-muted rdp2-small">
           {data.tasks.map((task) => `#${task.slot}: ${task.cpu_percent.toFixed(1)}% · ${bytes(task.mem_used)}`).join("  ·  ")}
@@ -437,6 +444,8 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
   const [host, setHost] = useState("");
   const [path, setPath] = useState("/");
   const [port, setPort] = useState("80");
+  const [container, setContainer] = useState("");
+  const isCompose = d.service.kind === "compose";
   const [https, setHttps] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const fields = error instanceof ResourceError ? error.fieldErrors : {};
@@ -474,7 +483,10 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                 {domain.https ? "https" : "http"}://{domain.host}
                 {domain.path}
               </code>{" "}
-              <span className="rdp2-muted">→ :{domain.port}</span>
+              <span className="rdp2-muted">
+                → {domain.compose_service ? `${domain.compose_service}:` : ":"}
+                {domain.port}
+              </span>
             </span>
             {d.can.domains.delete && (
               <Button
@@ -510,6 +522,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                   path: path.trim() || "/",
                   port: Number(port),
                   https,
+                  ...(isCompose ? { compose_service: container.trim() } : {}),
                 });
                 setAdding(false);
                 setHost("");
@@ -530,6 +543,11 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                 <Input type="number" value={port} onChange={(e) => setPort(e.target.value)} />
               </Field>
             </div>
+            {isCompose && (
+              <Field label={t("Compose service")} help={t("The service of the Compose file it leads to")} error={fields.compose_service}>
+                <Input value={container} onChange={(e) => setContainer(e.target.value)} placeholder="web" />
+              </Field>
+            )}
             <label className="rdp2-row">
               <Switch checked={https} onCheckedChange={setHttps} /> {t("HTTPS")}
             </label>
@@ -582,6 +600,9 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
   const [builder, setBuilder] = useState(s.builder);
   const [dockerfilePath, setDockerfilePath] = useState(s.dockerfile_path ?? "Dockerfile");
   const [dockerfile, setDockerfile] = useState(s.dockerfile ?? "FROM nginx:1.27-alpine\n");
+  const [compose, setCompose] = useState(s.compose ?? "");
+  const [composeFile, setComposeFile] = useState(s.compose_file ?? "docker-compose.yml");
+  const isCompose = s.kind === "compose";
   const [trigger, setTrigger] = useState<string | null>(null);
   const [extra, setExtra] = useState<unknown>(null);
   const { save, error, busy, fields } = useServiceSave(s.id, () => {
@@ -597,7 +618,16 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
           onSubmit={(e) => {
             e.preventDefault();
             const data: Record<string, unknown> = { source };
-            if (source === "image") {
+            if (isCompose && source === "image") {
+              data.compose = compose;
+            } else if (isCompose) {
+              Object.assign(data, {
+                git_url: gitUrl.trim(),
+                git_branch: branch.trim() || null,
+                git_path: path.trim() || "/",
+                compose_file: composeFile.trim() || "docker-compose.yml",
+              });
+            } else if (source === "image") {
               Object.assign(data, { image: image.trim(), registry_username: user.trim() || null });
               if (password) data.registry_password = { replace: password };
             } else if (source === "git") {
@@ -615,13 +645,41 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
           }}
         >
           <div className="rdp2-kinds">
-            {(props.d.service.kind === "app" ? (["image", "git", "dockerfile"] as const) : (["image"] as const)).map((id) => (
+            {(isCompose
+              ? (["image", "git"] as const)
+              : props.d.service.kind === "app"
+                ? (["image", "git", "dockerfile"] as const)
+                : (["image"] as const)
+            ).map((id) => (
               <button key={id} type="button" disabled={disabled} className={id === source ? "rdp2-kind rdp2-kind-active" : "rdp2-kind"} onClick={() => setSource(id)}>
-                {t(id === "image" ? "Docker image" : id === "git" ? "Git repository" : "Dockerfile")}
+                {t(isCompose && id === "image" ? "Compose file" : id === "image" ? "Docker image" : id === "git" ? "Git repository" : "Dockerfile")}
               </button>
             ))}
           </div>
-          {source === "image" && (
+          {isCompose && source === "image" && (
+            <Field label={t("Compose file")} help={t("${VAR} reads the Environment tab. Domains lead to one of its services.")} error={fields.compose}>
+              <Textarea className="rdp2-env" rows={16} value={compose} onChange={(e) => setCompose(e.target.value)} disabled={disabled} />
+            </Field>
+          )}
+          {isCompose && source === "git" && (
+            <>
+              <Field label={t("Repository URL")} help={t("https://github.com/org/app.git, or git@github.com:org/app.git with a deploy key")} error={fields.git_url}>
+                <Input value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} disabled={disabled} placeholder="https://github.com/org/app.git" />
+              </Field>
+              <div className="rdp2-grid2">
+                <Field label={t("Branch, tag or commit")} error={fields.git_branch}>
+                  <Input value={branch} onChange={(e) => setBranch(e.target.value)} disabled={disabled} />
+                </Field>
+                <Field label={t("Build path")} help={t("The Compose project's folder")} error={fields.git_path}>
+                  <Input value={path} onChange={(e) => setPath(e.target.value)} disabled={disabled} />
+                </Field>
+                <Field label={t("Compose file")} error={fields.compose_file}>
+                  <Input value={composeFile} onChange={(e) => setComposeFile(e.target.value)} disabled={disabled} />
+                </Field>
+              </div>
+            </>
+          )}
+          {!isCompose && source === "image" && (
             <>
               <Field label={t("Image")} help={t("Pulled and pinned to its digest at each deploy.")} error={fields.image}>
                 <Input value={image} onChange={(e) => setImage(e.target.value)} disabled={disabled} />
@@ -636,7 +694,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
               </div>
             </>
           )}
-          {source === "git" && (
+          {!isCompose && source === "git" && (
             <>
               <Field label={t("Repository URL")} help={t("https://github.com/org/app.git, or git@github.com:org/app.git with a deploy key")} error={fields.git_url}>
                 <Input value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} disabled={disabled} placeholder="https://github.com/org/app.git" />

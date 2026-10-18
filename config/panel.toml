@@ -36,6 +36,12 @@ service_domain = ""
 # The server's public IP address, for `$(EASYPANEL_HOST_IP)` in environments.
 public_ip = ""
 
+# Compose services' files, one directory each. The Docker daemon reads the
+# relative paths of a Compose file (./data:/data) on the host: the directory
+# must have the same path on the host and in the panel (the installer:
+# /var/lib/rdockpanel/compose). Relative paths are from the working directory.
+compose_dir = "storage/compose"
+
 # Where EasyPanel's templates are fetched from when the catalog is opened
 # (raw files of their repository's templates/ folder; never bundled).
 templates_url = "https://raw.githubusercontent.com/easypanel-io/templates/main/templates"

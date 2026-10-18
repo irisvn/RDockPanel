@@ -14,7 +14,7 @@ export type ServiceCard = {
 export type Project = { id: number; name: string; description: string | null; services: ServiceCard[] };
 export type Overview = { projects: Project[]; services_visible: boolean };
 
-export type Domain = { id: number; service_id: number; host: string; path: string; port: number; https: boolean };
+export type Domain = { id: number; service_id: number; host: string; path: string; port: number; https: boolean; compose_service: string | null };
 export type Port = { id: number; published: number; target: number; protocol: string; mode: string };
 export type Mount = { id: number; kind: string; name: string | null; source: string | null; target: string; read_only: boolean };
 
@@ -56,6 +56,8 @@ export type ServiceDetail = {
     builder: "dockerfile" | "nixpacks";
     dockerfile_path: string | null;
     dockerfile: string | null;
+    compose: string | null;
+    compose_file: string | null;
     deploy_key_public: string | null;
     trigger_set: boolean;
     registry_password_set: boolean;

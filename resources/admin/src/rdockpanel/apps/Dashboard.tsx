@@ -3,7 +3,7 @@
 // asks for a name (and an image), nothing else.
 import { useState } from "react";
 import { type AdminApi, type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
-import { Button, Dialog, Input, Loading, ErrorState } from "@rustcms/admin-sdk/ui";
+import { Button, Dialog, Input, Loading, ErrorState, Textarea } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field, Sparkline, StatusDot, bytes } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 import { Templates } from "./Templates";
@@ -114,13 +114,18 @@ const KINDS: Array<[string, string]> = [
   ["mariadb", "MariaDB"],
   ["mongo", "MongoDB"],
   ["redis", "Redis"],
+  ["compose", "Compose"],
 ];
+
+const COMPOSE_EXAMPLE = "services:\n  web:\n    image: nginx:1.27-alpine\n";
 
 /** A new service: a name, and an image for an app; a database needs only
  * its name (its credentials are generated). */
 export function NewService(props: {
   t: (s: string) => string;
   api: AdminApi;
+  /** Compose services: the panel's administrators only (`system.manage`). */
+  canCompose?: boolean;
   project: Project;
   onDone: (name: string) => void;
   onClose: () => void;
@@ -129,10 +134,12 @@ export function NewService(props: {
   const [kind, setKind] = useState("app");
   const [name, setName] = useState("");
   const [image, setImage] = useState("");
+  const [compose, setCompose] = useState(COMPOSE_EXAMPLE);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const fields = (error as { fieldErrors?: Record<string, string[]> } | null)?.fieldErrors ?? {};
   const app = kind === "app";
+  const isCompose = kind === "compose";
   return (
     <Dialog open onClose={props.onClose} title={`${t("Create service in")} ${props.project.name}`}>
       <form
@@ -145,7 +152,8 @@ export function NewService(props: {
             await props.api.post(`/apps/projects/${props.project.id}/services`, {
               name: name.trim(),
               kind,
-              image: image.trim() || undefined,
+              image: isCompose ? undefined : image.trim() || undefined,
+              compose: isCompose ? compose : undefined,
             });
             props.onDone(name.trim());
           } catch (err) {
@@ -157,7 +165,7 @@ export function NewService(props: {
       >
         <Field label={t("Type")}>
           <div className="rdp2-kinds">
-            {KINDS.map(([id, label]) => (
+            {KINDS.filter(([id]) => id !== "compose" || props.canCompose).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -176,14 +184,20 @@ export function NewService(props: {
         <Field label={t("Service name")} help={t("Lowercase letters, digits and dashes")} error={fields.name}>
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={app ? "web" : "db"} />
         </Field>
-        <Field
-          label={app ? t("Docker image") : t("Image (optional)")}
-          help={app ? t("e.g. nginx:1.27 or ghcr.io/org/app:v2") : t("The engine's official image by default; credentials are generated.")}
-          error={fields.image}
-        >
-          <Input value={image} onChange={(e) => setImage(e.target.value)} placeholder={app ? "nginx:1.27-alpine" : ""} />
-        </Field>
-        {!fields.name && !fields.image && <ErrorNote error={error} />}
+        {isCompose ? (
+          <Field label={t("Compose file")} help={t("docker-compose.yml; a repository can be set later on its Source tab")} error={fields.compose}>
+            <Textarea className="rdp2-env" rows={10} value={compose} onChange={(e) => setCompose(e.target.value)} />
+          </Field>
+        ) : (
+          <Field
+            label={app ? t("Docker image") : t("Image (optional)")}
+            help={app ? t("e.g. nginx:1.27 or ghcr.io/org/app:v2") : t("The engine's official image by default; credentials are generated.")}
+            error={fields.image}
+          >
+            <Input value={image} onChange={(e) => setImage(e.target.value)} placeholder={app ? "nginx:1.27-alpine" : ""} />
+          </Field>
+        )}
+        {!fields.name && !fields.image && !fields.compose && <ErrorNote error={error} />}
         <div className="rdp2-row rdp2-end">
           <Button type="button" variant="ghost" onClick={props.onClose}>
             {t("Cancel")}
@@ -307,6 +321,7 @@ export function Dashboard(props: PageProps<unknown>) {
         <NewService
           t={t}
           api={props.api}
+          canCompose={props.can("system.manage")}
           project={adding}
           onClose={() => setAdding(null)}
           onDone={(name) => {
