@@ -351,7 +351,25 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
     <Section
       title={t("Domains")}
       description={t("Traefik routes these to the service's port. HTTPS redirects HTTP to it.")}
-      actions={d.can.domains.create && <Button onClick={() => setAdding(true)}>+ {t("Add domain")}</Button>}
+      actions={
+        d.can.domains.create && (
+          <>
+            {d.auto_domain && !d.domains.some((x) => x.host === d.auto_domain) && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setHost(d.auto_domain ?? "");
+                  setHttps(!(d.auto_domain ?? "").endsWith(".localhost"));
+                  setAdding(true);
+                }}
+              >
+                + {t("Generated domain")}
+              </Button>
+            )}
+            <Button onClick={() => setAdding(true)}>+ {t("Add domain")}</Button>
+          </>
+        )
+      }
     >
       {d.domains.length === 0 && <p className="rdp2-muted">{t("No domain: the service is only reachable inside its project.")}</p>}
       <ul className="rdp2-list">
@@ -519,6 +537,7 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [readOnly, setReadOnly] = useState(false);
+  const [content, setContent] = useState("");
   const [error, setError] = useState<unknown>(null);
   const fields = error instanceof ResourceError ? error.fieldErrors : {};
   return (
@@ -532,7 +551,8 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
         {d.mounts.map((m) => (
           <li key={m.id} className="rdp2-list-row">
             <span>
-              <span className="rdp2-muted">{t(m.kind)}</span> <code>{m.kind === "bind" ? m.source : m.name}</code> → <code>{m.target}</code>
+              <span className="rdp2-muted">{t(m.kind)}</span>{" "}
+              {m.kind === "file" ? <code>{m.target}</code> : <><code>{m.kind === "bind" ? m.source : m.name}</code> → <code>{m.target}</code></>}
               {m.read_only && <span className="rdp2-muted"> ({t("read-only")})</span>}
             </span>
             {d.can.mounts.delete && (
@@ -566,10 +586,11 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                 await resources.create("service_mounts", {
                   service_id: String(d.service.id),
                   kind,
-                  ...(kind === "bind" ? { source: name.trim() } : { name: name.trim() }),
+                  ...(kind === "bind" ? { source: name.trim() } : kind === "file" ? { content } : { name: name.trim() }),
                   target: target.trim(),
-                  read_only: readOnly,
+                  read_only: kind === "file" ? true : readOnly,
                 });
+                setContent("");
                 setAdding(false);
                 setName("");
                 setTarget("");
@@ -583,23 +604,33 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
               <NativeSelect value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="volume">{t("Volume")}</option>
                 <option value="bind">{t("Host directory")}</option>
+                <option value="file">{t("File")}</option>
               </NativeSelect>
             </Field>
-            <Field label={kind === "bind" ? t("Host directory") : t("Volume name")} error={kind === "bind" ? fields.source : fields.name}>
-              <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === "bind" ? "/srv/data" : "data"} />
+            {kind !== "file" && (
+              <Field label={kind === "bind" ? t("Host directory") : t("Volume name")} error={kind === "bind" ? fields.source : fields.name}>
+                <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === "bind" ? "/srv/data" : "data"} />
+              </Field>
+            )}
+            <Field label={kind === "file" ? t("File path in the container") : t("Path in the container")} error={fields.target}>
+              <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={kind === "file" ? "/etc/app/config.ini" : "/var/lib/app"} />
             </Field>
-            <Field label={t("Path in the container")} error={fields.target}>
-              <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="/var/lib/app" />
-            </Field>
-            <label className="rdp2-row">
-              <Checkbox checked={readOnly} onChange={(e) => setReadOnly(e.currentTarget.checked)} /> {t("Read-only")}
-            </label>
+            {kind === "file" && (
+              <Field label={t("Content")} help={t("A config file (read-only in the container; not for secrets)")} error={fields.content}>
+                <Textarea className="rdp2-env" rows={8} value={content} onChange={(e) => setContent(e.target.value)} />
+              </Field>
+            )}
+            {kind !== "file" && (
+              <label className="rdp2-row">
+                <Checkbox checked={readOnly} onChange={(e) => setReadOnly(e.currentTarget.checked)} /> {t("Read-only")}
+              </label>
+            )}
             {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
             <div className="rdp2-row rdp2-end">
               <Button type="button" variant="ghost" onClick={() => setAdding(false)}>
                 {t("Cancel")}
               </Button>
-              <Button type="submit" disabled={!name.trim() || !target.trim()}>
+              <Button type="submit" disabled={(kind !== "file" && !name.trim()) || !target.trim()}>
                 {t("Add")}
               </Button>
             </div>

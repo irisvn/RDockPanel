@@ -58,6 +58,7 @@ export type ServiceDetail = {
   project: { id: number; name: string };
   swarm_name: string;
   internal_host: string;
+  auto_domain: string | null;
   pending: boolean;
   zero_downtime_possible: boolean;
   env_names: string[];

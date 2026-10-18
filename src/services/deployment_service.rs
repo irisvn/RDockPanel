@@ -23,20 +23,21 @@ use sea_orm::{
 };
 use serde_json::json;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rustcms::crypto::{Encrypted, Keyring, Unreadable};
 
 use crate::models::{deployment, project, service, service_domain, service_mount, service_port};
 use crate::services::deploy_rules_service::{bind_source, config};
 use crate::services::deploy_service::{
-    DeployOptions, PinnedImage, Snapshot, TEMPLATE_LABEL, desired, network_name, pin_image,
-    pulled_digest,
+    ConfigRef, DeployOptions, PinnedImage, Runtime, Snapshot, TEMPLATE_LABEL, desired,
+    network_name, pin_image, pulled_digest,
 };
 use crate::services::docker_service::{
     Docker, DockerError, MANAGED_LABEL, NetworkRequest, RegistryAuth, SwarmService, SwarmTask,
     TaskState,
 };
+use crate::services::placeholders;
 use crate::services::traefik_service::{self, Traefik};
 
 /// How long a deployment holds its service without renewing: a run renews it
@@ -189,9 +190,14 @@ pub async fn has_pending_changes<C: ConnectionTrait>(
     else {
         return Ok(true);
     };
-    let Ok(then) = serde_json::from_value::<Snapshot>(deployed.spec) else {
+    // A snapshot from before `primary_domain` was recorded: as today's.
+    let legacy = deployed.spec.get("primary_domain").is_none();
+    let Ok(mut then) = serde_json::from_value::<Snapshot>(deployed.spec) else {
         return Ok(true);
     };
+    if legacy {
+        then.primary_domain = current.primary_domain.clone();
+    }
     let env_then = match &deployed.env {
         Some(sealed) => match sealed.open(keyring, &deployment::env_context()) {
             Ok(env) => env,
@@ -580,6 +586,8 @@ pub fn deploy_options(force_update: u64) -> DeployOptions {
 /// What a run applies besides its snapshot, opened: never logged.
 struct Secrets {
     env: BTreeMap<String, String>,
+    /// Keys the digest of the environment as resolved (the task template's).
+    digest_key: [u8; 32],
     /// The service's registry credentials now (server, user, password),
     /// for the registry of its image now.
     registry: Option<(String, String, String)>,
@@ -593,9 +601,11 @@ impl Secrets {
         service: &service::Model,
         keyring: &Keyring,
     ) -> Result<Self, Outcome> {
+        let digest_key = env_digest_key(keyring);
         if Trigger::parse(&row.trigger) == Some(Trigger::Destroy) {
             return Ok(Self {
                 env: BTreeMap::new(),
+                digest_key,
                 registry: None,
             });
         }
@@ -628,7 +638,11 @@ impl Secrets {
             }
             _ => None,
         };
-        Ok(Self { env, registry })
+        Ok(Self {
+            env,
+            digest_key,
+            registry,
+        })
     }
 
     /// Credentials for `snapshot`'s image: the service's, only when they are
@@ -652,6 +666,110 @@ impl Secrets {
         (wanted != *server).then(|| {
             format!("the registry credentials are for {server}, not {wanted}: pulling without them")
         })
+    }
+}
+
+/// The label of a service's Swarm configs: `<project>_<service>`.
+const CONFIG_OF_LABEL: &str = "rdockpanel.config-of";
+
+/// The Swarm configs of `snapshot`'s file mounts, created when missing (a
+/// config never changes: a new content is a new config), by path.
+async fn file_configs(
+    docker: &Docker,
+    snapshot: &Snapshot,
+    log: &mut RunLog<'_>,
+) -> Result<BTreeMap<String, ConfigRef>, Outcome> {
+    let mut out = BTreeMap::new();
+    let files: Vec<_> = snapshot
+        .mounts
+        .iter()
+        .filter(|m| m.kind == "file")
+        .collect();
+    if files.is_empty() {
+        return Ok(out);
+    }
+    let api = docker.engine();
+    let owner = snapshot.service_name();
+    let fail = |err: DockerError| Outcome::Failed(format!("file mounts: {err}"));
+    let mut existing = api
+        .list_configs(CONFIG_OF_LABEL, &owner)
+        .await
+        .map_err(fail)?;
+    for file in files {
+        let (Some(name), Some(content)) = (file.config_name(snapshot), file.content.as_deref())
+        else {
+            continue;
+        };
+        let id = match existing.iter().find(|(_, n)| *n == name) {
+            Some((id, _)) => id.clone(),
+            None => {
+                log.hold().await?;
+                let labels = HashMap::from([
+                    (MANAGED_LABEL.to_owned(), "true".to_owned()),
+                    ("rdockpanel.project".to_owned(), snapshot.project.clone()),
+                    ("rdockpanel.service".to_owned(), snapshot.service.clone()),
+                    (CONFIG_OF_LABEL.to_owned(), owner.clone()),
+                ]);
+                match api.create_config(&name, content.as_bytes(), labels).await {
+                    Ok(id) => {
+                        log.line(format!("file {} ({name})", file.target)).await;
+                        id
+                    }
+                    // Made meanwhile (a run before this one): use it.
+                    Err(DockerError::Conflict(_)) => {
+                        existing = api
+                            .list_configs(CONFIG_OF_LABEL, &owner)
+                            .await
+                            .map_err(fail)?;
+                        existing
+                            .iter()
+                            .find(|(_, n)| *n == name)
+                            .map(|(id, _)| id.clone())
+                            .ok_or_else(|| {
+                                Outcome::Failed(format!("file mounts: {name} vanished"))
+                            })?
+                    }
+                    Err(err) => return Err(fail(err)),
+                }
+            }
+        };
+        out.insert(file.target.clone(), ConfigRef { id, name });
+    }
+    Ok(out)
+}
+
+/// Removes the service's configs it no longer uses (best effort: one still
+/// in use, by tasks shutting down, stays for the next run), each only while
+/// the lock is still this run's.
+async fn prune_configs(
+    docker: &Docker,
+    owner: &str,
+    used: &BTreeMap<String, ConfigRef>,
+    log: &mut RunLog<'_>,
+) -> Result<(), Outcome> {
+    let api = docker.engine();
+    let Ok(configs) = api.list_configs(CONFIG_OF_LABEL, owner).await else {
+        return Ok(());
+    };
+    for (id, _) in configs {
+        if !used.values().any(|c| c.id == id) {
+            log.hold().await?;
+            let _ = api.delete_config(&id).await;
+        }
+    }
+    Ok(())
+}
+
+/// What placeholders stand for in `snapshot`'s environment.
+pub fn placeholder_vars(snapshot: &Snapshot) -> placeholders::Vars {
+    let cfg = config();
+    let set = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_owned());
+    placeholders::Vars {
+        project: snapshot.project.clone(),
+        service: snapshot.service.clone(),
+        primary_domain: snapshot.primary_domain.clone(),
+        host: set(&cfg.service_domain),
+        host_ip: set(&cfg.public_ip),
     }
 }
 
@@ -702,6 +820,8 @@ async fn apply(
         } else {
             log.line(format!("{name} is not on Docker")).await;
         }
+        // Its files too (also those of a run that never made the service).
+        prune_configs(docker, &name, &BTreeMap::new(), log).await?;
         return Ok((Outcome::Succeeded, None));
     }
     if existing.is_none() && !snapshot.running {
@@ -777,12 +897,27 @@ async fn apply(
     }
     let options =
         deploy_options(force_update_of(existing.as_ref()) + u64::from(trigger == Trigger::Restart));
-    let out = desired(&snapshot, &image, &secrets.env, &options);
+    // Placeholders (`$(PROJECT_NAME)`, …) in the environment, as of now.
+    let vars = placeholder_vars(&snapshot);
+    let env: BTreeMap<String, String> = secrets
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), placeholders::expand(v, &vars)))
+        .collect();
+    let configs = file_configs(docker, &snapshot, log).await?;
+    let env_digest = crate::services::deploy_service::env_digest(&env, &secrets.digest_key);
+    let runtime = Runtime {
+        env,
+        env_digest,
+        configs,
+    };
+    let out = desired(&snapshot, &image, &runtime, &options);
     let sent = Utc::now();
     match existing {
         None => {
             log.line(format!("creating {name} ({})", image.reference()))
                 .await;
+            log.hold().await?;
             api.create_service(out.spec.clone(), auth.clone())
                 .await
                 .map_err(fail)?;
@@ -807,6 +942,9 @@ async fn apply(
         0
     };
     let outcome = converge(api, &name, replicas, &out.template, sent, log, timings).await;
+    if outcome == Outcome::Succeeded {
+        prune_configs(docker, &name, &runtime.configs, log).await?;
+    }
     Ok((outcome, Some(image.reference().to_owned())))
 }
 

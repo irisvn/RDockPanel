@@ -106,6 +106,25 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
 Snapshot tests (`src/services/snapshots/`, insta) pin the generated spec and routes; a Swarm test runs a
 generated spec on a real engine.
 
+### Placeholders, generated domains, files
+
+- **Placeholders** (`services/placeholders.rs`), as EasyPanel's templates write them, are replaced
+  in the environment at each deployment: `$(PROJECT_NAME)`, `$(SERVICE_NAME)`, `$(PRIMARY_DOMAIN)`
+  (the first domain added, else the generated one), `$(EASYPANEL_DOMAIN)` (the generated domain),
+  `$(EASYPANEL_HOST)` (`[panel] service_domain`) and `$(EASYPANEL_HOST_IP)` (`[panel] public_ip`).
+  An unknown or unset one is left as written.
+- **Generated domains**: `<project>-<service>.<[panel] service_domain>` (a wildcard DNS record to
+  the server; development: `localhost`), with a short hash of both names when the project's name has
+  a dash or the label would pass 63 characters (never the same for two services). The Domains tab
+  offers it; it is then a domain like any. The task template's hash counts the environment as
+  resolved (keyed digest), so a placeholder resolving differently replaces the tasks; a change of
+  `[panel] service_domain` or `public_ip` alone is not shown as pending.
+- **File mounts** (`kind = file`, with their content) become Swarm configs named
+  `rdp_<hash of project, service, path, content>`, labelled `rdockpanel.config-of=<project>_<service>`
+  and mounted read-only. A new content is a new config; a successful deployment removes the
+  service's configs it no longer uses, Destroy all of them. Their content is kept with each
+  deployment's configuration: not for secrets.
+
 ### Secrets
 
 A service's environment variables (`services.env`) and registry password

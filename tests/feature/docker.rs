@@ -661,21 +661,33 @@ async fn desired_specs_run_on_a_real_swarm() {
         mem_reservation_mb: None,
         zero_downtime: true,
         healthcheck: Some(Healthcheck {
-            command: "test -f /data/ready".to_owned(),
+            // Healthy once its volume and its file (a Swarm config) are there.
+            command: "test -f /data/ready && grep -q hi /etc/app/greeting.txt".to_owned(),
             interval_s: 1,
             retries: 3,
         }),
         domains: vec![],
         ports: vec![],
-        mounts: vec![Mount {
-            target: "/data".to_owned(),
-            kind: "volume".to_owned(),
-            source: "data".to_owned(),
-            read_only: false,
-        }],
+        mounts: vec![
+            Mount {
+                target: "/data".to_owned(),
+                kind: "volume".to_owned(),
+                source: "data".to_owned(),
+                read_only: false,
+                content: None,
+            },
+            Mount {
+                target: "/etc/app/greeting.txt".to_owned(),
+                kind: "file".to_owned(),
+                source: String::new(),
+                read_only: true,
+                content: Some("hi from a config\n".to_owned()),
+            },
+        ],
         env_names: vec![],
         env_digest: None,
         registry_username: None,
+        primary_domain: None,
     };
     // An environment, as a deployment opens it.
     let env = std::collections::BTreeMap::from([("GREETING".to_owned(), "hello".to_owned())]);
@@ -702,7 +714,26 @@ async fn desired_specs_run_on_a_real_swarm() {
         &api.inspect_image("alpine:3.20").await.unwrap(),
     );
     assert!(image.digest().is_some(), "{image:?}");
-    let out = desired(&snapshot, &image, &env, &DeployOptions::default());
+    // The file's config, as a deployment makes it.
+    let file = &snapshot.mounts[1];
+    let config_name = file.config_name(&snapshot).unwrap();
+    let config_id = api
+        .create_config(&config_name, b"hi from a config\n", Default::default())
+        .await
+        .unwrap();
+    let runtime = rdockpanel::services::deploy_service::Runtime {
+        env: env.clone(),
+        env_digest: None,
+        configs: [(
+            file.target.clone(),
+            rdockpanel::services::deploy_service::ConfigRef {
+                id: config_id.clone(),
+                name: config_name,
+            },
+        )]
+        .into(),
+    };
+    let out = desired(&snapshot, &image, &runtime, &DeployOptions::default());
 
     let checks = std::panic::AssertUnwindSafe(async {
         api.create_service(out.spec.clone(), None).await.unwrap();
@@ -751,6 +782,12 @@ async fn desired_specs_run_on_a_real_swarm() {
     });
     let outcome = futures_util::FutureExt::catch_unwind(checks).await;
     let _ = api.delete_service(&name).await;
+    for _ in 0..30 {
+        if api.delete_config(&config_id).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
     for _ in 0..30 {
         let volume_gone = api
             .remove_volume(&volume_name(&project, "app", "data"))

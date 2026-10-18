@@ -18,7 +18,9 @@ deployments (Deploy, Start, Stop, Restart, Destroy, Rollback) run as jobs with a
 convergence checks, automatic rollback and a live log; domains routed through Traefik (route files,
 Republish, rewritten at boot, Traefik on each project's network), checked end to end: zero-downtime
 image changes, HTTPS, isolated projects; environment variables and private registry credentials,
-encrypted (RustCMS W8), kept with each deployment for rollback.
+encrypted (RustCMS W8), kept with each deployment for rollback; the EasyPanel-like interface
+(dashboard, service pages and tabs, React); environment placeholders, generated domains, file
+mounts.
 
 Next: the installer, then
 service logs and terminal, a projects overview, certificate status, and drift checks (RustCMS W4).

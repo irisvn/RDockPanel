@@ -27,3 +27,11 @@ traefik_dir = "storage/traefik/dynamic"
 # Traefik's Swarm service: attached to each project's network so it reaches
 # the services there (scripts/dev-swarm.sh and the installer name it so).
 traefik_service = "rdp-traefik"
+
+# The domain generated service domains live under: `<project>-<service>.<this>`
+# (point a wildcard DNS record `*.<this>` to the server). Empty: none
+# generated. Development: "localhost" (set in .env), so http://shop-web.localhost:8080.
+service_domain = ""
+
+# The server's public IP address, for `$(EASYPANEL_HOST_IP)` in environments.
+public_ip = ""

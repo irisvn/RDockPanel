@@ -69,6 +69,9 @@ pub struct Snapshot {
     /// The private registry's user (its password is sealed apart).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry_username: Option<String>,
+    /// The host of its primary domain (the first added): `$(PRIMARY_DOMAIN)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_domain: Option<String>,
 }
 
 /// The environment's digest, keyed (`key`: derived from `APP_KEY`): HMAC-SHA256
@@ -126,11 +129,48 @@ pub struct Port {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Mount {
     pub target: String,
-    /// `volume` or `bind`.
+    /// `volume`, `bind` or `file`.
     pub kind: String,
-    /// The volume's name, or the host directory.
+    /// The volume's name, or the host directory (empty for a file).
     pub source: String,
     pub read_only: bool,
+    /// A file's content (a Swarm config).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+}
+
+impl Mount {
+    /// A file's Swarm config: `rdp_<hash>` of what makes it (project,
+    /// service, path, content), so a new content is a new config.
+    pub fn config_name(&self, snapshot: &Snapshot) -> Option<String> {
+        let content = self.content.as_deref()?;
+        let id = sha256_hex(
+            format!(
+                "{}\0{}\0{}\0{content}",
+                snapshot.project, snapshot.service, self.target
+            )
+            .as_bytes(),
+        );
+        Some(format!("rdp_{}", &id[..32]))
+    }
+}
+
+/// What a deployment resolved for its run: the environment (opened,
+/// placeholders expanded) and the Swarm configs of its file mounts (by path).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Runtime {
+    pub env: BTreeMap<String, String>,
+    /// The keyed digest of `env` as resolved: what the task template's hash
+    /// counts (a placeholder resolving differently restarts the tasks).
+    pub env_digest: Option<String>,
+    pub configs: BTreeMap<String, ConfigRef>,
+}
+
+/// A Swarm config a file mount uses: its id and name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRef {
+    pub id: String,
+    pub name: String,
 }
 
 fn positive(value: Option<i32>) -> Option<u32> {
@@ -156,6 +196,8 @@ impl Snapshot {
                 interval_s: positive(service.healthcheck_interval_s).unwrap_or(10),
                 retries: positive(service.healthcheck_retries).unwrap_or(3),
             });
+        // The first added (lowest id) is the primary one.
+        let primary_domain = domains.iter().min_by_key(|d| d.id).map(|d| d.host.clone());
         let mut domains: Vec<Domain> = domains
             .iter()
             .filter_map(|d| {
@@ -183,16 +225,17 @@ impl Snapshot {
         let mut mounts: Vec<Mount> = mounts
             .iter()
             .filter_map(|m| {
-                let source = if m.kind == "bind" {
-                    m.source.clone()?
-                } else {
-                    m.name.clone()?
+                let source = match m.kind.as_str() {
+                    "bind" => m.source.clone()?,
+                    "file" => String::new(),
+                    _ => m.name.clone()?,
                 };
                 Some(Mount {
                     target: m.target.clone(),
                     kind: m.kind.clone(),
                     source,
                     read_only: m.read_only,
+                    content: (m.kind == "file").then(|| m.content.clone()).flatten(),
                 })
             })
             .collect();
@@ -221,6 +264,7 @@ impl Snapshot {
             // Set from the sealed environment ([`Snapshot::with_env`]).
             env_names: vec![],
             env_digest: None,
+            primary_domain,
             registry_username: service
                 .registry_username
                 .as_deref()
@@ -416,9 +460,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 pub fn desired(
     snapshot: &Snapshot,
     image: &PinnedImage,
-    env: &BTreeMap<String, String>,
+    runtime: &Runtime,
     options: &DeployOptions,
 ) -> Desired {
+    let env = &runtime.env;
     let hash = snapshot.hash();
     let name = snapshot.service_name();
     let labels: BTreeMap<&str, &str> = BTreeMap::from([
@@ -438,9 +483,31 @@ pub fn desired(
     let mut container = json!({
         "Image": image.reference(),
         "Labels": owner,
-        "Mounts": snapshot.mounts.iter().map(|m| mount(snapshot, m)).collect::<Vec<_>>(),
+        "Mounts": snapshot
+            .mounts
+            .iter()
+            .filter(|m| m.kind != "file")
+            .map(|m| mount(snapshot, m))
+            .collect::<Vec<_>>(),
         "Init": true,
     });
+    // Files: their configs, read-only for everyone in the container.
+    let configs: Vec<Value> = snapshot
+        .mounts
+        .iter()
+        .filter(|m| m.kind == "file")
+        .filter_map(|m| {
+            let config = runtime.configs.get(&m.target)?;
+            Some(json!({
+                "File": {"Name": m.target, "UID": "0", "GID": "0", "Mode": 0o444},
+                "ConfigID": config.id,
+                "ConfigName": config.name,
+            }))
+        })
+        .collect();
+    if !configs.is_empty() {
+        container["Configs"] = json!(configs);
+    }
     if let Some(args) = snapshot.command.as_deref().and_then(command_args) {
         container["Args"] = json!(args);
     }
@@ -478,7 +545,7 @@ pub fn desired(
     // The environment counts by its keyed digest: the label never tells
     // anything of its values.
     let mut hashed = template.clone();
-    if let Some(digest) = &snapshot.env_digest {
+    if let Some(digest) = runtime.env_digest.as_ref().or(snapshot.env_digest.as_ref()) {
         hashed["ContainerSpec"]["Env"] = json!(digest);
     }
     let template_hash = sha256_hex(&serde_json::to_vec(&hashed).expect("a template serializes"));
@@ -746,10 +813,12 @@ mod tests {
                 kind: "volume".to_owned(),
                 source: "html".to_owned(),
                 read_only: true,
+                content: None,
             }],
             env_names: vec![],
             env_digest: None,
             registry_username: None,
+            primary_domain: None,
         }
     }
 
@@ -767,7 +836,7 @@ mod tests {
 
     #[test]
     fn a_web_service_with_domains() {
-        let out = desired(&snapshot(), &pinned(), &BTreeMap::new(), &production());
+        let out = desired(&snapshot(), &pinned(), &Runtime::default(), &production());
         insta::assert_snapshot!("web_service_spec", canonical(&out.spec));
         insta::assert_snapshot!("web_service_routes", out.routes.unwrap().to_yaml());
     }
@@ -776,7 +845,7 @@ mod tests {
     fn a_stopped_service_has_no_tasks_and_no_routes() {
         let mut stopped = snapshot();
         stopped.running = false;
-        let out = desired(&stopped, &pinned(), &BTreeMap::new(), &production());
+        let out = desired(&stopped, &pinned(), &Runtime::default(), &production());
         assert_eq!(out.spec.mode.unwrap().replicated.unwrap().replicas, Some(0));
         assert!(out.routes.is_none());
     }
@@ -802,6 +871,7 @@ mod tests {
                 kind: "bind".to_owned(),
                 source: "/srv/shop/data".to_owned(),
                 read_only: false,
+                content: None,
             }],
             cpu_limit_millis: None,
             mem_limit_mb: None,
@@ -812,7 +882,7 @@ mod tests {
         let out = desired(
             &worker,
             &PinnedImage::Local("sha256:local".to_owned()),
-            &BTreeMap::new(),
+            &Runtime::default(),
             &DeployOptions::default(),
         );
         // Zero downtime asked, but without a health check (and with a host port) it stops first.
@@ -827,7 +897,7 @@ mod tests {
             https_port: 8443,
             ..DeployOptions::default()
         };
-        let yaml = desired(&snapshot(), &pinned(), &BTreeMap::new(), &dev)
+        let yaml = desired(&snapshot(), &pinned(), &Runtime::default(), &dev)
             .routes
             .unwrap()
             .to_yaml();
@@ -840,11 +910,11 @@ mod tests {
 
     #[test]
     fn routing_and_scaling_changes_keep_the_task_template() {
-        let base = desired(&snapshot(), &pinned(), &BTreeMap::new(), &production());
+        let base = desired(&snapshot(), &pinned(), &Runtime::default(), &production());
         let mut changed = snapshot();
         changed.replicas = 5;
         changed.domains.pop();
-        let after = desired(&changed, &pinned(), &BTreeMap::new(), &production());
+        let after = desired(&changed, &pinned(), &Runtime::default(), &production());
         assert_ne!(after.hash, base.hash);
         assert_eq!(after.spec.task_template, base.spec.task_template);
     }
@@ -855,7 +925,15 @@ mod tests {
         let with_env = snapshot().with_env(&env, b"a key");
         assert_eq!(with_env.env_names, ["DB_PASSWORD"]);
         assert!(!serde_json::to_string(&with_env).unwrap().contains("s3cret"));
-        let out = desired(&with_env, &pinned(), &env, &production());
+        let out = desired(
+            &with_env,
+            &pinned(),
+            &Runtime {
+                env: env.clone(),
+                ..Runtime::default()
+            },
+            &production(),
+        );
         let container = out
             .spec
             .task_template
@@ -871,7 +949,16 @@ mod tests {
         let changed = snapshot().with_env(&other, b"a key");
         assert_ne!(changed.hash(), with_env.hash());
         assert_ne!(
-            desired(&changed, &pinned(), &other, &production()).template,
+            desired(
+                &changed,
+                &pinned(),
+                &Runtime {
+                    env: other.clone(),
+                    ..Runtime::default()
+                },
+                &production()
+            )
+            .template,
             out.template
         );
         // Keyed: another key, another digest.
@@ -884,8 +971,9 @@ mod tests {
     #[test]
     fn the_template_follows_what_tasks_run() {
         let options = DeployOptions::default();
-        let template =
-            |s: &Snapshot, o: &DeployOptions| desired(s, &pinned(), &BTreeMap::new(), o).template;
+        let template = |s: &Snapshot, o: &DeployOptions| {
+            desired(s, &pinned(), &Runtime::default(), o).template
+        };
         let base = template(&snapshot(), &options);
         // More replicas, another domain: the same tasks.
         let mut scaled = snapshot();
@@ -902,7 +990,7 @@ mod tests {
         command.command = Some("nginx -g 'daemon off;'".to_owned());
         assert_ne!(template(&command, &options), base);
         // Carried by the containers.
-        let out = desired(&snapshot(), &pinned(), &BTreeMap::new(), &options);
+        let out = desired(&snapshot(), &pinned(), &Runtime::default(), &options);
         let labels = out
             .spec
             .task_template
@@ -933,7 +1021,7 @@ mod tests {
         let a = desired(
             &base,
             &pinned(),
-            &BTreeMap::new(),
+            &Runtime::default(),
             &DeployOptions {
                 force_update: 1,
                 ..production()

@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::models::{deployment, project, service, service_domain, service_mount, service_port};
 use crate::services::deployment_service::{
-    has_pending_changes, service_env, snapshot_without_env, summary,
+    has_pending_changes, placeholder_vars, service_env, snapshot_without_env, summary,
 };
 use crate::services::dotenv;
 
@@ -207,6 +207,8 @@ pub async fn service(
         "project": { "id": project.id, "name": project.name },
         "swarm_name": snapshot.service_name(),
         "internal_host": snapshot.service_name(),
+        // `<project>-<service>.<[panel] service_domain>`, when set.
+        "auto_domain": placeholder_vars(&snapshot).auto_domain(),
         "pending": has_pending_changes(db, &row, app.keyring()).await?,
         "zero_downtime_possible": snapshot.zero_downtime_possible(),
         "env_names": env_names,

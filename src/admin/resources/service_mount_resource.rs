@@ -51,18 +51,25 @@ impl Resource for ServiceMountResource {
                 .sortable()
                 .max_length(512),
             Field::column(service_mount::Column::ReadOnly),
+            Field::column(service_mount::Column::Content).max_length(MAX_FILE),
         ]
     }
 
     fn form() -> Form {
         Form::new().columns(2).schema(components![
             SelectInput::make("service_id"),
-            SelectInput::make("kind")
-                .options([("volume", "Volume"), ("bind", "Host directory (bind)")]),
+            SelectInput::make("kind").options([
+                ("volume", "Volume"),
+                ("bind", "Host directory (bind)"),
+                ("file", "File"),
+            ]),
             TextInput::make("name").help("Volume: its name, e.g. data"),
             TextInput::make("source").help("Bind: a host directory under an allowed root"),
             TextInput::make("target").help("Path inside the container, e.g. /var/lib/app"),
             Toggle::make("read_only"),
+            Textarea::make("content")
+                .column_span(2)
+                .help("File: its content (a config file; not for secrets)"),
         ])
     }
 
@@ -96,6 +103,10 @@ impl Resource for ServiceMountResource {
     }
 }
 
+/// The largest file content, in bytes: what a MySQL `TEXT` holds (a Swarm
+/// config takes more; such files are small).
+const MAX_FILE: usize = 65_535;
+
 /// Checks the mount as it will be after this write; a bind's source is
 /// stored resolved.
 fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> AppResult<Data> {
@@ -111,6 +122,7 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
     let source =
         after("source", record.and_then(|r| r.source.as_deref())).filter(|s| !s.is_empty());
     let target = after("target", record.map(|r| r.target.as_str()));
+    let content = after("content", record.and_then(|r| r.content.as_deref()));
     let mut errors = ValidationErrors::new();
     match kind.as_str() {
         "volume" => {
@@ -148,7 +160,22 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
                 }
             }
         }
-        _ => errors.add("kind", ctx.t("must be volume or bind")),
+        "file" => {
+            if name.is_some() {
+                errors.add("name", ctx.t("is only for volumes"));
+            }
+            if source.is_some() {
+                errors.add("source", ctx.t("is only for host directories"));
+            }
+            match content.as_deref() {
+                None => errors.add("content", ctx.t("is required")),
+                Some(c) if c.len() > MAX_FILE => {
+                    errors.add("content", ctx.t("is at most 64 KB"));
+                }
+                Some(_) => {}
+            }
+        }
+        _ => errors.add("kind", ctx.t("must be volume, bind or file")),
     }
     if !target.as_deref().is_some_and(valid_container_path) {
         errors.add("target", ctx.t("must be an absolute path other than /"));

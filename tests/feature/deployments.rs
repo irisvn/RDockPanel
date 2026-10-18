@@ -904,6 +904,89 @@ db_test!(
 );
 
 db_test!(
+    placeholders_and_files_reach_the_containers,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        let env = app.admin_api(&format!("x/apps/services/{id}/env"));
+        admin
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &env,
+                Some(&json!({"text": "URL=https://$(PRIMARY_DOMAIN)\nDB=$(PROJECT_NAME)_db\nKEEP=$(UNKNOWN)"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        create(&app, &admin, "service_mounts", json!({"service_id": id.to_string(), "kind": "file", "target": "/etc/app.ini", "content": "a=1\n"})).await;
+        let deployed = run(&app, &admin, "deploy", id).await;
+        assert_eq!(deployed.status, "succeeded", "{:?}", deployed.error);
+        let container = |fake: &FakeDocker| {
+            fake.services.lock().unwrap()["shop_web"]
+                .spec
+                .clone()
+                .unwrap()
+                .task_template
+                .unwrap()
+                .container_spec
+                .unwrap()
+        };
+        let spec = container(&fake);
+        let env = spec.env.clone().unwrap();
+        assert!(
+            env.contains(&"URL=https://shop.localhost".to_owned()),
+            "{env:?}"
+        );
+        assert!(env.contains(&"DB=shop_db".to_owned()), "{env:?}");
+        assert!(env.contains(&"KEEP=$(UNKNOWN)".to_owned()), "{env:?}");
+        // The file: a config, mounted read-only at its path.
+        let configs = spec.configs.clone().unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(
+            configs[0].file.as_ref().unwrap().name.as_deref(),
+            Some("/etc/app.ini")
+        );
+        let first = configs[0].config_name.clone().unwrap();
+        assert_eq!(fake.configs.lock().unwrap()[&first].1, b"a=1\n");
+
+        // A new content: a new config; the old one is removed once unused.
+        let mount = service_mount_id(&app, id).await;
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{}/{mount}", records(&app, "service_mounts")),
+                Some(&json!({"content": "a=2\n"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let second = container(&fake).configs.unwrap()[0]
+            .config_name
+            .clone()
+            .unwrap();
+        assert_ne!(first, second);
+        {
+            let configs = fake.configs.lock().unwrap();
+            assert!(configs.contains_key(&second) && !configs.contains_key(&first));
+        }
+        // Destroyed: its configs go too.
+        assert_eq!(run(&app, &admin, "destroy", id).await.status, "succeeded");
+        assert!(fake.configs.lock().unwrap().is_empty());
+    }
+);
+
+async fn service_mount_id(app: &TestApp, service: i64) -> i64 {
+    rdockpanel::models::service_mount::Entity::find()
+        .filter(rdockpanel::models::service_mount::Column::ServiceId.eq(service))
+        .one(app.state().db())
+        .await
+        .unwrap()
+        .unwrap()
+        .id
+}
+
+db_test!(
     domains_need_traefik_on_the_network,
     migrate = Migrator,
     |db: TestDb| async move {

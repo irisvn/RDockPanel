@@ -16,6 +16,9 @@ use rdockpanel::services::docker_service::{
 use rustcms::async_trait;
 use serde_json::{Value, json};
 
+/// A config: its id, content and labels.
+pub type FakeConfig = (String, Vec<u8>, HashMap<String, String>);
+
 #[derive(Clone, Default)]
 pub struct FakeDocker {
     pub containers: Arc<Mutex<Vec<ContainerItem>>>,
@@ -24,6 +27,8 @@ pub struct FakeDocker {
     pub images: Arc<Mutex<Vec<ImageItem>>>,
     /// Swarm services by name.
     pub services: Arc<Mutex<HashMap<String, SwarmService>>>,
+    /// Swarm configs: name → (id, content, labels).
+    pub configs: Arc<Mutex<HashMap<String, FakeConfig>>>,
     /// The state every task reports (default: running).
     pub task_state: Arc<Mutex<Option<TaskState>>>,
     /// The update status an update leaves (default: none, like a create).
@@ -369,6 +374,51 @@ impl DockerApi for FakeDocker {
             service.update_status = None;
         }
         Ok(vec![])
+    }
+    async fn create_config(
+        &self,
+        name: &str,
+        data: &[u8],
+        labels: HashMap<String, String>,
+    ) -> DockerResult<String> {
+        let mut configs = self.configs.lock().unwrap();
+        if configs.contains_key(name) {
+            return Err(DockerError::Conflict(format!("config {name} exists")));
+        }
+        let id = format!("cfg-{name}");
+        configs.insert(name.to_owned(), (id.clone(), data.to_vec(), labels));
+        self.record(format!("create config {name}"));
+        Ok(id)
+    }
+    async fn list_configs(&self, key: &str, value: &str) -> DockerResult<Vec<(String, String)>> {
+        Ok(self
+            .configs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, (_, _, labels))| labels.get(key).map(String::as_str) == Some(value))
+            .map(|(name, (id, _, _))| (id.clone(), name.clone()))
+            .collect())
+    }
+    async fn delete_config(&self, id: &str) -> DockerResult<()> {
+        // In use by a service: refused, as Swarm does.
+        let used = self.services.lock().unwrap().values().any(|s| {
+            s.spec
+                .as_ref()
+                .and_then(|s| s.task_template.as_ref())
+                .and_then(|t| t.container_spec.as_ref())
+                .and_then(|c| c.configs.as_ref())
+                .is_some_and(|c| c.iter().any(|c| c.config_id.as_deref() == Some(id)))
+        });
+        if used {
+            return Err(DockerError::Conflict(format!("config {id} is in use")));
+        }
+        self.configs
+            .lock()
+            .unwrap()
+            .retain(|_, (cid, _, _)| cid != id);
+        self.record(format!("delete config {id}"));
+        Ok(())
     }
     async fn delete_service(&self, name: &str) -> DockerResult<()> {
         self.services

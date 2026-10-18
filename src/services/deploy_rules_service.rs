@@ -29,6 +29,11 @@ pub struct PanelConfig {
     /// Traefik's Swarm service, attached to each project's network (empty:
     /// Traefik is not a Swarm service the panel manages).
     pub traefik_service: String,
+    /// The domain generated ones live under (`<project>-<service>.<this>`,
+    /// a wildcard DNS record to the server); empty: none generated.
+    pub service_domain: String,
+    /// The server's public address (`$(EASYPANEL_HOST_IP)`); empty: unknown.
+    pub public_ip: String,
 }
 
 impl Default for PanelConfig {
@@ -40,6 +45,8 @@ impl Default for PanelConfig {
             https_port: 443,
             traefik_dir: PathBuf::from("storage/traefik/dynamic"),
             traefik_service: "rdp-traefik".to_owned(),
+            service_domain: String::new(),
+            public_ip: String::new(),
         }
     }
 }
