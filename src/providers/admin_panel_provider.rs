@@ -5,7 +5,7 @@ use rustcms::prelude::*;
 
 pub fn provider() -> AdminProvider {
     AdminProvider::new()
-        .brand("rust-panel")
+        .brand("RDockPanel")
         // Labels in Vietnamese (`rustcms lang:missing vi` lists what is missing).
         .translations("vi", include_str!("../../lang/vi.toml"))
         // rustcms:resources
@@ -15,34 +15,34 @@ pub fn provider() -> AdminProvider {
         .page::<crate::admin::pages::volumes_page::VolumesPage>()
         .page::<crate::admin::pages::networks_page::NetworksPage>()
         // rustcms:pages
-        // Shared helpers first: the page scripts use `window.rustPanel`.
+        // Shared helpers first: the page scripts use `window.rdockPanel`.
         .extension_script(
             "panel",
-            include_str!("../../resources/admin/js/rust-panel/panel.js"),
+            include_str!("../../resources/admin/js/rdockpanel/panel.js"),
         )
         .extension_script(
             "server",
-            include_str!("../../resources/admin/js/rust-panel/server.js"),
+            include_str!("../../resources/admin/js/rdockpanel/server.js"),
         )
         .extension_script(
             "containers",
-            include_str!("../../resources/admin/js/rust-panel/containers.js"),
+            include_str!("../../resources/admin/js/rdockpanel/containers.js"),
         )
         .extension_script(
             "images",
-            include_str!("../../resources/admin/js/rust-panel/images.js"),
+            include_str!("../../resources/admin/js/rdockpanel/images.js"),
         )
         .extension_script(
             "volumes",
-            include_str!("../../resources/admin/js/rust-panel/volumes.js"),
+            include_str!("../../resources/admin/js/rdockpanel/volumes.js"),
         )
         .extension_script(
             "networks",
-            include_str!("../../resources/admin/js/rust-panel/networks.js"),
+            include_str!("../../resources/admin/js/rdockpanel/networks.js"),
         )
         .extension_style(
             "panel",
-            include_str!("../../resources/admin/css/rust-panel/panel.css"),
+            include_str!("../../resources/admin/css/rdockpanel/panel.css"),
         )
     // rustcms:extensions
 }

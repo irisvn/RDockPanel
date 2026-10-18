@@ -1,21 +1,21 @@
 // The `volumes` page: Docker volumes, creating and removing them.
-window.rustcms.registerPage("rust-panel/volumes", {
+window.rustcms.registerPage("rdockpanel/volumes", {
   apiVersion: 1,
   mount(element, ctx) {
-    const { api, h, button, act, table, page } = window.rustPanel;
+    const { api, h, button, act, table, page } = window.rdockPanel;
     const t = ctx.t;
     const can = ctx.data?.can ?? {};
     let alive = true;
 
     const { body, note } = page(element, t, "Volumes", [button(t("Refresh"), () => load())]);
     if (can["docker.manage"]) {
-      const name = h("input", { type: "text", className: "rp-input rp-grow", placeholder: t("New volume name"), required: true });
-      const submit = h("button", { type: "submit", className: "rp-btn rp-btn-primary" }, t("Create"));
+      const name = h("input", { type: "text", className: "rdp-input rdp-grow", placeholder: t("New volume name"), required: true });
+      const submit = h("button", { type: "submit", className: "rdp-btn rdp-btn-primary" }, t("Create"));
       body.append(
         h(
           "form",
           {
-            className: "rp-form",
+            className: "rdp-form",
             onsubmit: async (event) => {
               event.preventDefault();
               if (await act(submit, note, () => api("POST", "/docker/volumes", { name: name.value.trim() }), t("Created."))) {
@@ -38,9 +38,9 @@ window.rustcms.registerPage("rust-panel/volumes", {
         volumes.sort((a, b) => a.name.localeCompare(b.name));
         if (!alive) return;
         const rows = volumes.map((v) => [
-          h("span", { className: "rp-mono" }, v.name),
+          h("span", { className: "rdp-mono" }, v.name),
           v.driver,
-          h("span", { className: "rp-mono rp-muted" }, v.mountpoint),
+          h("span", { className: "rdp-mono rdp-muted" }, v.mountpoint),
           can["docker.manage"]
             ? button(
                 t("Remove"),

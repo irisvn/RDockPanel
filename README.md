@@ -1,4 +1,4 @@
-# rust-panel
+# RDockPanel
 
 A [RustCMS](https://irisvn.github.io/RustCMS/) application. Commit `Cargo.lock`: it pins the RustCMS commit and every dependency.
 

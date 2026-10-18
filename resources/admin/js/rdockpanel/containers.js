@@ -2,22 +2,22 @@
 // buttons, and a panel with its logs, its live stats or its inspect
 // document. The list refreshes every 5 s; logs and stats are server-sent
 // events.
-window.rustcms.registerPage("rust-panel/containers", {
+window.rustcms.registerPage("rdockpanel/containers", {
   apiVersion: 1,
   mount(element, ctx) {
-    const { api, h, bytes, date, badge, button, act, poll, table, page, showState } = window.rustPanel;
+    const { api, h, bytes, date, badge, button, act, poll, table, page, showState } = window.rdockPanel;
     const t = ctx.t;
     const can = ctx.data?.can ?? {};
     let alive = true;
     let containers = [];
     let open = null; // { id, name, tab }
 
-    const search = h("input", { type: "search", className: "rp-input", placeholder: t("Search"), oninput: () => renderList() });
+    const search = h("input", { type: "search", className: "rdp-input", placeholder: t("Search"), oninput: () => renderList() });
     const running = h("input", { type: "checkbox", onchange: () => renderList() });
     const refresh = button(t("Refresh"), () => loadList());
-    const { body, note } = page(element, t, "Containers", [search, h("label", { className: "rp-check" }, running, t("Only running")), refresh]);
+    const { body, note } = page(element, t, "Containers", [search, h("label", { className: "rdp-check" }, running, t("Only running")), refresh]);
     const list = h("div");
-    const detail = h("section", { className: "rp-detail", hidden: true });
+    const detail = h("section", { className: "rdp-detail", hidden: true });
     body.append(list, detail);
 
     const stateKind = (state) => (state === "running" ? "ok" : state === "paused" || state === "restarting" ? "warn" : "muted");
@@ -44,7 +44,7 @@ window.rustcms.registerPage("rust-panel/containers", {
           "danger",
         ),
       );
-      return h("div", { className: "rp-actions" }, buttons);
+      return h("div", { className: "rdp-actions" }, buttons);
     }
 
     function renderList() {
@@ -53,11 +53,11 @@ window.rustcms.registerPage("rust-panel/containers", {
         (c) => (!running.checked || c.state === "running") && (!term || c.name.toLowerCase().includes(term) || c.image.toLowerCase().includes(term)),
       );
       const rows = shown.map((c) => [
-        h("button", { type: "button", className: "rp-link", onclick: () => openDetail(c, can["docker.logs"] ? "logs" : "inspect") }, c.name),
-        h("span", { className: "rp-mono" }, c.image),
+        h("button", { type: "button", className: "rdp-link", onclick: () => openDetail(c, can["docker.logs"] ? "logs" : "inspect") }, c.name),
+        h("span", { className: "rdp-mono" }, c.image),
         badge(c.state, stateKind(c.state)),
         h("span", { title: date(c.created) }, c.status),
-        h("span", { className: "rp-mono" }, c.ports.join(", ")),
+        h("span", { className: "rdp-mono" }, c.ports.join(", ")),
         actions(c),
       ]);
       list.replaceChildren(table([t("Name"), t("Image"), t("State"), t("Status"), t("Ports"), t("Actions")], rows, t("No containers.")));
@@ -91,14 +91,14 @@ window.rustcms.registerPage("rust-panel/containers", {
       tabs.push(["inspect", "Inspect"]);
       const nav = h(
         "div",
-        { className: "rp-tabs", role: "tablist" },
+        { className: "rdp-tabs", role: "tablist" },
         tabs.map(([key, label]) =>
-          h("button", { type: "button", role: "tab", "aria-selected": String(key === tab), className: `rp-tab${key === tab ? " rp-tab-active" : ""}`, onclick: () => openDetail(c, key) }, t(label)),
+          h("button", { type: "button", role: "tab", "aria-selected": String(key === tab), className: `rdp-tab${key === tab ? " rdp-tab-active" : ""}`, onclick: () => openDetail(c, key) }, t(label)),
         ),
       );
-      const content = h("div", { className: "rp-detail-body" });
+      const content = h("div", { className: "rdp-detail-body" });
       detail.replaceChildren(
-        h("header", { className: "rp-detail-header" }, h("h2", { className: "rp-card-title" }, c.name), nav, button(t("Close"), closeDetail)),
+        h("header", { className: "rdp-detail-header" }, h("h2", { className: "rdp-card-title" }, c.name), nav, button(t("Close"), closeDetail)),
         content,
       );
       detail.hidden = false;
@@ -111,18 +111,18 @@ window.rustcms.registerPage("rust-panel/containers", {
     // Logs: the last lines, then new ones as they come while "Follow" is on.
     function showLogs(c, content) {
       const MAX_LINES = 5000;
-      const lines = h("select", { className: "rp-input" }, [100, 500, 2000].map((n) => h("option", { value: n }, String(n))));
+      const lines = h("select", { className: "rdp-input" }, [100, 500, 2000].map((n) => h("option", { value: n }, String(n))));
       lines.value = "500";
       const follow = h("input", { type: "checkbox", checked: true });
-      const output = h("pre", { className: "rp-log", tabindex: "0", "aria-live": "off" });
+      const output = h("pre", { className: "rdp-log", tabindex: "0", "aria-live": "off" });
       content.replaceChildren(
-        h("div", { className: "rp-toolbar" }, h("label", { className: "rp-check" }, t("Lines"), lines), h("label", { className: "rp-check" }, follow, t("Follow"))),
+        h("div", { className: "rdp-toolbar" }, h("label", { className: "rdp-check" }, t("Lines"), lines), h("label", { className: "rdp-check" }, follow, t("Follow"))),
         output,
       );
       const append = (batch) => {
         const stick = output.scrollTop + output.clientHeight >= output.scrollHeight - 8;
-        output.querySelector(".rp-log-empty")?.remove();
-        output.append(...batch.map((l) => h("span", { className: l.stream === "stderr" ? "rp-log-err" : "" }, l.text.endsWith("\n") ? l.text : `${l.text}\n`)));
+        output.querySelector(".rdp-log-empty")?.remove();
+        output.append(...batch.map((l) => h("span", { className: l.stream === "stderr" ? "rdp-log-err" : "" }, l.text.endsWith("\n") ? l.text : `${l.text}\n`)));
         while (output.childNodes.length > MAX_LINES) output.firstChild.remove();
         if (stick) output.scrollTop = output.scrollHeight;
       };
@@ -135,7 +135,7 @@ window.rustcms.registerPage("rust-panel/containers", {
           },
           onState(state) {
             // The server sends the last lines again after each (re)connect.
-            if (state.state === "open") output.replaceChildren(h("span", { className: "rp-muted rp-log-empty" }, t("No output.")));
+            if (state.state === "open") output.replaceChildren(h("span", { className: "rdp-muted rdp-log-empty" }, t("No output.")));
             showState(note, t, state);
           },
         });
@@ -149,14 +149,14 @@ window.rustcms.registerPage("rust-panel/containers", {
     // Stats: CPU, memory, network and disk I/O, live.
     function showStats(c, content) {
       const value = (label) => {
-        const out = h("div", { className: "rp-card-value" }, "–");
-        return [h("section", { className: "rp-card" }, h("h3", { className: "rp-card-title" }, t(label)), out), out];
+        const out = h("div", { className: "rdp-card-value" }, "–");
+        return [h("section", { className: "rdp-card" }, h("h3", { className: "rdp-card-title" }, t(label)), out), out];
       };
       const [cpuCard, cpu] = value("CPU");
       const [memCard, mem] = value("Memory");
       const [netCard, net] = value("Network");
       const [diskCard, disk] = value("Disk");
-      content.replaceChildren(h("div", { className: "rp-cards" }, cpuCard, memCard, netCard, diskCard));
+      content.replaceChildren(h("div", { className: "rdp-cards" }, cpuCard, memCard, netCard, diskCard));
       const stream = ctx.realtime.events(path(c.id, "/stats"), {
         onEvent(name, s) {
           if (name !== "stats") return;
@@ -171,7 +171,7 @@ window.rustcms.registerPage("rust-panel/containers", {
     }
 
     async function showInspect(c, content) {
-      const output = h("pre", { className: "rp-log", tabindex: "0" });
+      const output = h("pre", { className: "rdp-log", tabindex: "0" });
       content.replaceChildren(output);
       try {
         const doc = await api("GET", path(c.id));

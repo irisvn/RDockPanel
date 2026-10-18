@@ -4,9 +4,9 @@
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use rust_panel::bootstrap;
-use rust_panel::database::migrations::Migrator;
-use rust_panel::services::docker_service::Docker;
+use rdockpanel::bootstrap;
+use rdockpanel::database::migrations::Migrator;
+use rdockpanel::services::docker_service::Docker;
 use rustcms::AppState;
 use rustcms::auth::AuthState;
 use rustcms_testing::{TestApp, TestDb, db_test};

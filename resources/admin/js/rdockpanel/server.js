@@ -1,23 +1,23 @@
 // The `server` page: the host's CPU, memory, network and disk over the last
 // minutes, like EasyPanel's dashboard, live from `/server/live` (server-sent
 // events: the history first, then each sample).
-window.rustcms.registerPage("rust-panel/server", {
+window.rustcms.registerPage("rdockpanel/server", {
   apiVersion: 1,
   mount(element, ctx) {
-    const { api, h, bytes, percent, duration, page, showState } = window.rustPanel;
+    const { api, h, bytes, percent, duration, page, showState } = window.rdockPanel;
     const t = ctx.t;
     const { body, note } = page(element, t, "Server");
 
-    const info = h("dl", { className: "rp-facts" });
-    const cards = h("div", { className: "rp-cards" });
+    const info = h("dl", { className: "rdp-facts" });
+    const cards = h("div", { className: "rdp-cards" });
     body.append(info, cards);
 
     // One chart card per metric: a value line and a canvas of the history.
     function card(title, series) {
-      const value = h("div", { className: "rp-card-value" });
-      const detail = h("div", { className: "rp-card-detail rp-muted" });
-      const canvas = h("canvas", { className: "rp-chart", width: 600, height: 160, "aria-hidden": "true" });
-      const element = h("section", { className: "rp-card" }, h("h2", { className: "rp-card-title" }, t(title)), value, detail, canvas);
+      const value = h("div", { className: "rdp-card-value" });
+      const detail = h("div", { className: "rdp-card-detail rdp-muted" });
+      const canvas = h("canvas", { className: "rdp-chart", width: 600, height: 160, "aria-hidden": "true" });
+      const element = h("section", { className: "rdp-card" }, h("h2", { className: "rdp-card-title" }, t(title)), value, detail, canvas);
       cards.append(element);
       return { value, detail, canvas, series };
     }

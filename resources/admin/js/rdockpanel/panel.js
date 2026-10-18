@@ -1,4 +1,4 @@
-// Helpers shared by rust-panel's pages (`window.rustPanel`), loaded before
+// Helpers shared by rdockpanel's pages (`window.rdockPanel`), loaded before
 // them. Pages build elements with `h` (never innerHTML: names, labels and
 // logs come from Docker) and call the panel's admin routes with `api`.
 (() => {
@@ -71,7 +71,7 @@
     return null;
   }
 
-  // h("button", { className: "rp-btn", onclick }, "Text", child, …)
+  // h("button", { className: "rdp-btn", onclick }, "Text", child, …)
   function h(tag, props, ...children) {
     const element = document.createElement(tag);
     for (const [key, value] of Object.entries(props ?? {})) {
@@ -123,12 +123,12 @@
 
   // A line under the page title for errors and confirmations.
   function notice() {
-    const element = h("p", { className: "rp-notice", role: "status", hidden: true });
+    const element = h("p", { className: "rdp-notice", role: "status", hidden: true });
     let timer = null;
     const show = (text, kind) => {
       clearTimeout(timer);
       element.textContent = text;
-      element.className = `rp-notice rp-notice-${kind}`;
+      element.className = `rdp-notice rdp-notice-${kind}`;
       element.hidden = false;
       if (kind === "ok") timer = setTimeout(() => (element.hidden = true), 4000);
     };
@@ -167,17 +167,17 @@
     const body = h(
       "tbody",
       null,
-      rows.length ? rows.map((cells) => h("tr", null, cells.map((c) => h("td", null, c)))) : h("tr", null, h("td", { colspan: columns.length, className: "rp-muted" }, empty)),
+      rows.length ? rows.map((cells) => h("tr", null, cells.map((c) => h("td", null, c)))) : h("tr", null, h("td", { colspan: columns.length, className: "rdp-muted" }, empty)),
     );
-    return h("div", { className: "rp-table-wrap" }, h("table", { className: "rp-table" }, head, body));
+    return h("div", { className: "rdp-table-wrap" }, h("table", { className: "rdp-table" }, head, body));
   }
 
   function badge(text, kind) {
-    return h("span", { className: `rp-badge rp-badge-${kind ?? "muted"}` }, text);
+    return h("span", { className: `rdp-badge rdp-badge-${kind ?? "muted"}` }, text);
   }
 
   function button(label, onclick, kind) {
-    return h("button", { type: "button", className: `rp-btn${kind ? ` rp-btn-${kind}` : ""}`, onclick }, label);
+    return h("button", { type: "button", className: `rdp-btn${kind ? ` rdp-btn-${kind}` : ""}`, onclick }, label);
   }
 
   // Runs `work` with `trigger` disabled; reports the outcome on `note`.
@@ -198,9 +198,9 @@
   // The page frame below the panel's own title: toolbar, notice, body.
   function page(element, t, title, toolbar) {
     const note = notice();
-    const body = h("div", { className: "rp-body" });
-    const bar = toolbar?.length ? h("div", { className: "rp-toolbar", role: "toolbar", "aria-label": t(title) }, toolbar) : null;
-    element.replaceChildren(h("div", { className: "rp-page" }, bar, note.element, body));
+    const body = h("div", { className: "rdp-body" });
+    const bar = toolbar?.length ? h("div", { className: "rdp-toolbar", role: "toolbar", "aria-label": t(title) }, toolbar) : null;
+    element.replaceChildren(h("div", { className: "rdp-page" }, bar, note.element, body));
     return { body, note };
   }
 
@@ -215,7 +215,7 @@
     else note.error(t("Live updates stopped."));
   }
 
-  window.rustPanel = { showState, api, ApiError, h, bytes, percent, date, duration, shortId, poll, table, badge, button, act, page };
+  window.rdockPanel = { showState, api, ApiError, h, bytes, percent, date, duration, shortId, poll, table, badge, button, act, page };
 
   window.rustcms.registerTranslations("vi", {
     Server: "Máy chủ",

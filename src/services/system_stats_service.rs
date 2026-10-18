@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn procfs_probe_reads_a_mounted_host() {
-        let dir = std::env::temp_dir().join(format!("rust-panel-procfs-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rdockpanel-procfs-{}", std::process::id()));
         let proc_root = dir.join("proc");
         fs::create_dir_all(proc_root.join("1/net")).unwrap();
         fs::create_dir_all(proc_root.join("sys/kernel")).unwrap();

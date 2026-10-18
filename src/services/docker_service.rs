@@ -22,7 +22,7 @@ pub use self::bollard::BollardDocker;
 
 /// Label the installer puts on the panel's own services, volumes, networks
 /// and secrets.
-pub const SYSTEM_LABEL: &str = "rust-panel.system";
+pub const SYSTEM_LABEL: &str = "rdockpanel.system";
 
 /// Env names containing one of these have their value replaced in `inspect`.
 const SECRET_MARKERS: [&str; 9] = [

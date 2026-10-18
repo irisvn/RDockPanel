@@ -1,10 +1,10 @@
 //! The panel's rules over Docker: its own objects (label
-//! `rust-panel.system=true`) are hidden and untouchable without the system
+//! `rdockpanel.system=true`) are hidden and untouchable without the system
 //! scope, prune skips them, inspect hides secrets. With `PANEL_TEST_DOCKER=1`
 //! the last test runs against the real engine.
 
 use futures_util::StreamExt;
-use rust_panel::services::docker_service::{
+use rdockpanel::services::docker_service::{
     BollardDocker, ContainerAction, Docker, DockerError, LogQuery, SYSTEM_LABEL, Scope,
 };
 
@@ -177,7 +177,7 @@ async fn mutations_use_the_checked_objects_id() {
     fake.networks
         .lock()
         .unwrap()
-        .push(rust_panel::services::docker_service::NetworkItem {
+        .push(rdockpanel::services::docker_service::NetworkItem {
             id: "netid-decoy".to_owned(),
             name: "netid-panel".to_owned(),
             driver: "bridge".to_owned(),
@@ -250,7 +250,7 @@ async fn against_the_real_engine() {
     let pulled: Vec<_> = docker.pull_image("alpine:3.20").collect().await;
     assert!(pulled.iter().all(Result::is_ok), "{pulled:?}");
 
-    let name = format!("rust-panel-test-{}", std::process::id());
+    let name = format!("rdockpanel-test-{}", std::process::id());
     let status = std::process::Command::new("docker")
         .args([
             "run",
@@ -258,7 +258,7 @@ async fn against_the_real_engine() {
             "--name",
             &name,
             "--label",
-            "rust-panel.test=1",
+            "rdockpanel.test=1",
             "alpine:3.20",
             "sh",
             "-c",

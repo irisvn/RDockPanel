@@ -1,5 +1,5 @@
 //! The `Containers` page (`/admin/p/containers`): containers: state, logs, inspect and actions. Drawn by
-//! `resources/admin/js/rust-panel/containers.js`, which calls the routes of
+//! `resources/admin/js/rdockpanel/containers.js`, which calls the routes of
 //! `routes/admin.rs`.
 
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
@@ -20,7 +20,7 @@ impl PanelPage for ContainersPage {
     }
 
     fn view() -> PageView {
-        PageView::Script("rust-panel/containers")
+        PageView::Script("rdockpanel/containers")
     }
 
     /// What the script may offer (the routes check again).

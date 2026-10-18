@@ -1,9 +1,9 @@
 //! The Docker and server endpoints under `/admin/api/x`: who may call
 //! which, the panel's own objects, and the actions log.
 
-use rust_panel::database::migrations::Migrator;
-use rust_panel::models::action;
-use rust_panel::routes::admin::routes;
+use rdockpanel::database::migrations::Migrator;
+use rdockpanel::models::action;
+use rdockpanel::routes::admin::routes;
 use rustcms::axum::http::{Method, StatusCode};
 use rustcms_testing::admin_routes::{Case, assert_access};
 use rustcms_testing::{TestDb, db_test};
@@ -260,7 +260,7 @@ db_test!(
     migrate = Migrator,
     |db: TestDb| async move {
         use chrono::Utc;
-        use rust_panel::services::action_service;
+        use rdockpanel::services::action_service;
         use sea_orm::{ActiveModelTrait, Set};
         let app = support::app_with_docker(db, FakeDocker::with_app_and_panel()).await;
         let db = app.state().db();

@@ -1,5 +1,5 @@
 //! The `Server` page (`/admin/p/server`): the host: CPU, memory, network and disk, live. Drawn by
-//! `resources/admin/js/rust-panel/server.js`, which calls the routes of
+//! `resources/admin/js/rdockpanel/server.js`, which calls the routes of
 //! `routes/admin.rs`.
 
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
@@ -20,7 +20,7 @@ impl PanelPage for ServerPage {
     }
 
     fn view() -> PageView {
-        PageView::Script("rust-panel/server")
+        PageView::Script("rdockpanel/server")
     }
 
     /// What the script may offer (the routes check again).

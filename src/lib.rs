@@ -1,4 +1,4 @@
-//! rust-panel: a rustcms application. Where things live:
+//! rdockpanel: a rustcms application. Where things live:
 //! `bootstrap` assembles the app from `providers`; `routes` declares the API,
 //! served by `http`; `models`, `services` and `policies` hold the domain;
 //! `admin` the panel; `database` migrations, seeders and factories.

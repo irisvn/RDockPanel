@@ -1,3 +1,3 @@
 # tracing filter; RUST_LOG overrides it.
-filter = "info,rust_panel=debug"
+filter = "info,rdockpanel=debug"
 json = false

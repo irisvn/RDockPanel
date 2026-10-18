@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
-use rust_panel::services::docker_service::{
+use rdockpanel::services::docker_service::{
     ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
     DockerResult, ImageItem, LogLine, LogQuery, LogStream, NetworkItem, PruneReport, SYSTEM_LABEL,
     SwarmRole, VolumeItem,
@@ -20,7 +20,7 @@ pub struct FakeDocker {
     pub volumes: Arc<Mutex<Vec<VolumeItem>>>,
     pub networks: Arc<Mutex<Vec<NetworkItem>>>,
     pub images: Arc<Mutex<Vec<ImageItem>>>,
-    /// `"restart web"`, `"remove web"`, `"prune rust-panel.system"`, …
+    /// `"restart web"`, `"remove web"`, `"prune rdockpanel.system"`, …
     pub calls: Arc<Mutex<Vec<String>>>,
 }
 

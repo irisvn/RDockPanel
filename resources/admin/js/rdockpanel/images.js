@@ -1,9 +1,9 @@
 // The `images` page: images on this server, pulling one (a queued job whose
 // progress is followed through its action), removing, pruning.
-window.rustcms.registerPage("rust-panel/images", {
+window.rustcms.registerPage("rdockpanel/images", {
   apiVersion: 1,
   mount(element, ctx) {
-    const { api, h, bytes, date, shortId, badge, button, act, poll, table, page } = window.rustPanel;
+    const { api, h, bytes, date, shortId, badge, button, act, poll, table, page } = window.rdockPanel;
     const t = ctx.t;
     const can = ctx.data?.can ?? {};
     let alive = true;
@@ -35,14 +35,14 @@ window.rustcms.registerPage("rust-panel/images", {
     const { body, note } = page(element, t, "Images", toolbar);
 
     // Pull: queue it, then follow its action until it ends.
-    const progress = h("pre", { className: "rp-log rp-log-short", hidden: true });
+    const progress = h("pre", { className: "rdp-log rdp-log-short", hidden: true });
     if (can["docker.manage"]) {
-      const reference = h("input", { type: "text", className: "rp-input rp-grow", placeholder: t("Image to pull, e.g. nginx:1.27"), required: true });
-      const submit = h("button", { type: "submit", className: "rp-btn rp-btn-primary" }, t("Pull"));
+      const reference = h("input", { type: "text", className: "rdp-input rdp-grow", placeholder: t("Image to pull, e.g. nginx:1.27"), required: true });
+      const submit = h("button", { type: "submit", className: "rdp-btn rdp-btn-primary" }, t("Pull"));
       const form = h(
         "form",
         {
-          className: "rp-form",
+          className: "rdp-form",
           onsubmit: async (event) => {
             event.preventDefault();
             const queued = await act(submit, note, () => api("POST", "/docker/images/pull", { image: reference.value }));
@@ -106,13 +106,13 @@ window.rustcms.registerPage("rust-panel/images", {
       const rows = images.map((image) => {
         const tags = image.tags.length ? image.tags : [shortId(image.id)];
         return [
-          h("div", { className: "rp-stack" }, tags.map((tag) => h("span", { className: "rp-mono" }, tag))),
-          h("span", { className: "rp-mono", title: image.id }, shortId(image.id)),
+          h("div", { className: "rdp-stack" }, tags.map((tag) => h("span", { className: "rdp-mono" }, tag))),
+          h("span", { className: "rdp-mono", title: image.id }, shortId(image.id)),
           bytes(image.size),
           date(image.created),
           image.containers > 0 ? badge(t("In use"), "ok") : "",
           can["docker.manage"]
-            ? h("div", { className: "rp-actions" }, tags.map((tag) => button(`${t("Remove")} ${image.tags.length > 1 ? tag : ""}`.trim(), (event) => remove(image, image.tags.length ? tag : image.id, event), "danger")))
+            ? h("div", { className: "rdp-actions" }, tags.map((tag) => button(`${t("Remove")} ${image.tags.length > 1 ? tag : ""}`.trim(), (event) => remove(image, image.tags.length ? tag : image.id, event), "danger")))
             : "",
         ];
       });

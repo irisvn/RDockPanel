@@ -1,5 +1,5 @@
 //! The `Images` page (`/admin/p/images`): images: pull, remove, prune. Drawn by
-//! `resources/admin/js/rust-panel/images.js`, which calls the routes of
+//! `resources/admin/js/rdockpanel/images.js`, which calls the routes of
 //! `routes/admin.rs`.
 
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
@@ -20,7 +20,7 @@ impl PanelPage for ImagesPage {
     }
 
     fn view() -> PageView {
-        PageView::Script("rust-panel/images")
+        PageView::Script("rdockpanel/images")
     }
 
     /// What the script may offer (the routes check again).

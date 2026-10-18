@@ -2764,6 +2764,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
+name = "rdockpanel"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bollard",
+ "chrono",
+ "futures-util",
+ "rustcms",
+ "rustcms-testing",
+ "rustix",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2849,27 +2870,6 @@ dependencies = [
  "mime_guess",
  "sha2 0.11.1",
  "walkdir",
-]
-
-[[package]]
-name = "rust-panel"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bollard",
- "chrono",
- "futures-util",
- "rustcms",
- "rustcms-testing",
- "rustix",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "sysinfo",
- "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]

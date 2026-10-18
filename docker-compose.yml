@@ -1,5 +1,5 @@
 # MySQL 8.4 for development and tests, with the same server flags as production
-# (install/ creates the `rust-panel-mysql` swarm service with these flags).
+# (install/ creates the `rdockpanel-mysql` swarm service with these flags).
 #   docker compose up -d
 #   App:   DATABASE_URL=mysql://panel:panel@127.0.0.1:3306/panel
 #   Tests: RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_REQUIRE=mysql

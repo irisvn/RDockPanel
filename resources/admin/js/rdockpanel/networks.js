@@ -1,9 +1,9 @@
 // The `networks` page: Docker networks, creating (bridge or overlay) and
 // removing them. Docker's own (bridge, host, none, ingress) can't be removed.
-window.rustcms.registerPage("rust-panel/networks", {
+window.rustcms.registerPage("rdockpanel/networks", {
   apiVersion: 1,
   mount(element, ctx) {
-    const { api, h, shortId, badge, button, act, table, page } = window.rustPanel;
+    const { api, h, shortId, badge, button, act, table, page } = window.rdockPanel;
     const t = ctx.t;
     const can = ctx.data?.can ?? {};
     const builtIn = new Set(["bridge", "host", "none", "ingress", "docker_gwbridge"]);
@@ -11,19 +11,19 @@ window.rustcms.registerPage("rust-panel/networks", {
 
     const { body, note } = page(element, t, "Networks", [button(t("Refresh"), () => load())]);
     if (can["docker.manage"]) {
-      const name = h("input", { type: "text", className: "rp-input rp-grow", placeholder: t("New network name"), required: true });
+      const name = h("input", { type: "text", className: "rdp-input rdp-grow", placeholder: t("New network name"), required: true });
       const driver = h(
         "select",
-        { className: "rp-input" },
+        { className: "rdp-input" },
         h("option", { value: "overlay" }, t("overlay (the swarm)")),
         h("option", { value: "bridge" }, t("bridge (this server)")),
       );
-      const submit = h("button", { type: "submit", className: "rp-btn rp-btn-primary" }, t("Create"));
+      const submit = h("button", { type: "submit", className: "rdp-btn rdp-btn-primary" }, t("Create"));
       body.append(
         h(
           "form",
           {
-            className: "rp-form",
+            className: "rdp-form",
             onsubmit: async (event) => {
               event.preventDefault();
               const payload = { name: name.value.trim(), driver: driver.value };
@@ -48,8 +48,8 @@ window.rustcms.registerPage("rust-panel/networks", {
         networks.sort((a, b) => a.name.localeCompare(b.name));
         if (!alive) return;
         const rows = networks.map((n) => [
-          h("span", { className: "rp-mono" }, n.name),
-          h("span", { className: "rp-mono rp-muted", title: n.id }, shortId(n.id)),
+          h("span", { className: "rdp-mono" }, n.name),
+          h("span", { className: "rdp-mono rdp-muted", title: n.id }, shortId(n.id)),
           n.driver,
           badge(n.scope, n.scope === "swarm" ? "ok" : "muted"),
           can["docker.manage"] && !builtIn.has(n.name)

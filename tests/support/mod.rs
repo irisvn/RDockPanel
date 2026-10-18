@@ -4,7 +4,7 @@
 
 pub mod fake_docker;
 
-use rust_panel::bootstrap;
+use rdockpanel::bootstrap;
 use rustcms_testing::{TestApp, TestDb};
 
 /// The application on `db` (migrated by `db_test!`).
@@ -14,7 +14,7 @@ pub async fn app(db: TestDb) -> TestApp {
 
 /// The application on `db` with `docker` as its Docker engine.
 pub async fn app_with_docker(db: TestDb, docker: fake_docker::FakeDocker) -> TestApp {
-    use rust_panel::services::docker_service::Docker;
+    use rdockpanel::services::docker_service::Docker;
     TestApp::new(
         move |config| {
             let mut app = bootstrap::build(config);

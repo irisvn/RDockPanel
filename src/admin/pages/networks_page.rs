@@ -1,5 +1,5 @@
 //! The `Networks` page (`/admin/p/networks`): networks: create and remove. Drawn by
-//! `resources/admin/js/rust-panel/networks.js`, which calls the routes of
+//! `resources/admin/js/rdockpanel/networks.js`, which calls the routes of
 //! `routes/admin.rs`.
 
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
@@ -20,7 +20,7 @@ impl PanelPage for NetworksPage {
     }
 
     fn view() -> PageView {
-        PageView::Script("rust-panel/networks")
+        PageView::Script("rdockpanel/networks")
     }
 
     /// What the script may offer (the routes check again).

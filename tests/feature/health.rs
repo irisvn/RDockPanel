@@ -1,4 +1,4 @@
-use rust_panel::database::migrations::Migrator;
+use rdockpanel::database::migrations::Migrator;
 use rustcms::axum::http::StatusCode;
 use rustcms_testing::{Factory, TestDb, UserFactory, db_test};
 use serde_json::json;
@@ -50,7 +50,7 @@ db_test!(
     |db: TestDb| async move {
         use rustcms::database::Seeder;
         let app = support::app(db).await;
-        rust_panel::database::seeders::DatabaseSeeder
+        rdockpanel::database::seeders::DatabaseSeeder
             .run(app.state())
             .await
             .unwrap();
