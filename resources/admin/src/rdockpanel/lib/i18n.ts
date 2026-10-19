@@ -526,6 +526,27 @@ window.rustcms?.registerTranslations?.("vi", {
   "Change and add services and domains": "Sửa và thêm service, domain",
   "Read environment values": "Đọc giá trị biến môi trường",
   "Read services' logs": "Đọc log của service",
+  // Cloudflare Tunnel
+  "Cloudflare Tunnel": "Cloudflare Tunnel",
+  "Reach your domains through Cloudflare, without opening ports 80 and 443 (cloudflared runs beside Traefik).":
+    "Vào các domain qua Cloudflare mà không cần mở cổng 80 và 443 (cloudflared chạy cạnh Traefik).",
+  Starting: "Đang khởi động",
+  Off: "Tắt",
+  "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared), copy its token.":
+    "Trong Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared), copy token của nó.",
+  "Paste it below and turn the tunnel on (Traefik restarts once: a few seconds).":
+    "Dán token vào ô dưới và bật tunnel (Traefik khởi động lại một lần, vài giây).",
+  "For each domain, add a public hostname to the tunnel with this service:":
+    "Với mỗi domain, thêm một public hostname cho tunnel với service này:",
+  "Service (origin)": "Service (origin)",
+  "Cloudflare serves HTTPS (domains' certificates are not used through the tunnel); a visitor over plain HTTP is redirected. The visitor's address reaches apps as Cloudflare's Cf-Connecting-Ip header (the panel sees cloudflared's).":
+    "Cloudflare lo HTTPS (đi qua tunnel thì không dùng certificate của domain); khách vào bằng HTTP thường sẽ được chuyển sang HTTPS. IP của khách tới app qua header Cf-Connecting-Ip của Cloudflare (panel thấy IP của cloudflared).",
+  "Tunnel token": "Token của tunnel",
+  "Kept (paste a new one to replace it)": "Đã lưu (dán token mới để thay)",
+  "Turn the tunnel off? Domains are then reached only through ports 80 and 443.":
+    "Tắt tunnel? Khi đó chỉ vào được domain qua cổng 80 và 443.",
+  "Turn off": "Tắt",
+  "Turn on": "Bật",
   // Project members
   Members: "Thành viên",
   viewer: "Xem",

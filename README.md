@@ -91,6 +91,8 @@ feature is free: no project limits, no paid tiers.
   use) with the installer command that applies them.
 - **Traefik in Settings**: its state, a restart, its live logs, and middlewares of your own
   (`custom-<name>`, headers, rate limits, IP allow lists…) for domains, all without SSH.
+- **Cloudflare Tunnel** (Settings): cloudflared run with your tunnel's token (kept encrypted, given
+  as a Swarm secret), so domains are reached through Cloudflare without opening ports 80 and 443.
 - **Per service**: CPU and memory charts, notes for the team, scripts (one-off commands in the running
   container, their output shown), and, for administrators, capabilities, sysctls and supplemental
   groups.
@@ -101,7 +103,7 @@ feature is free: no project limits, no paid tiers.
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
 - Uploads as a source, Railpack and buildpacks; a web database client.
-- Later: multiple nodes, Cloudflare Tunnel, two-factor authentication, an API and a CLI.
+- Later: multiple nodes, two-factor authentication.
 
 | A service | Templates | + Service |
 |---|---|---|

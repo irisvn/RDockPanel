@@ -11,7 +11,7 @@ use crate::http::controllers::{
     git_controller as git, members_controller as members,
     notifications_controller as notifications, server_controller as server,
     system_controller as system, templates_controller as templates, tokens_controller as tokens,
-    traefik_controller as traefik,
+    traefik_controller as traefik, tunnel_controller as tunnel,
 };
 
 /// Every admin route, with the access it requires.
@@ -91,6 +91,18 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                // Cloudflare Tunnel (Settings).
+                .get("/tunnel", AdminAccess::can("system.manage"), tunnel::status)
+                .post(
+                    "/tunnel/enable",
+                    AdminAccess::can("system.manage"),
+                    tunnel::enable,
+                )
+                .post(
+                    "/tunnel/disable",
+                    AdminAccess::can("system.manage"),
+                    tunnel::disable,
+                )
                 // Each user's own API tokens.
                 .get("/tokens", member(), tokens::index)
                 .post("/tokens", member(), tokens::create)

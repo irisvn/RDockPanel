@@ -24,4 +24,5 @@ mod routing;
 mod system;
 mod templates;
 mod terminal;
+mod tunnel;
 // rustcms:tests

@@ -66,13 +66,14 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Thông báo:** Discord, Slack, Telegram, email (SMTP) và webhook; mỗi kênh tự chọn sự kiện: deploy, backup, ổ đĩa sắp đầy, service lỗi và chạy lại, Traefik ngừng và chạy lại, certificate sắp hết hạn, có bản panel mới, dọn Docker, đăng nhập từ IP mới; có nút "Gửi thử".
 - **Panel trong Settings:** domain panel, email Let's Encrypt và domain cho app được kiểm tra (DNS, tên đang dùng), kèm sẵn lệnh installer để áp dụng.
 - **Traefik trong Settings:** xem trạng thái, khởi động lại, log trực tiếp, và middleware tuỳ chỉnh (`custom-<tên>`: headers, giới hạn tốc độ, danh sách IP…) cho domain, không cần SSH.
+- **Cloudflare Tunnel** (Settings): chạy cloudflared bằng token tunnel của bạn (mã hoá, đưa vào dưới dạng Swarm secret), để vào domain qua Cloudflare mà không cần mở cổng 80 và 443.
 - **Từng service:** biểu đồ CPU và RAM, ghi chú cho nhóm, script (lệnh chạy một lần trong container đang chạy, hiện output); quản trị panel còn đặt được capability, sysctl và group bổ sung.
 - **Bí mật:** biến môi trường (sửa như file `.env`) và tài khoản registry riêng được mã hoá bằng app key; chỉ người có quyền `services.secrets` mới xem được giá trị, mỗi lần xem đều ghi audit. Rollback trả lại đúng biến môi trường của lần deploy đó.
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
 - Nguồn Upload, build bằng Railpack và Buildpacks; web client cho database.
-- **Sau đó:** nhiều node, Cloudflare Tunnel, xác thực 2 lớp, API và CLI.
+- **Sau đó:** nhiều node, xác thực 2 lớp.
 
 | Trang service | Template | Tạo service |
 |---|---|---|

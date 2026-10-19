@@ -42,6 +42,9 @@ pub struct Traefik {
     writing: Arc<tokio::sync::Mutex<()>>,
     /// Held while Traefik's Swarm service is changed (networks, resolvers).
     updating: Arc<tokio::sync::Mutex<()>>,
+    /// Cloudflare Tunnel on (`tunnel_service`): routes written with their
+    /// tunnel routers.
+    tunnel: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Traefik {
@@ -52,6 +55,24 @@ impl Traefik {
             prune,
             writing: Arc::default(),
             updating: Arc::default(),
+            tunnel: Arc::default(),
+        }
+    }
+
+    /// Whether routes are served through Cloudflare Tunnel too.
+    pub fn tunnel(&self) -> bool {
+        self.tunnel.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set_tunnel(&self, on: bool) {
+        self.tunnel.store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// `options` as written now (with the tunnel's routers when it is on).
+    fn written(&self, options: &DeployOptions) -> DeployOptions {
+        DeployOptions {
+            tunnel: self.tunnel(),
+            ..options.clone()
         }
     }
 
@@ -384,6 +405,7 @@ pub async fn republish(
     options: &DeployOptions,
 ) -> AppResult<bool> {
     let _writing = traefik.writing.lock().await;
+    let options = &traefik.written(options);
     // Read again under the lock: what the database says now.
     let Some(row) = service::Entity::find_by_id(row.id).one(db).await? else {
         return Ok(true);
@@ -408,17 +430,27 @@ pub async fn sync_all(
 ) -> AppResult<usize> {
     // Nothing is published meanwhile (the list below stays the truth).
     let _writing = traefik.writing.lock().await;
+    let options = &traefik.written(options);
     let mut keep = std::collections::BTreeSet::new();
     let mut written = 0;
+    let mut failed = None;
     for row in service::Entity::find().all(db).await? {
         let name = swarm_name(db, &row).await?;
         let routes = deployed_routes(db, &row, options).await?;
         if routes.is_some() {
             keep.insert(format!("{name}.yml"));
         }
-        if traefik.write(&name, routes.as_ref()).is_ok() && routes.is_some() {
-            written += 1;
+        match traefik.write(&name, routes.as_ref()) {
+            Ok(()) if routes.is_some() => written += 1,
+            Ok(()) => {}
+            Err(err) => failed = Some(format!("{name}: {err}")),
         }
+    }
+    // Every one tried; then the first failure (the caller says so).
+    if let Some(failed) = failed {
+        return Err(rustcms::AppError::internal(format!(
+            "routes not written ({failed})"
+        )));
     }
     // Files left by services since renamed or deleted.
     if !traefik.prune {

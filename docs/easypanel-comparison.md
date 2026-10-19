@@ -65,4 +65,5 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Quick search (⌘K) | Done | |
 | Project members (users per project, roles) | Done | viewer, developer, admin per project, on every route ([permissions](permissions.md)) |
 | API with tokens, CLI | Done | `/api/v1` with scoped tokens (Settings → API tokens), the `rdp` command line ([api](api.md)) |
-| Cluster (several nodes), Cloudflare Tunnel, white-label | Missing | later (see the [roadmap](roadmap.md)) |
+| Cloudflare Tunnel | Done | Settings → Cloudflare Tunnel: cloudflared with the tunnel's token (a Swarm secret); each public hostname to `http://rdp-traefik:8081` |
+| Cluster (several nodes), white-label | Missing | later (see the [roadmap](roadmap.md)) |

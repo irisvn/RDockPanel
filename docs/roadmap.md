@@ -37,6 +37,8 @@ Done (feature by feature in [the EasyPanel comparison](easypanel-comparison.md))
 - Certificate resolvers per domain (Let's Encrypt over HTTP or DNS), applied to Traefik from the panel;
   uploaded certificates with expiry warnings; Traefik in Settings (state, restart, logs, custom
   middlewares).
+- Cloudflare Tunnel (Settings): cloudflared with the tunnel's token as a Swarm secret; every domain
+  and the panel also served on Traefik's `tunnel` entrypoint (plain HTTP, Cloudflare holds TLS).
 
 Next:
 
@@ -46,7 +48,7 @@ Next:
 
 ## Later
 
-- Multiple servers (Swarm workers), placement; Cloudflare Tunnel.
+- Multiple servers (Swarm workers), placement.
 - Two-factor authentication.
 
 ## Depends on RustCMS

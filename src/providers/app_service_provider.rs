@@ -268,6 +268,12 @@ impl ServiceProvider for AppServiceProvider {
             Ok(n) => tracing::info!(n, "backups interrupted by a stop"),
             Err(err) => tracing::debug!(%err, "interrupted backups not checked"),
         }
+        // Cloudflare Tunnel on or off (routes are written with it).
+        if let Err(err) = crate::services::tunnel_service::load(state).await {
+            tracing::warn!(%err, "the tunnel's setting not read");
+        }
+        crate::services::tunnel_service::sync_panel_route(state);
+        crate::services::tunnel_service::reconcile(state);
         // Traefik's routes, written again from the database.
         if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {
             let options = crate::services::deployment_service::deploy_options(0);

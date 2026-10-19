@@ -657,6 +657,9 @@ pub struct DeployOptions {
     pub https_port: u16,
     /// The panel as Traefik reaches it (maintenance pages); empty: none.
     pub internal_url: String,
+    /// Cloudflare Tunnel on (Settings): each domain also served on the
+    /// tunnel's entrypoint, over plain HTTP (Cloudflare holds TLS).
+    pub tunnel: bool,
 }
 
 impl Default for DeployOptions {
@@ -666,6 +669,7 @@ impl Default for DeployOptions {
             cert_resolver: String::new(),
             https_port: 443,
             internal_url: String::new(),
+            tunnel: false,
         }
     }
 }
@@ -1241,6 +1245,42 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
             );
         }
     }
+    // Through Cloudflare Tunnel: the router serving each domain (its HTTPS
+    // one, or its plain one: never the redirect), on the tunnel's
+    // entrypoint without TLS (Cloudflare's).
+    if options.tunnel {
+        for index in 0..snapshot.domains.len() {
+            let serving = [format!("{base}-{index}"), format!("{base}-{index}-http")]
+                .into_iter()
+                .find_map(|name| http.routers.get(&name).cloned());
+            if let Some(mut router) = serving {
+                router.entry_points = vec![crate::services::tunnel_service::ENTRYPOINT.to_owned()];
+                router.tls = None;
+                // An HTTPS domain's visitor over plain HTTP (Cloudflare's
+                // `Cf-Visitor`): redirected, as on Traefik's own port 80.
+                if snapshot.domains[index].https {
+                    let redirect = format!("{base}-tunnel-https");
+                    http.middlewares
+                        .entry(redirect.clone())
+                        .or_insert_with(|| redirect_to_https(443));
+                    http.routers.insert(
+                        format!("{base}-{index}-tunnel-http"),
+                        Router {
+                            rule: format!(
+                                "{} && {}",
+                                router.rule,
+                                crate::services::tunnel_service::PLAIN_VISITOR
+                            ),
+                            middlewares: vec![redirect],
+                            ..router.clone()
+                        },
+                    );
+                }
+                http.routers
+                    .insert(format!("{base}-{index}-tunnel"), router);
+            }
+        }
+    }
     for router in http.routers.values_mut() {
         let length = router.rule.len() as i64;
         router.priority = Some(if router.rule.starts_with("HostRegexp") {
@@ -1248,6 +1288,20 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
         } else {
             10_000 + length
         });
+    }
+    // A tunnel's redirect just above the router it redirects for (by the
+    // rule without its header: never above a longer path's).
+    let names: Vec<String> = http
+        .routers
+        .keys()
+        .filter(|k| k.ends_with("-tunnel-http"))
+        .cloned()
+        .collect();
+    for name in names {
+        let serving = name.trim_end_matches("-http");
+        if let Some(priority) = http.routers.get(serving).and_then(|r| r.priority) {
+            http.routers.get_mut(&name).unwrap().priority = Some(priority + 1);
+        }
     }
     Some(TraefikFile { http })
 }
@@ -1452,6 +1506,7 @@ mod tests {
             cert_resolver: "letsencrypt".to_owned(),
             https_port: 443,
             internal_url: String::new(),
+            tunnel: false,
         }
     }
 
@@ -1460,6 +1515,53 @@ mod tests {
         let out = desired(&snapshot(), &pinned(), &Runtime::default(), &production());
         insta::assert_snapshot!("web_service_spec", canonical(&out.spec));
         insta::assert_snapshot!("web_service_routes", out.routes.unwrap().to_yaml());
+    }
+
+    #[test]
+    fn through_the_tunnel_each_domain_is_served_without_tls_or_redirect() {
+        let mut plain = snapshot();
+        plain.domains[1].https = false;
+        let snapshot_https: Vec<bool> = plain.domains.iter().map(|d| d.https).collect();
+        assert!(snapshot_https.contains(&true) && snapshot_https.contains(&false));
+        let options = DeployOptions {
+            tunnel: true,
+            ..production()
+        };
+        let routes = routes(&plain, &options).unwrap();
+        let base = plain.service_name();
+        for (index, https) in snapshot_https.iter().enumerate() {
+            let tunnel = &routes.http.routers[&format!("{base}-{index}-tunnel")];
+            assert_eq!(tunnel.entry_points, ["tunnel"]);
+            assert!(tunnel.tls.is_none());
+            // The serving router's middlewares (never the HTTPS redirect).
+            assert!(!tunnel.middlewares.contains(&format!("{base}-https")));
+            // A visitor over plain HTTP: redirected, for an HTTPS domain only.
+            let plain = routes
+                .http
+                .routers
+                .get(&format!("{base}-{index}-tunnel-http"));
+            assert_eq!(plain.is_some(), *https, "{index}");
+            if let Some(plain) = plain {
+                assert!(
+                    plain
+                        .rule
+                        .ends_with(crate::services::tunnel_service::PLAIN_VISITOR)
+                );
+                assert_eq!(plain.middlewares, [format!("{base}-tunnel-https")]);
+                assert_eq!(plain.priority, tunnel.priority.map(|p| p + 1));
+            }
+            assert_eq!(
+                tunnel.service,
+                routes.http.routers[&format!("{base}-{index}")].service
+            );
+        }
+        // Off: none.
+        let off = routes_of(&plain);
+        assert!(!off.http.routers.keys().any(|k| k.ends_with("-tunnel")));
+    }
+
+    fn routes_of(snapshot: &Snapshot) -> TraefikFile {
+        routes(snapshot, &production()).unwrap()
     }
 
     #[test]

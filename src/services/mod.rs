@@ -29,4 +29,5 @@ pub mod template_engine;
 pub mod template_service;
 pub mod traefik_service;
 pub mod traefik_settings_service;
+pub mod tunnel_service;
 // rustcms:services

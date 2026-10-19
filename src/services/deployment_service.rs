@@ -781,6 +781,8 @@ pub fn deploy_options(force_update: u64) -> DeployOptions {
         cert_resolver: cfg.cert_resolver.clone(),
         https_port: cfg.https_port,
         internal_url: cfg.internal_url.clone(),
+        // Set as routes are written (Traefik knows).
+        tunnel: false,
     }
 }
 
