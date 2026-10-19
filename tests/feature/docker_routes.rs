@@ -63,6 +63,20 @@ db_test!(
                 Case::new(Method::GET, "/apps/overview")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::OK),
+                // Each user's own API tokens: any signed-in user.
+                Case::new(Method::GET, "/apps/tokens")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::OK),
+                Case::new(Method::POST, "/apps/tokens").expect(
+                    "nobody",
+                    &nobody,
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                ),
+                Case::new(Method::DELETE, "/apps/tokens/999").expect(
+                    "viewer",
+                    &viewer,
+                    StatusCode::NOT_FOUND,
+                ),
                 // A project's members: its admins (projects.members there).
                 Case::new(Method::GET, "/apps/projects/1/members")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)

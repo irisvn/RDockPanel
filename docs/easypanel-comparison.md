@@ -63,4 +63,6 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Settings: panel domain, Let's Encrypt email | Partly | Settings → Panel checks new ones (DNS, a taken name) and gives the installer command to run on the server (the panel never moves itself) |
 | Users and roles | Done | RustCMS roles and fine-grained permissions |
 | Quick search (⌘K) | Done | |
+| Project members (users per project, roles) | Done | viewer, developer, admin per project, on every route ([permissions](permissions.md)) |
+| API with tokens, CLI | Done | `/api/v1` with scoped tokens (Settings → API tokens), the `rdp` command line ([api](api.md)) |
 | Cluster (several nodes), Cloudflare Tunnel, white-label | Missing | later (see the [roadmap](roadmap.md)) |

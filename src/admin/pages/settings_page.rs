@@ -20,6 +20,9 @@ impl PanelPage for SettingsPage {
                 "storage_providers.view_any",
                 "notification_channels.view_any",
                 "system.manage",
+                // Their own API tokens (Settings → API tokens).
+                "projects.view_any",
+                "apps.access",
             ])
     }
 

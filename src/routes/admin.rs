@@ -10,7 +10,8 @@ use crate::http::controllers::{
     deploy_controller as deploy, docker_controller as docker, domains_controller as domains,
     git_controller as git, members_controller as members,
     notifications_controller as notifications, server_controller as server,
-    system_controller as system, templates_controller as templates, traefik_controller as traefik,
+    system_controller as system, templates_controller as templates, tokens_controller as tokens,
+    traefik_controller as traefik,
 };
 
 /// Every admin route, with the access it requires.
@@ -90,6 +91,10 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                // Each user's own API tokens.
+                .get("/tokens", member(), tokens::index)
+                .post("/tokens", member(), tokens::create)
+                .delete("/tokens/{id}", member(), tokens::revoke)
                 .get("/projects/{id}/members", member(), members::index)
                 .post("/projects/{id}/members", member(), members::add)
                 .patch("/projects/{id}/members/{user}", member(), members::update)

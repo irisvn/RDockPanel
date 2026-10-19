@@ -29,6 +29,48 @@ pub fn routes() -> ApiRoutes {
             Access::public(),
             controllers::trigger_controller::github,
         )
+        // The public API: a token of Settings → API tokens, within its
+        // scopes and its user's permissions (docs/api.md).
+        .get(
+            "/me",
+            Access::authenticated(),
+            controllers::api_v1_controller::me,
+        )
+        .get(
+            "/projects",
+            Access::authenticated(),
+            controllers::api_v1_controller::projects,
+        )
+        .get(
+            "/services/{id}",
+            Access::authenticated(),
+            controllers::api_v1_controller::show,
+        )
+        .post(
+            "/services/{id}/deploy",
+            Access::authenticated(),
+            controllers::api_v1_controller::deploy,
+        )
+        .post(
+            "/services/{id}/restart",
+            Access::authenticated(),
+            controllers::api_v1_controller::restart,
+        )
+        .get(
+            "/services/{id}/env",
+            Access::authenticated(),
+            controllers::api_v1_controller::env,
+        )
+        .get(
+            "/services/{id}/domains",
+            Access::authenticated(),
+            controllers::api_v1_controller::domains,
+        )
+        .get(
+            "/deployments/{id}",
+            Access::authenticated(),
+            controllers::api_v1_controller::deployment,
+        )
     // rustcms:api-routes
 }
 

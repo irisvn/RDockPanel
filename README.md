@@ -82,6 +82,8 @@ feature is free: no project limits, no paid tiers.
 - **Backups**: scheduled dumps (cron) of PostgreSQL, MySQL, MariaDB and MongoDB, and archives of
   volumes, to a local directory or an S3-compatible bucket, with retention, a log per run, "Run now"
   and Restore.
+- **Project members** (viewer, developer, admin per project) and a **public API** with scoped tokens
+  (Settings → API tokens) and its command line, `rdp`.
 - **Notifications**: Discord, Slack, Telegram, email (SMTP) and webhooks; each channel picks its
   events (deployments, backups, a full disk, a failing service and its return, Traefik down, expiring
   certificates, a newer panel, Docker prunes, a sign-in from a new address), with "Send test notification".

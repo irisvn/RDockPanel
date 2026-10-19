@@ -13,6 +13,7 @@ import { UploadedCertificates } from "./Uploaded";
 import { Traefik } from "./Traefik";
 import { Panel } from "./Panel";
 import { Git } from "./Git";
+import { Tokens } from "./Tokens";
 
 type Provider = {
   id: number;
@@ -233,20 +234,22 @@ function StorageProviders(props: PageProps<unknown>) {
 }
 
 /** Its sub-pages (`/p/settings/<tab>`), each shown with its own permission. */
-const TABS: Array<{ id: string; label: string; permission: string }> = [
+const TABS: Array<{ id: string; label: string; permission: string | null }> = [
   { id: "panel", label: "Panel", permission: "system.manage" },
   { id: "traefik", label: "Traefik", permission: "system.manage" },
   { id: "certificates", label: "Certificates", permission: "system.manage" },
   { id: "git", label: "Git", permission: "system.manage" },
   { id: "backups", label: "Backups", permission: "storage_providers.view_any" },
   { id: "notifications", label: "Notifications", permission: "notification_channels.view_any" },
+  // Everyone's own.
+  { id: "tokens", label: "API tokens", permission: null },
 ];
 
 export function Settings(props: PageProps<unknown>) {
   const t = props.t;
   // The page opens with any of these permissions (`permission_any`): each
   // tab with its own.
-  const tabs = TABS.filter((tab) => props.can(tab.permission));
+  const tabs = TABS.filter((tab) => tab.permission === null || props.can(tab.permission));
   const wanted = (props.path ?? "").split("/")[0];
   const tab = tabs.find((x) => x.id === wanted)?.id ?? tabs[0]?.id;
   if (!tab) return <p className="rdp2-muted">{t("Nothing to set here with your permissions.")}</p>;
@@ -269,6 +272,7 @@ export function Settings(props: PageProps<unknown>) {
         {tab === "git" && <Git {...props} />}
         {tab === "backups" && <StorageProviders {...props} />}
         {tab === "notifications" && <Notifications {...props} />}
+        {tab === "tokens" && <Tokens {...props} />}
       </Tabs>
     </div>
   );

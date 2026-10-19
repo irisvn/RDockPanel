@@ -1,7 +1,61 @@
 # The panel's routes
 
-All routes are served under `/admin/api/x` on the admin session (the panel's cookie). They are meant
-for the panel's own pages, not for scripts: token-authenticated API routes come later (Phase 3).
+Scripts and CI use the **public API** (`/api/v1`, with a token; below). The other routes are served
+under `/admin/api/x` on the admin session (the panel's cookie), for the panel's own pages.
+
+## Public API (`/api/v1`)
+
+Make a token in **Settings → API tokens** (each user their own): a name, scopes, an expiry (at most
+365 days). It is shown once. Send it as `Authorization: Bearer rcms_…`. A token does what its user
+may — their roles, and their roles in projects — and **never beyond its scopes**: both must allow.
+Revoke it there.
+
+| Scope | Allows |
+|---|---|
+| `read` | projects, services, deployments and domains: seen |
+| `deploy` | deploy and restart services |
+| `write` | change and add services and domains |
+| `secrets` | read environment values (audited) |
+| `logs` | read services' logs |
+
+A service is named by its id or by `project/service` (URL-encoded: `shop%2Fweb`). Errors are JSON
+`{"code", "message"}`: 401 without a valid token, 403 outside its scopes or its user's projects,
+404 for what does not exist or is in a project the user is no member of (the same answer: no
+telling which). A token holding anything beyond the scopes (RustCMS's console `*`) is refused here.
+Requests are rate-limited per user and route (120 a minute; deploy and restart 10): 429 beyond.
+Deploying a Compose service or a privileged one (added capabilities, sysctls or groups) through the API is
+refused: those need `system.manage`, which no token carries (deploy them in the panel).
+The `write` and `logs` scopes are for routes to come.
+
+| Method | Path | Scope | |
+|---|---|---|---|
+| GET | `/me` | any | the token's user (id) and scopes |
+| GET | `/projects` | read | the projects the user sees, with their services |
+| GET | `/services/{id}` | read | the service: image, status, replicas, domains, latest deployment (each when the token may see them) |
+| POST | `/services/{id}/deploy` | deploy | queues a deployment: 202 `{"deployment": …}` |
+| POST | `/services/{id}/restart` | deploy | queues a restart: 202 |
+| GET | `/deployments/{id}` | read | its status, error and log |
+| GET | `/services/{id}/env` | secrets | `{"env": {NAME: value}}` (audited, as the panel's own read) |
+| GET | `/services/{id}/domains` | read | its domains |
+
+### The `rdp` command line
+
+`rdp` (built with the panel: `cargo build --release --bin rdp`) uses this API:
+
+```sh
+rdp login https://panel.example.com     # asks for the token (stdin), checks it, keeps it (mode 0600)
+rdp projects
+rdp status shop/web
+rdp deploy shop/web --wait              # waits for the deployment, prints its log
+rdp restart shop/web
+rdp logs 42                             # a deployment's log (waits until it ends)
+rdp env shop/web                        # NAME=value lines (the secrets scope)
+rdp domains shop/web
+```
+
+The address and token are kept in `~/.config/rdp/config.json`, or given as `RDP_URL` and
+`RDP_TOKEN`. The address is https (http for localhost only); redirects are never followed, so
+the token goes to the panel only.
 
 - Writes (`POST`, `DELETE`) need an allowed `Origin` and the session's CSRF token in `X-CSRF-Token`
   (`GET /admin/api/auth/csrf` returns it).

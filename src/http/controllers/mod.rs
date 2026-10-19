@@ -1,6 +1,7 @@
 //! Request handlers, one module per model (`rustcms make:api <Model>`).
 
 pub mod actions_controller;
+pub mod api_v1_controller;
 pub mod apps_controller;
 pub mod backups_controller;
 pub mod deploy_controller;
@@ -12,6 +13,7 @@ pub mod notifications_controller;
 pub mod server_controller;
 pub mod system_controller;
 pub mod templates_controller;
+pub mod tokens_controller;
 pub mod traefik_controller;
 pub mod trigger_controller;
 // rustcms:controller-mods

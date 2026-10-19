@@ -507,6 +507,25 @@ window.rustcms?.registerTranslations?.("vi", {
   "Every service, the panel and Traefik stop until the server is back (usually a minute or two).":
     "Mọi service, panel và Traefik sẽ dừng tới khi server chạy lại (thường một, hai phút).",
   "Type the server's hostname to confirm": "Gõ hostname của server để xác nhận",
+  // API tokens
+  "API tokens": "API token",
+  "For the API (/api/v1) and the rdp command line: a token does what you may, within its scopes.":
+    "Dùng cho API (/api/v1) và lệnh rdp: token làm được những gì anh được phép, trong phạm vi scope của nó.",
+  "New token": "Token mới",
+  "Copy it now: it is not shown again.": "Copy ngay: token sẽ không hiện lại.",
+  "Command line": "Dòng lệnh",
+  "No token yet.": "Chưa có token.",
+  expires: "hết hạn",
+  "last used": "dùng lần cuối",
+  "Revoke this token? What uses it stops working.": "Thu hồi token này? Những gì đang dùng nó sẽ ngừng hoạt động.",
+  Revoke: "Thu hồi",
+  Scopes: "Scope",
+  "Expires in (days)": "Hết hạn sau (ngày)",
+  "See projects, services, deployments and domains": "Xem project, service, deploy và domain",
+  "Deploy and restart services": "Deploy và khởi động lại service",
+  "Change and add services and domains": "Sửa và thêm service, domain",
+  "Read environment values": "Đọc giá trị biến môi trường",
+  "Read services' logs": "Đọc log của service",
   // Project members
   Members: "Thành viên",
   viewer: "Xem",

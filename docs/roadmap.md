@@ -47,8 +47,7 @@ Next:
 ## Later
 
 - Multiple servers (Swarm workers), placement; Cloudflare Tunnel.
-- Multiple users per project, two-factor authentication.
-- A public API with tokens, a CLI.
+- Two-factor authentication.
 
 ## Depends on RustCMS
 
