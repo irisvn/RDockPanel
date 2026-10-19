@@ -67,9 +67,7 @@ impl Resource for ServiceDomainResource {
     }
 
     fn policy() -> std::sync::Arc<dyn Policy> {
-        std::sync::Arc::new(crate::admin::resources::guard::ChildPolicy(
-            "service_domains",
-        ))
+        std::sync::Arc::new(DomainPolicy)
     }
 
     fn table() -> Table {
@@ -197,5 +195,34 @@ fn check(ctx: &Ctx, mut data: Data) -> AppResult<Data> {
         Ok(data)
     } else {
         Err(errors.into())
+    }
+}
+
+/// The service's records' policy, and a wildcard changed or removed by the
+/// panel's administrators only.
+struct DomainPolicy;
+
+#[async_trait]
+impl Policy for DomainPolicy {
+    async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
+        let base = crate::admin::resources::guard::ChildPolicy("service_domains");
+        if !base.allows(ctx, ability, record).await {
+            return false;
+        }
+        matches!(ability, "view" | "view_any")
+            || !record
+                .and_then(|r| text(r, "host"))
+                .is_some_and(|h| h.starts_with("*."))
+            || ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+    }
+
+    async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {
+        crate::admin::resources::guard::ChildPolicy("service_domains")
+            .admits(ctx, ability)
+            .await
+    }
+
+    fn view_depends_on_record(&self) -> bool {
+        false
     }
 }
