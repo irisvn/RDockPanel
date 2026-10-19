@@ -57,6 +57,7 @@ db_test!(
                 read("/server/live"),
                 read("/docker/containers/web/stats"),
                 read("/docker/containers/web/logs/follow"),
+                read("/docker/containers/web/logs/follow/10"),
                 // The apps routes need the resources' permissions, which none of these has.
                 Case::new(Method::GET, "/apps/overview")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)

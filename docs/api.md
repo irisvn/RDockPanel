@@ -20,8 +20,9 @@ for the panel's own pages, not for scripts: token-authenticated API routes come 
 | DELETE | `/containers/{id}?force=` | docker.manage | remove |
 | GET | `/containers/{id}/logs?tail=&since=&timestamps=` | docker.logs | the last lines: `tail` up to 5,000 (default 500); reading stops after about 2 MiB of text; lines are cut to 16 KiB |
 | GET (SSE) | `/containers/{id}/logs/follow?tail=&since=&timestamps=` | docker.logs | `lines` events: the tail, then new lines |
+| GET (SSE) | `/containers/{id}/logs/follow/{tail}` | docker.logs | the same with the tail in the path (the panel's pages: their event streams take no query string) |
 | GET (SSE) | `/containers/{id}/stats` | docker.view | `stats` events about every second |
-| GET (WS) | `/containers/{id}/exec?cols=&rows=` | docker.exec | a terminal: binary messages both ways; text `{"type":"resize","cols":80,"rows":24}`; the server sends `{"type":"exit"}` or `{"type":"idle"}` before closing |
+| GET (WS) | `/containers/{id}/exec?cols=&rows=` | docker.exec | a terminal (80×24 without a size; the panel's page sends a resize once open): binary messages both ways; text `{"type":"resize","cols":80,"rows":24}`; the server sends `{"type":"exit"}` or `{"type":"idle"}` before closing |
 | GET | `/images` | docker.view | images with tags, size, use |
 | POST | `/images/pull` | docker.manage | `{"image": "nginx:1.27"}` → 202 with the queued action |
 | DELETE | `/images/{tag or id}?force=` | docker.manage | remove (force needs system.manage) |

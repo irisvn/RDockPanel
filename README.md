@@ -11,7 +11,7 @@ feature is free: no project limits, no paid tiers.
 > Compose services, database and volume backups, notifications, and a one-command installer work.
 > Try it on a test server first.
 
-![Server dashboard](docs/images/server.png)
+![Dashboard](docs/images/dashboard.png)
 
 ## Features
 
@@ -88,9 +88,15 @@ feature is free: no project limits, no paid tiers.
   domain and Let's Encrypt email in Settings; a web database client.
 - Later: multiple nodes, Cloudflare Tunnel, two-factor authentication, an API and a CLI.
 
-| Containers | Live logs | Terminal |
+| A service | Templates | + Service |
 |---|---|---|
-| ![Containers](docs/images/containers.png) | ![Logs](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |
+| ![A service](docs/images/service.png) | ![Templates](docs/images/templates.png) | ![+ Service](docs/images/new-service.png) |
+| Deployments | Domains | A database |
+| ![Deployments](docs/images/deployments.png) | ![Domains](docs/images/domains.png) | ![A database](docs/images/database.png) |
+| Monitor | Actions | Settings |
+| ![Monitor](docs/images/monitor.png) | ![Actions](docs/images/actions.png) | ![Settings](docs/images/settings.png) |
+| Containers | Live logs | Terminal |
+| ![Containers](docs/images/containers.png) | ![Live logs](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |
 
 ## Install
 

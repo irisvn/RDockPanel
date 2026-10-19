@@ -202,7 +202,9 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
     const ticket = ++asked.current;
     try {
       const out = await props.api.get<{ files: Array<{ file: string; size: number }> }>(
-        `/apps/storage-providers/${provider}/files?path=${encodeURIComponent(folder.trim())}`,
+        // The query as an option: RustCMS refuses a `?` in the path.
+        `/apps/storage-providers/${provider}/files`,
+        { query: { path: folder.trim() } },
       );
       if (ticket !== asked.current) return;
       setFiles(out.files);

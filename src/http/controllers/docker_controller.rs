@@ -184,6 +184,30 @@ pub async fn follow_logs(
     Path(id): Path<String>,
     Query(params): Query<LogParams>,
 ) -> AppResult<EventStream> {
+    follow(live, app, id, params).await
+}
+
+/// [`follow_logs`] with the tail in the path (`…/logs/follow/{tail}`): the
+/// panel's event streams take no query string (RustCMS 0.5).
+pub async fn follow_logs_tail(
+    live: LiveSession,
+    State(app): State<AppState>,
+    Path((id, tail)): Path<(String, u32)>,
+) -> AppResult<EventStream> {
+    let params = LogParams {
+        tail: Some(tail),
+        since: None,
+        timestamps: false,
+    };
+    follow(live, app, id, params).await
+}
+
+async fn follow(
+    live: LiveSession,
+    app: AppState,
+    id: String,
+    params: LogParams,
+) -> AppResult<EventStream> {
     let docker = docker(&app)?;
     let id = docker.container_id(&id, scope_of(live.principal())).await?;
     let tail = params.tail.unwrap_or(500).min(MAX_LOG_LINES);

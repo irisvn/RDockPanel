@@ -39,6 +39,11 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("docker.logs"),
                     docker::follow_logs,
                 )
+                .events(
+                    "/containers/{id}/logs/follow/{tail}",
+                    AdminAccess::can("docker.logs"),
+                    docker::follow_logs_tail,
+                )
                 .events("/containers/{id}/stats", view(), docker::live_stats)
                 .socket(
                     "/containers/{id}/exec",

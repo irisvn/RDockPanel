@@ -12,7 +12,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 > - Đã có installer cài bằng một lệnh, build từ Git hoặc Dockerfile, backup database và volume, thông báo, Compose.
 > - Chưa dùng được cho production.
 
-![Bảng điều khiển server](docs/images/server.png)
+![Dashboard](docs/images/dashboard.png)
 
 ## Tính năng
 
@@ -70,9 +70,15 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - Nguồn Upload, build bằng Railpack và Buildpacks; chọn cert resolver cho từng domain; đổi domain panel và email Let's Encrypt trong Settings; web client cho database.
 - **Sau đó:** nhiều node, Cloudflare Tunnel, xác thực 2 lớp, API và CLI.
 
-| Container | Log trực tiếp | Terminal |
+| Trang service | Template | Tạo service |
 |---|---|---|
-| ![Container](docs/images/containers.png) | ![Log](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |
+| ![Trang service](docs/images/service.png) | ![Template](docs/images/templates.png) | ![Tạo service](docs/images/new-service.png) |
+| Lịch sử deploy | Domain | Database |
+| ![Lịch sử deploy](docs/images/deployments.png) | ![Domain](docs/images/domains.png) | ![Database](docs/images/database.png) |
+| Monitor | Actions | Settings |
+| ![Monitor](docs/images/monitor.png) | ![Actions](docs/images/actions.png) | ![Settings](docs/images/settings.png) |
+| Container | Log trực tiếp | Terminal |
+| ![Container](docs/images/containers.png) | ![Log trực tiếp](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |
 
 ## Cài đặt
 

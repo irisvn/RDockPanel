@@ -140,7 +140,7 @@ window.rustcms.registerPage("rdockpanel/containers", {
       let stream = null;
       const start = () => {
         stream?.close();
-        stream = ctx.realtime.events(path(c.id, `/logs/follow?tail=${lines.value}`), {
+        stream = ctx.realtime.events(path(c.id, `/logs/follow/${lines.value}`), {
           onEvent(name, data) {
             if (name === "lines") append(data.lines);
           },
@@ -220,9 +220,12 @@ window.rustcms.registerPage("rdockpanel/containers", {
       };
       status.textContent = t("Connecting…");
       const socket = ctx.realtime.socket(
-        path(c.id, `/exec?cols=${term.cols}&rows=${term.rows}`),
+        // The size goes as a command once open: the panel's sockets take no
+        // query string (RustCMS 0.5).
+        path(c.id, "/exec"),
         {
           onOpen() {
+            socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
             status.textContent = "";
             term.options.disableStdin = false;
             term.focus();

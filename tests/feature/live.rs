@@ -137,12 +137,7 @@ db_test!(
         let cookie = cookie(app.state(), &operator).await;
         let seconds = Duration::from_secs;
 
-        let mut logs = open(
-            &server,
-            "/docker/containers/web/logs/follow?tail=10",
-            &cookie,
-        )
-        .await;
+        let mut logs = open(&server, "/docker/containers/web/logs/follow/10", &cookie).await;
         assert_eq!(logs.status, 200);
         let lines = logs.find("lines", seconds(5)).await.expect("log lines");
         assert_eq!(lines["lines"][0]["text"], "id-web started\n");
