@@ -111,6 +111,8 @@ Resolvers are written through the `cert_resolvers` resource (their token sealed,
 |---|---|---|---|
 | GET | `/traefik/resolvers` | system.manage | the resolvers (`has_token`, `in_use`), the DNS providers, the default resolver, and whether Traefik runs them (`applied`: `null` without a Traefik service) |
 | POST | `/traefik/apply` | system.manage | gives Traefik the resolvers (it restarts); logged as an action |
+| GET | `/panel` | system.manage | the panel's domain, Let's Encrypt email (from Traefik's arguments), apps' domain and address, as the installer set them |
+| POST | `/panel/check` | system.manage | `{"domain","email","apps_domain"}`: `{"errors","warnings","dns","command"}` — checked (names, a service's domain, DNS records) and the installer command applying them |
 | GET | `/traefik/status` | system.manage | Traefik's image, published ports, tasks (state, error), last update; the custom middlewares' YAML (never its arguments) |
 | POST | `/traefik/restart` | system.manage | restarts Traefik (its tasks replaced); logged as an action |
 | PUT | `/traefik/middlewares` | system.manage | `{"yaml"}`: the custom middlewares, checked, written for Traefik (no restart): `{"middlewares": ["custom-x@file", …]}` |

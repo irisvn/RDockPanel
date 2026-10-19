@@ -391,3 +391,23 @@ pub async fn logs(
     let lines = docker.engine().service_logs(&traefik.service, query);
     Ok(live.stream(crate::services::live_service::log_events(lines)))
 }
+
+/// The panel's domain, Let's Encrypt email and apps' domain, as the
+/// installer set them.
+pub async fn panel(State(app): State<AppState>) -> AppResult<Json<Value>> {
+    let (docker, traefik) = services(&app)?;
+    Ok(Json(
+        crate::services::panel_domain_service::current(Some(&docker), &traefik).await,
+    ))
+}
+
+/// Checks new ones (DNS, a taken name) and gives the installer command
+/// applying them: the panel never changes them itself.
+pub async fn check_panel(
+    State(app): State<AppState>,
+    Json(wanted): Json<crate::services::panel_domain_service::Wanted>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(
+        crate::services::panel_domain_service::check(app.db(), &wanted).await?,
+    ))
+}

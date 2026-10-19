@@ -46,6 +46,8 @@ The resources use the panel's standard permissions, one set per resource
 - uploaded certificates (Settings → Uploaded certificates: upload, replace, delete): `system.manage`
   only; choosing one on a domain too;
 - Traefik (Settings → Traefik: its state, restart, live logs, custom middlewares): `system.manage` only;
+- the panel's domain, Let's Encrypt email and apps' domain (Settings → Panel: shown, checked, the
+  installer command given): `system.manage` only;
 - adding Linux capabilities, sysctls or supplemental groups to a service needs `system.manage`
   (dropping capabilities does not). Such a **privileged** service (like a Compose service) is then
   the panel's administrators' only: editing it and every record of it (domains, ports, mounts,

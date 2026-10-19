@@ -79,6 +79,8 @@ feature is free: no project limits, no paid tiers.
   and Restore.
 - **Notifications**: Discord, Slack, Telegram, email (SMTP) and webhooks, for deployments, backups
   and a full disk, with "Send test notification".
+- **Panel in Settings**: its domain, Let's Encrypt email and apps' domain, checked (DNS, names in
+  use) with the installer command that applies them.
 - **Traefik in Settings**: its state, a restart, its live logs, and middlewares of your own
   (`custom-<name>`, headers, rate limits, IP allow lists…) for domains, all without SSH.
 - **Per service**: CPU and memory charts, notes for the team, scripts (one-off commands in the running
@@ -90,8 +92,7 @@ feature is free: no project limits, no paid tiers.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Uploads as a source, Railpack and buildpacks; the panel's
-  domain and Let's Encrypt email in Settings; a web database client.
+- Uploads as a source, Railpack and buildpacks; a web database client.
 - Later: multiple nodes, Cloudflare Tunnel, two-factor authentication, an API and a CLI.
 
 | A service | Templates | + Service |

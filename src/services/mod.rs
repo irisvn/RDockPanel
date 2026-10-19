@@ -15,6 +15,7 @@ pub mod docker_service;
 pub mod dotenv;
 pub mod live_service;
 pub mod notify_service;
+pub mod panel_domain_service;
 pub mod placeholders;
 pub mod storage_service;
 pub mod system_stats_service;

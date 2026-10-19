@@ -29,6 +29,9 @@ Point `panel.example.com` and `*.apps.example.com` (a wildcard record) to the se
 | `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:main` until the first release) |
 
 The options are kept in `/etc/rdockpanel/install.conf`: a later run changes only what it is given.
+That file is read as data (`KEY=value` lines of `IMAGE`, `DOMAIN`, `EMAIL`, `APPS_DOMAIN`, each
+value checked), never run. In the panel, **Settings → Panel** checks a new domain, email or apps'
+domain (DNS records, a name a service already uses) and gives the exact command to run here.
 Without a domain the panel answers on plain HTTP (port 3000), like EasyPanel before its domain is
 set: give it a domain before using it over the internet. With one, port 3000 is closed and the
 panel is reached over HTTPS only.

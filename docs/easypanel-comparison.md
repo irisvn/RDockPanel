@@ -58,7 +58,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Settings: storage providers (Local, S3) | Done | with a Test button |
 | Settings: notifications (Discord, Slack, Telegram, email, webhook) | Done | deployments, backups, a full disk; Send test |
 | Settings: Traefik (state, restart, logs, custom configuration) | Done | in the panel, no SSH: custom middlewares only (`custom-<name>`, the types that change a request or an answer), used by domains as `custom-<name>@file` |
-| Settings: panel domain, Let's Encrypt email | Partly | set by the installer (run it again to change them) |
+| Settings: panel domain, Let's Encrypt email | Partly | Settings → Panel checks new ones (DNS, a taken name) and gives the installer command to run on the server (the panel never moves itself) |
 | Users and roles | Done | RustCMS roles and fine-grained permissions |
 | Quick search (⌘K) | Done | |
 | Cluster (several nodes), Cloudflare Tunnel, white-label | Missing | later (see the [roadmap](roadmap.md)) |

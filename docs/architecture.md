@@ -436,6 +436,12 @@ that sends requests elsewhere (`forwardAuth`, `errors`, plugins), reads Traefik'
 (`usersFile`), or is a Go template; routers stay the panel's. A domain uses one as
 `custom-<name>@file`.
 
+Settings → Panel shows the panel's domain, Let's Encrypt email and apps' domain as the installer set
+them, checks new ones (host names, an email, a name a service already uses, DNS records: warned of,
+never refused, as proxies and NAT answer otherwise) and gives the installer command applying them.
+The panel never moves itself: its own service, Traefik's `letsencrypt` resolver and its route would
+change at once, with no way back if it did not come up. The installer reads `install.conf` as data.
+
 ## The apps interface
 
 `Dashboard` (`/admin/p/dashboard`, React, RustCMS extension host v2) is the EasyPanel-like

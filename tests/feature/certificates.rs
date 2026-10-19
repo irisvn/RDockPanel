@@ -798,3 +798,76 @@ db_test!(
             .assert_status(StatusCode::FORBIDDEN);
     }
 );
+
+db_test!(
+    the_panels_domain_is_checked_and_given_as_a_command,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        installer_traefik(&fake);
+        let admin = admin(&app).await;
+        // As the installer set it: its email from Traefik's arguments.
+        let current = admin.get(&app.admin_api("x/apps/panel")).await;
+        current.assert_status(StatusCode::OK);
+        assert_eq!(current.json()["email"], "ops@example.com");
+
+        let url = app.admin_api("x/apps/panel/check");
+        let bad = admin
+            .post_json(&url, &json!({"domain": "Not A Host", "email": "nope", "apps_domain": "*.apps.example.com"}))
+            .await
+            .json();
+        assert!(
+            bad["errors"]["domain"].is_string()
+                && bad["errors"]["email"].is_string()
+                && bad["errors"]["apps_domain"].is_string(),
+            "{bad}"
+        );
+        assert!(bad["command"].is_null());
+        // A service's domain is not the panel's.
+        let project = create(&app, &admin, "projects", json!({"name": "taken"})).await;
+        let service = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await;
+        create(&app, &admin, "service_domains", json!({"service_id": service, "host": "*.example.invalid", "path": "/", "port": 80, "https": false})).await;
+        let taken = admin
+            .post_json(
+                &url,
+                &json!({"domain": "panel.example.invalid", "email": "ops@example.com"}),
+            )
+            .await
+            .json();
+        assert!(
+            taken["errors"]["domain"]
+                .as_str()
+                .unwrap()
+                .contains("service"),
+            "{taken}"
+        );
+        // Fine: the command applying it (DNS said, not refused).
+        let ok = admin
+            .post_json(&url, &json!({"domain": "panel.invalid", "email": "ops@example.com", "apps_domain": "apps.invalid"}))
+            .await
+            .json();
+        assert_eq!(ok["errors"], json!({}), "{ok}");
+        let command = ok["command"].as_str().unwrap();
+        assert!(
+            command.ends_with(
+                "--domain panel.invalid --email ops@example.com --apps-domain apps.invalid"
+            ),
+            "{command}"
+        );
+        assert!(
+            ok["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w.as_str().unwrap().contains("does not resolve")),
+            "{ok}"
+        );
+    }
+);

@@ -87,6 +87,12 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("system.manage"),
                     traefik::apply,
                 )
+                .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                .post(
+                    "/panel/check",
+                    AdminAccess::can("system.manage"),
+                    traefik::check_panel,
+                )
                 .get(
                     "/traefik/status",
                     AdminAccess::can("system.manage"),

@@ -39,8 +39,20 @@ IMAGE="ghcr.io/irisvn/rdockpanel:main"
 DOMAIN=""
 EMAIL=""
 APPS_DOMAIN=""
-# shellcheck disable=SC1090
-[ -f "$CONF" ] && . "$CONF"
+# Read as data, never run: KEY=value lines of these keys only (a value with
+# anything but the characters its option allows is refused below).
+if [ -f "$CONF" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+      IMAGE=*) IMAGE="${line#IMAGE=}" ;;
+      DOMAIN=*) DOMAIN="${line#DOMAIN=}" ;;
+      EMAIL=*) EMAIL="${line#EMAIL=}" ;;
+      APPS_DOMAIN=*) APPS_DOMAIN="${line#APPS_DOMAIN=}" ;;
+      *) die "$CONF: unknown line (keys: IMAGE, DOMAIN, EMAIL, APPS_DOMAIN)" ;;
+    esac
+  done < "$CONF"
+fi
 ADMIN_EMAIL=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -57,13 +69,15 @@ done
 
 # Checked before anything changes: these become Docker arguments and
 # Traefik rules (no spaces, quotes, backticks).
-host_ok() { printf '%s' "$1" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$'; }
-email_ok() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$'; }
+# One line each (grep checks lines: a value with a newline is refused first).
+one_line() { [ "$(printf '%s' "$1" | wc -l)" -eq 0 ]; }
+host_ok() { one_line "$1" && printf '%s' "$1" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$'; }
+email_ok() { one_line "$1" && printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$'; }
 [ -z "$DOMAIN" ] || host_ok "$DOMAIN" || die "--domain: not a host name: $DOMAIN"
 [ -z "$APPS_DOMAIN" ] || host_ok "$APPS_DOMAIN" || die "--apps-domain: not a host name: $APPS_DOMAIN"
 [ -z "$EMAIL" ] || email_ok "$EMAIL" || die "--email: not an email address: $EMAIL"
 [ -z "$ADMIN_EMAIL" ] || email_ok "$ADMIN_EMAIL" || die "--admin-email: not an email address"
-printf '%s' "$IMAGE" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$' || die "--image: not an image reference"
+one_line "$IMAGE" && printf '%s' "$IMAGE" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$' || die "--image: not an image reference"
 [ -z "$DOMAIN" ] || [ -n "$EMAIL" ] || die "--domain needs --email (its HTTPS certificate)"
 
 # --- Docker and Swarm -------------------------------------------------------
