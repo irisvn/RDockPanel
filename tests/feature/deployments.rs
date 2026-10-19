@@ -1241,6 +1241,27 @@ db_test!(
             let first = step("deploy").await;
             let images = running(docker.clone(), name.clone()).await;
             assert_eq!(images.len(), 2, "{images:?}");
+            // Read back with its health check (Docker writes `Healthcheck`,
+            // Bollard reads `HealthCheck`): an update from it keeps it.
+            let read = docker
+                .engine()
+                .inspect_service(&name)
+                .await
+                .unwrap()
+                .unwrap();
+            let check = read
+                .spec
+                .and_then(|s| s.task_template)
+                .and_then(|t| t.container_spec)
+                .and_then(|c| c.health_check);
+            assert!(
+                check.is_some_and(|c| c
+                    .test
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|t| t.contains("wget"))),
+                "the health check is lost when read"
+            );
             assert!(
                 images
                     .iter()

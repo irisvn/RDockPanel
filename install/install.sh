@@ -303,7 +303,10 @@ if exists rdockpanel; then
   fi
   mounted "$BACKUPS" || set -- "$@" --mount-add "type=bind,source=$BACKUPS,target=$BACKUPS"
   mounted "$COMPOSE" || set -- "$@" --mount-add "type=bind,source=$COMPOSE,target=$COMPOSE"
-  docker service update --quiet --image "$IMAGE" "$@" rdockpanel >/dev/null
+  # Its health check again (an older panel's own restart could drop it).
+  docker service update --quiet --image "$IMAGE" "$@" \
+    --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-retries 60 \
+    rdockpanel >/dev/null
 else
   say "Starting RDockPanel ($IMAGE)"
   # `service create` takes --env and --publish (not their -add forms).

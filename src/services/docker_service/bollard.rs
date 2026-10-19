@@ -52,6 +52,46 @@ impl BollardDocker {
     }
 }
 
+/// Docker writes a service's health check as `Healthcheck`; Bollard reads
+/// `HealthCheck` (Docker accepts both when written): read back, it would be
+/// lost, and an update made from that spec would drop it. Read again through
+/// Docker's CLI (no shell; the name is the panel's).
+async fn restore_healthcheck(name: &str, service: &mut SwarmService) {
+    let Some(spec) = service
+        .spec
+        .as_mut()
+        .and_then(|s| s.task_template.as_mut())
+        .and_then(|t| t.container_spec.as_mut())
+    else {
+        return;
+    };
+    if spec.health_check.is_some() {
+        return;
+    }
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::process::Command::new("docker")
+            .args([
+                "service",
+                "inspect",
+                "--format",
+                "{{json .Spec.TaskTemplate.ContainerSpec.Healthcheck}}",
+                "--",
+                name,
+            ])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    if let Ok(Ok(output)) = output
+        && output.status.success()
+        && let Ok(Some(check)) =
+            serde_json::from_slice::<Option<::bollard::models::HealthConfig>>(&output.stdout)
+    {
+        spec.health_check = Some(check);
+    }
+}
+
 fn map_err(err: Error) -> DockerError {
     match err {
         Error::DockerResponseServerError {
@@ -706,7 +746,10 @@ impl DockerApi for BollardDocker {
             )
             .await
         {
-            Ok(service) => Ok(Some(service)),
+            Ok(mut service) => {
+                restore_healthcheck(name, &mut service).await;
+                Ok(Some(service))
+            }
             Err(Error::DockerResponseServerError {
                 status_code: 404, ..
             }) => Ok(None),
