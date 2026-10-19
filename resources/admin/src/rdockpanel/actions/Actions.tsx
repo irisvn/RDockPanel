@@ -48,7 +48,7 @@ export function Actions(props: PageProps<unknown>) {
   return (
     <div className="rdp2-page">
       <div className="rdp2-head">
-        <h2 className="rdp2-title">{t("Actions")}</h2>
+        <p className="rdp2-muted">{t("Deployments, backups and Docker actions, newest first.")}</p>
         <NativeSelect className="rdp2-narrow" value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="all">{t("All")}</option>
           <option value="deployment">{t("Deployments")}</option>

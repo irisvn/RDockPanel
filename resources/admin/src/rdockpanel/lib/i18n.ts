@@ -303,6 +303,7 @@ window.rustcms?.registerTranslations?.("vi", {
   Actions: "Hoạt động",
   All: "Tất cả",
   "Nothing yet.": "Chưa có gì.",
+  "Deployments, backups and Docker actions, newest first.": "Các lần deploy, backup và thao tác Docker, mới nhất trước.",
   Where: "Ở đâu",
   ok: "xong",
   Monitor: "Giám sát",

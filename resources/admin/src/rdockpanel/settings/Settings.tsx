@@ -131,6 +131,7 @@ function StorageProviders(props: PageProps<unknown>) {
   if (list.error || !list.data) return <ErrorState error={list.error} />;
   return (
     <Section
+      level={2}
       title={t("Storage providers")}
       description={t("Where database backups are written.")}
       actions={props.can("storage_providers.create") && <Button onClick={() => setEditing("new")}>{t("Add storage provider")}</Button>}
@@ -230,7 +231,6 @@ export function Settings(props: PageProps<unknown>) {
   const t = props.t;
   return (
     <div className="rdp2-page">
-      <h2 className="rdp2-title">{t("Settings")}</h2>
       {props.can("storage_providers.view_any") ? (
         <StorageProviders {...props} />
       ) : (

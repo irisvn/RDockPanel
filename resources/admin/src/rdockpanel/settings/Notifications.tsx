@@ -166,6 +166,7 @@ export function Notifications(props: PageProps<unknown>) {
   if (list.error || !list.data) return <ErrorState error={list.error} />;
   return (
     <Section
+      level={2}
       title={t("Notifications")}
       description={t("Where the panel says what happened: deployments, backups, a full disk.")}
       actions={props.can("notification_channels.create") && <Button onClick={() => setEditing("new")}>{t("Add channel")}</Button>}

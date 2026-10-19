@@ -70,13 +70,14 @@ export function CopyButton(props: { text: string; label: string; copied: string 
   );
 }
 
-/** A titled block of a tab, with its actions on the right. */
-export function Section(props: { title: ReactNode; description?: ReactNode; actions?: ReactNode; children?: ReactNode }) {
+/** A titled block of a tab, with its actions on the right; `level` 2 directly under the page's title. */
+export function Section(props: { title: ReactNode; description?: ReactNode; actions?: ReactNode; children?: ReactNode; level?: 2 | 3 }) {
+  const Title = props.level === 2 ? "h2" : "h3";
   return (
     <section className="rdp2-section">
       <header className="rdp2-section-head">
         <div>
-          <h3 className="rdp2-section-title">{props.title}</h3>
+          <Title className="rdp2-section-title">{props.title}</Title>
           {props.description && <p className="rdp2-muted">{props.description}</p>}
         </div>
         {props.actions && <div className="rdp2-row">{props.actions}</div>}
