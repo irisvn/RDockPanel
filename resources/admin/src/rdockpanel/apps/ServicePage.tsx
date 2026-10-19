@@ -112,8 +112,7 @@ export function ServicePage(props: Props) {
           { id: "storage", label: t("Storage") },
           { id: "advanced", label: t("Advanced") },
         ]}
-      />
-      <div className="rdp2-tab-body">
+      >
         {tab === "overview" && <OverviewTab {...props} d={d} />}
         {tab === "credentials" && d.database && <CredentialsTab {...props} d={d} />}
         {tab === "backups" && <BackupsTab {...props} d={d} />}
@@ -138,7 +137,7 @@ export function ServicePage(props: Props) {
             onDeleted={() => props.navigate(`/p/dashboard/${props.project}`)}
           />
         )}
-      </div>
+      </Tabs>
     </div>
   );
 }

@@ -228,14 +228,10 @@ function StorageProviders(props: PageProps<unknown>) {
 }
 
 export function Settings(props: PageProps<unknown>) {
-  const t = props.t;
+  // The page opens with either permission (`permission_any`): each section with its own.
   return (
     <div className="rdp2-page">
-      {props.can("storage_providers.view_any") ? (
-        <StorageProviders {...props} />
-      ) : (
-        <Alert>{t("You may not see the storage providers.")}</Alert>
-      )}
+      {props.can("storage_providers.view_any") && <StorageProviders {...props} />}
       {props.can("notification_channels.view_any") && <Notifications {...props} />}
     </div>
   );

@@ -8,10 +8,10 @@ repository = "https://github.com/irisvn/rdockpanel"
 publish = false
 
 [package.metadata.rustcms]
-version = "0.5.1"
+version = "0.6.1"
 
 [dependencies]
-rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.5.1" }
+rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.6.1" }
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "with-chrono", "with-uuid", "with-rust_decimal", "with-json"] }
 sea-orm-migration = { version = "=2.0.4", default-features = false }
 anyhow = "1"
@@ -48,6 +48,6 @@ shell-words = "1.1"
 
 [dev-dependencies]
 insta = "1"
-rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.5.1" }
+rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.6.1" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 [workspace]

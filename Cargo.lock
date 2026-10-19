@@ -4151,8 +4151,8 @@ dependencies = [
 
 [[package]]
 name = "rustcms"
-version = "0.5.1"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.5.1#49d93143e0354ffdb9070d0502470132a001e1a7"
+version = "0.6.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.6.1#bc6bec92150afd038ae304a9d179ed38a817bdd9"
 dependencies = [
  "async-trait",
  "axum",
@@ -4167,8 +4167,8 @@ dependencies = [
 
 [[package]]
 name = "rustcms-admin"
-version = "0.5.1"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.5.1#49d93143e0354ffdb9070d0502470132a001e1a7"
+version = "0.6.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.6.1#bc6bec92150afd038ae304a9d179ed38a817bdd9"
 dependencies = [
  "ammonia",
  "anyhow",
@@ -4198,8 +4198,8 @@ dependencies = [
 
 [[package]]
 name = "rustcms-auth"
-version = "0.5.1"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.5.1#49d93143e0354ffdb9070d0502470132a001e1a7"
+version = "0.6.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.6.1#bc6bec92150afd038ae304a9d179ed38a817bdd9"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4228,8 +4228,8 @@ dependencies = [
 
 [[package]]
 name = "rustcms-core"
-version = "0.5.1"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.5.1#49d93143e0354ffdb9070d0502470132a001e1a7"
+version = "0.6.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.6.1#bc6bec92150afd038ae304a9d179ed38a817bdd9"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -4269,16 +4269,16 @@ dependencies = [
 
 [[package]]
 name = "rustcms-migration"
-version = "0.5.1"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.5.1#49d93143e0354ffdb9070d0502470132a001e1a7"
+version = "0.6.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.6.1#bc6bec92150afd038ae304a9d179ed38a817bdd9"
 dependencies = [
  "sea-orm-migration",
 ]
 
 [[package]]
 name = "rustcms-testing"
-version = "0.5.1"
-source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.5.1#49d93143e0354ffdb9070d0502470132a001e1a7"
+version = "0.6.1"
+source = "git+https://github.com/irisvn/RustCMS-Core?tag=v0.6.1#bc6bec92150afd038ae304a9d179ed38a817bdd9"
 dependencies = [
  "async-trait",
  "axum",

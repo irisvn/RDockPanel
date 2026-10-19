@@ -237,7 +237,6 @@ window.rustcms?.registerTranslations?.("vi", {
   "Path-style URLs (MinIO and most S3-compatible services)": "URL kiểu path (MinIO và đa số dịch vụ tương thích S3)",
   "Delete this storage provider? Its files stay where they are.": "Xoá nơi lưu trữ này? Các file vẫn giữ nguyên.",
   "A backup uses this provider: change or delete it first.": "Có backup đang dùng nơi lưu trữ này: đổi hoặc xoá backup đó trước.",
-  "You may not see the storage providers.": "Bạn không có quyền xem nơi lưu trữ.",
   "Database backups": "Backup database",
   "Create database backup": "Tạo backup database",
   "Edit backup": "Sửa backup",

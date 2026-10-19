@@ -5,7 +5,7 @@
 // `npm run build` in resources/admin, then commit the built files.
 import { type PageProps, registerPage, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, ErrorState, Loading } from "@rustcms/admin-sdk/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dashboard, NewService } from "./apps/Dashboard";
 import { ServicePage } from "./apps/ServicePage";
 import { Templates } from "./apps/Templates";
@@ -107,6 +107,12 @@ function ServiceRoute(props: PageProps<unknown> & { project: string; service: st
 function Apps(props: PageProps<{ user?: string | number }>) {
   bindSession(String(props.data.user ?? ""));
   const [project, service, tab] = props.path ? props.path.split("/") : [];
+  // A project or a service has its own header (breadcrumb, status, actions):
+  // no "Dashboard" heading above it.
+  const { title } = props;
+  useEffect(() => {
+    if (project) title(null);
+  }, [title, project, service, tab]);
   const page =
     project && service ? (
       <ServiceRoute {...props} project={project} service={service} tab={tab ?? "overview"} />

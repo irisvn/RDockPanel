@@ -14,7 +14,7 @@ impl PanelPage for VolumesPage {
 
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Volumes")
-            .icon("folder")
+            .icon("hard-drive")
             .group("Docker")
             .sort(12)
             .permission("docker.view")

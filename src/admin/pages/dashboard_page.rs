@@ -17,7 +17,7 @@ impl PanelPage for DashboardPage {
 
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Dashboard")
-            .icon("layers")
+            .icon("dashboard")
             .permission("projects.view_any")
     }
 

@@ -15,10 +15,10 @@ Permissions live in the `admin` guard and are granted through roles (System → 
 ## Projects and services (Phase 2)
 
 The pages of the sidebar need: the Dashboard (projects, services and their tabs) `projects.view_any`;
-Actions `projects.view_any`; Monitor `server.view`; Settings `storage_providers.view_any`. The
-resources behind them have no sidebar entry, so give a role that manages services, or notification
-channels, those permissions as well (their routes, `/admin/r/<slug>`, still answer to the resource's
-own permissions).
+Actions `projects.view_any`; Monitor `server.view`; Settings `storage_providers.view_any` or
+`notification_channels.view_any` (each section shows with its own). The resources behind them have no
+sidebar entry, so give a role that manages services `projects.view_any` as well (their routes,
+`/admin/r/<slug>`, still answer to the resource's own permissions).
 
 The resources use the panel's standard permissions, one set per resource
 (`view_any`, `view`, `create`, `update`, `delete`): `projects.*`, `services.*`,

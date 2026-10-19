@@ -23,7 +23,8 @@ feature is free: no project limits, no paid tiers.
   Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts,
   Storage, Backups (databases), Advanced.
 - **Actions** lists deployments, backups and Docker actions; **Settings** holds storage providers and
-  notification channels; **⌘K** finds a project or a service. In English and Vietnamese.
+  notification channels; **⌘K** finds a project or a service. Light by default, with a Light / Dark /
+  System switch per user; in English and Vietnamese.
 
 **Server and Docker**
 

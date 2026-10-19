@@ -58,5 +58,6 @@ Next:
 | 0.4.1 W4: scheduler | the deployment lease reaper (every minute); reconcile/drift, periodic prune, backups | released, in use |
 | 0.5.0: React extension host (API v2) | the Phase 3 interface (dashboard, service pages, templates) | released, in use |
 | 0.5.1 W9 part A: home page, sidebar order, hidden resources | an EasyPanel-like sidebar | released, in use |
-| 0.6.0 W9 part B: resource API, toasts, UI kit 2 for React pages | replaces the panel's own tabs, toasts and resource calls; a light/dark switch per user | in progress |
+| 0.6.0 W9 part B: resource API, toasts, UI kit 2, page titles, any-of page permissions | the kit's tabs, page titles on sub-paths, Settings for either permission, icons | released, in use |
+| 0.6.1: a light/dark switch per user | the panel's sidebar | released, in use |
 | TOTP | two-factor authentication | planned |

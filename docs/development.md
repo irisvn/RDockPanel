@@ -81,7 +81,7 @@ xterm.js is vendored in `resources/admin/js/rdockpanel/vendor/` (see its README 
 
 ## RustCMS dependency
 
-`Cargo.toml` pins RustCMS-Core by a release tag (`v0.5.1`), or by git rev between releases. Never
+`Cargo.toml` pins RustCMS-Core by a release tag (`v0.6.1`), or by git rev between releases. Never
 use a plain path dependency on a working checkout: it picks up unfinished framework changes. For
 unpushed framework commits, pin a `file://` git rev and switch back to GitHub once pushed. After an
 upgrade, run `rustcms migrate` (framework tables) and `rustcms permission:sync`.

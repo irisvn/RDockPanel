@@ -416,7 +416,8 @@ The sidebar is EasyPanel's: Dashboard (the panel's home, `AdminProvider::home`, 
 Monitor, Settings, then the Docker pages, then RustCMS's System. The resources (projects, services,
 domains, …) have no sidebar entry (`navigation(false)`): their routes and API stay, as the React pages
 write through them, and an administrator can still open `/admin/r/<slug>`. The panel is light by default,
-whatever the operating system prefers (`Theme::color_scheme`); a per-user switch comes with RustCMS 0.6.
+whatever the operating system prefers (`Theme::color_scheme`); each user can pick Light, Dark or System
+at the bottom of the sidebar (RustCMS 0.6.1, kept in the browser).
 
 ## Data
 

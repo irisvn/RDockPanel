@@ -14,7 +14,7 @@ impl PanelPage for ServerPage {
 
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Monitor")
-            .icon("file-text")
+            .icon("activity")
             .sort(2)
             .permission("server.view")
     }

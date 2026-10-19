@@ -20,7 +20,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 - Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Actions, Monitor, Settings và các trang Docker.
 - **Trang service** có header (trạng thái, Deploy, Start/Stop, Restart, Open, Logs, Shell) và các tab: Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts, Storage, Backups (với database), Advanced.
-- **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** chứa nơi lưu backup và kênh thông báo; **⌘K** tìm nhanh project hoặc service. Có tiếng Anh và tiếng Việt.
+- **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** chứa nơi lưu backup và kênh thông báo; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
 
 **Server và Docker**
 

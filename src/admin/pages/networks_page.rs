@@ -14,7 +14,7 @@ impl PanelPage for NetworksPage {
 
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Networks")
-            .icon("shield")
+            .icon("network")
             .group("Docker")
             .sort(13)
             .permission("docker.view")

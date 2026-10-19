@@ -1,8 +1,7 @@
-// Small pieces shared by the apps pages, on the panel's UI kit and theme
-// variables (light and dark). Replaced by the kit's own Tabs, Toast, … when
-// RustCMS 0.6 brings them.
+// Small pieces shared by the apps pages, on the panel's UI kit (ui 2,
+// RustCMS 0.6) and theme variables (light and dark).
 import { useState, type ReactNode } from "react";
-import { Alert, Button, cn } from "@rustcms/admin-sdk/ui";
+import { Alert, Button, cn, Tabs as KitTabs, TabsContent, TabsList, TabsTrigger } from "@rustcms/admin-sdk/ui";
 
 /** How a status reads: ok, busy, off or bad. */
 export function statusTone(status: string | null | undefined, busy = false): "ok" | "busy" | "off" | "bad" {
@@ -28,23 +27,28 @@ export function StatusBadge(props: { status?: string | null; busy?: boolean; lab
   );
 }
 
-/** Tabs as links of the page's sub-path (the URL keeps the open tab). */
-export function Tabs(props: { tabs: Array<{ id: string; label: string }>; value: string; onSelect: (id: string) => void }) {
+/** Tabs of the page's sub-path (the URL keeps the open tab), on the kit's Tabs (keyboard, ARIA);
+ * `children` is the open tab's panel. */
+export function Tabs(props: {
+  tabs: Array<{ id: string; label: string }>;
+  value: string;
+  onSelect: (id: string) => void;
+  label?: string;
+  children?: ReactNode;
+}) {
   return (
-    <nav className="rdp2-tabs" role="tablist">
-      {props.tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          aria-selected={tab.id === props.value}
-          className={cn("rdp2-tab", tab.id === props.value && "rdp2-tab-active")}
-          onClick={() => props.onSelect(tab.id)}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </nav>
+    <KitTabs value={props.value} onValueChange={props.onSelect}>
+      <TabsList aria-label={props.label ?? "Sections"}>
+        {props.tabs.map((tab) => (
+          <TabsTrigger key={tab.id} value={tab.id}>
+            {tab.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      <TabsContent value={props.value} className="rdp2-tab-body">
+        {props.children}
+      </TabsContent>
+    </KitTabs>
   );
 }
 

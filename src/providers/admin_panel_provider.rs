@@ -95,7 +95,7 @@ pub fn provider() -> AdminProvider {
             rustcms::admin::Requires {
                 react: "19.3",
                 react_query: "5.104",
-                ui: 1,
+                ui: 2,
             },
         )
         .extension_style(

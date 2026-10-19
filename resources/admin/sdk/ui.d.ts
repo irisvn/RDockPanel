@@ -1,4 +1,4 @@
-// The panel's UI kit (`ui` module version 1). Props follow the panel's own
+// The panel's UI kit (`ui` level 2; level 1 had everything up to `cn`). Props follow the panel's own
 // components; they accept the usual HTML attributes of their element.
 import type * as React from "react";
 
@@ -26,3 +26,40 @@ export declare const PageHeader: React.FC<{ title: React.ReactNode; description?
 export declare const Loading: React.FC<{ label?: string }>;
 export declare const ErrorState: React.FC<{ error: unknown }>;
 export declare function cn(...inputs: Array<string | false | null | undefined>): string;
+
+// ui 2
+
+/** Controlled tabs (`value` from e.g. `props.path`). */
+export declare const Tabs: React.FC<{ value: string; onValueChange: (value: string) => void; className?: string; children: React.ReactNode }>;
+export declare const TabsList: React.FC<Props<"div"> & { "aria-label": string }>;
+export declare const TabsTrigger: React.FC<{ value: string; className?: string; disabled?: boolean; children: React.ReactNode }>;
+export declare const TabsContent: React.FC<{ value: string; className?: string; children: React.ReactNode }>;
+
+/** A menu under a button; `trigger` is the button's content. */
+export declare const DropdownMenu: React.FC<{
+  trigger: React.ReactNode;
+  children: React.ReactNode;
+  align?: "start" | "end";
+  variant?: "default" | "outline" | "ghost" | "destructive" | "secondary" | "link";
+  size?: "default" | "sm" | "lg" | "icon";
+  className?: string;
+  "aria-label"?: string;
+}>;
+export declare const DropdownMenuItem: React.FC<{ onSelect?: () => void; destructive?: boolean; disabled?: boolean; children: React.ReactNode }>;
+export declare const DropdownMenuSeparator: React.FC;
+export declare const DropdownMenuLabel: React.FC<{ children: React.ReactNode }>;
+
+/** `children`: one element that accepts `aria-describedby` and pointer/focus handlers. */
+export declare const Tooltip: React.FC<{ content: React.ReactNode; children: React.ReactElement; align?: "start" | "end" | "center" }>;
+
+export declare const Table: React.FC<Props<"table">>;
+export declare const TableHeader: React.FC<Props<"thead">>;
+export declare const TableBody: React.FC<Props<"tbody">>;
+export declare const TableRow: React.FC<Props<"tr">>;
+export declare const TableHead: React.FC<Props<"th">>;
+export declare const TableCell: React.FC<Props<"td">>;
+export declare const Skeleton: React.FC<Props<"div">>;
+export declare const Separator: React.FC<{ orientation?: "horizontal" | "vertical"; className?: string }>;
+/** Preformatted text with a copy button. */
+export declare const CodeBlock: React.FC<{ code: string; label?: string; className?: string }>;
+
