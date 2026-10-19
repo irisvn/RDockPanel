@@ -6,6 +6,7 @@ pub mod cert_resolver;
 pub mod certificate;
 pub mod database_backup;
 pub mod deployment;
+pub mod git_provider;
 pub mod notification_channel;
 pub mod panel_setting;
 pub mod project;

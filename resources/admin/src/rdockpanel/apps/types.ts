@@ -55,6 +55,8 @@ export type ServiceDetail = {
     git_url: string | null;
     git_branch: string | null;
     git_path: string | null;
+    /** The GitHub token it is cloned with (Settings → Git). */
+    git_provider_id: number | null;
     builder: "dockerfile" | "nixpacks";
     dockerfile_path: string | null;
     dockerfile: string | null;

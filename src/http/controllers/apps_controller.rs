@@ -260,6 +260,7 @@ pub async fn service(
             "git_url": row.git_url,
             "git_branch": row.git_branch,
             "git_path": row.git_path,
+            "git_provider_id": row.git_provider_id,
             "builder": row.builder,
             "dockerfile_path": row.dockerfile_path,
             "dockerfile": row.dockerfile,

@@ -507,6 +507,35 @@ window.rustcms?.registerTranslations?.("vi", {
   "Every service, the panel and Traefik stop until the server is back (usually a minute or two).":
     "Mọi service, panel và Traefik sẽ dừng tới khi server chạy lại (thường một, hai phút).",
   "Type the server's hostname to confirm": "Gõ hostname của server để xác nhận",
+  // GitHub tokens
+  "Edit GitHub token": "Sửa GitHub token",
+  "Add a GitHub token": "Thêm GitHub token",
+  Token: "Token",
+  "Leave empty to keep it.": "Để trống để giữ token cũ.",
+  "A fine-grained token with read access to Contents and Metadata of the repositories, or a classic one with repo. GitHub checks it first.":
+    "Token fine-grained có quyền đọc Contents và Metadata của các repo, hoặc token classic có quyền repo. GitHub sẽ kiểm tra token trước.",
+  "Projects that may use it": "Project được dùng token này",
+  "Their developers can list and clone every repository this token reaches.":
+    "Developer của các project này xem được và clone được mọi repo mà token truy cập được.",
+  "Tokens that clone private repositories, each for the projects you give it. Never shown again once saved.":
+    "Token để clone repo private, mỗi token dùng cho các project được chọn. Lưu xong sẽ không hiện lại.",
+  "No token: services clone public repositories, or private ones with a deploy key.":
+    "Chưa có token: service clone repo public, hoặc repo private bằng deploy key.",
+  "account unknown": "chưa rõ tài khoản",
+  "no project": "chưa có project",
+  "service(s)": "service",
+  "GitHub accepts it": "GitHub chấp nhận token",
+  "Services clone with it": "Đang có service dùng token này",
+  "Remove this token?": "Xoá token này?",
+  "Clone with": "Clone bằng",
+  "A public URL, or the deploy key": "URL public, hoặc deploy key",
+  "Choose a repository": "Chọn repo",
+  "Search repositories": "Tìm repo",
+  Repositories: "Repo",
+  Branches: "Branch",
+  "https://github.com/<owner>/<repo>.git, cloned with the token": "https://github.com/<owner>/<repo>.git, clone bằng token",
+  "A private GitHub repository: add a GitHub token in Settings → Git and give it this project, or use a deploy key.":
+    "Repo GitHub private: thêm GitHub token ở Settings → Git và chọn project này, hoặc dùng deploy key.",
   // Force rebuild, recent errors
   "Force rebuild": "Build lại từ đầu",
   "force rebuild": "build lại từ đầu",

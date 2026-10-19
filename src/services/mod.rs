@@ -13,6 +13,7 @@ pub mod deploy_service;
 pub mod deployment_service;
 pub mod docker_service;
 pub mod dotenv;
+pub mod github_service;
 pub mod live_service;
 pub mod notify_service;
 pub mod panel_domain_service;

@@ -329,7 +329,7 @@ pub(crate) async fn apply(
                 url,
                 source.git_branch.as_deref(),
                 &dir.join("src"),
-                secrets.deploy_key.as_deref(),
+                secrets.git(),
                 log,
             )
             .await?;

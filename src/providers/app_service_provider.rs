@@ -58,6 +58,11 @@ impl ServiceProvider for AppServiceProvider {
             crate::models::cert_resolver::Column::Token,
             rustcms::crypto::Binding::Column,
         );
+        app.encrypted_column::<crate::models::git_provider::Entity>(
+            crate::models::git_provider::Column::Token,
+            rustcms::crypto::Binding::Column,
+        );
+        app.bind(crate::services::github_service::GitHub::default());
         // `rustcms db:seed` runs this one (it calls the others).
         app.seeder(crate::database::seeders::DatabaseSeeder);
         // rustcms:seeders

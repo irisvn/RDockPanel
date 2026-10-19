@@ -72,7 +72,8 @@ feature is free: no project limits, no paid tiers.
 - **EasyPanel templates**: the 800+ templates of easypanel.io in one click (searched, filled in by
   their own form, deployed with their databases), fetched from their repository when you open the
   catalog; or paste a template's output ("Create from Schema").
-- **Builds**: an app from a Git repository (https, or ssh with a generated deploy key; a branch, tag
+- **Builds**: an app from a Git repository (https, ssh with a generated deploy key, or a GitHub token of
+  Settings → Git given to its project, its repositories picked from a list; a branch, tag
   or commit; a sub-directory), built with its Dockerfile or Nixpacks, or from a Dockerfile written in
   the panel; the build's log is the deployment's. A deployment trigger URL deploys from a CI, and a
   signed GitHub webhook deploys on each push (auto deploy).

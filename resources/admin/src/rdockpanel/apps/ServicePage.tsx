@@ -663,6 +663,123 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
   );
 }
 
+type GitHubToken = { id: number; name: string; account: string | null };
+type GitHubRepo = { full_name: string; private: boolean; default_branch: string | null; url: string };
+
+/** Clone with a GitHub token of Settings → Git (given to the project): its
+ * repositories and their branches to pick from. */
+function GitHubPicker(props: {
+  t: T;
+  d: ServiceDetail;
+  api: Props["api"];
+  provider: number | null;
+  url: string;
+  branch: string;
+  error?: string[];
+  disabled: boolean;
+  onProvider: (id: number | null) => void;
+  onRepo: (url: string, defaultBranch: string | null) => void;
+}) {
+  const { t, d } = props;
+  const [tokens, setTokens] = useState<GitHubToken[] | null>(null);
+  const [repos, setRepos] = useState<GitHubRepo[] | null>(null);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [filter, setFilter] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const base = `/apps/services/${d.service.id}/github`;
+  useEffect(() => {
+    if (!d.can.update) return;
+    props.api.get<{ providers: GitHubToken[] }>(base).then((r) => setTokens(r.providers), setError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base]);
+  const repoName = props.url.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "");
+  useEffect(() => {
+    if (!props.provider || !/^[\w.-]+\/[\w.-]+$/.test(repoName)) return setBranches([]);
+    props.api
+      .get<{ branches: string[] }>(`${base}/${props.provider}/branches`, { query: { repo: repoName } })
+      .then((r) => setBranches(r.branches), () => setBranches([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.provider, repoName]);
+  if (!tokens) return <ErrorNote error={error} />;
+  if (tokens.length === 0 && !props.provider) {
+    return <p className="rdp2-small rdp2-muted">{t("A private GitHub repository: add a GitHub token in Settings → Git and give it this project, or use a deploy key.")}</p>;
+  }
+  const shown = (repos ?? []).filter((r) => r.full_name.toLowerCase().includes(filter.toLowerCase())).slice(0, 200);
+  return (
+    <div className="rdp2-form">
+      <Field label={t("Clone with")} error={props.error}>
+        <NativeSelect
+          value={props.provider ?? ""}
+          disabled={props.disabled}
+          onChange={(e) => {
+            props.onProvider(e.target.value ? Number(e.target.value) : null);
+            setRepos(null);
+          }}
+        >
+          <option value="">{t("A public URL, or the deploy key")}</option>
+          {tokens.map((tok) => (
+            <option key={tok.id} value={tok.id}>
+              GitHub · {tok.name}
+              {tok.account ? ` (${tok.account})` : ""}
+            </option>
+          ))}
+        </NativeSelect>
+      </Field>
+      {props.provider && !props.disabled && (
+        <div className="rdp2-form">
+          {repos === null ? (
+            <div className="rdp2-row">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  props.api
+                    .get<{ repositories: GitHubRepo[] }>(`${base}/${props.provider}/repos`)
+                    .then((r) => setRepos(r.repositories), setError)
+                }
+              >
+                {t("Choose a repository")}
+              </Button>
+            </div>
+          ) : (
+            <div className="rdp2-grid2">
+              <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Search repositories")} />
+              <NativeSelect
+                value={repos.find((r) => r.url === props.url)?.url ?? ""}
+                onChange={(e) => {
+                  const repo = repos.find((r) => r.url === e.target.value);
+                  if (repo) props.onRepo(repo.url, repo.default_branch);
+                }}
+              >
+                <option value="">{`${t("Repositories")} (${repos.length})`}</option>
+                {shown.map((r) => (
+                  <option key={r.url} value={r.url}>
+                    {r.full_name}
+                    {r.private ? " 🔒" : ""}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+          )}
+          {branches.length > 0 && (
+            <p className="rdp2-small rdp2-muted">
+              {t("Branches")}:{" "}
+              {branches.slice(0, 30).map((b, i) => (
+                <span key={b}>
+                  {i > 0 && ", "}
+                  <code className={b === props.branch ? "rdp2-strong" : undefined}>{b}</code>
+                </span>
+              ))}
+            </p>
+          )}
+          <ErrorNote error={error} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Saves `data` on the service (the resource's own validation). */
 function useServiceSave(id: number, onSaved: () => void) {
   const [error, setError] = useState<unknown>(null);
@@ -693,6 +810,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
   const [gitUrl, setGitUrl] = useState(s.git_url ?? "");
   const [branch, setBranch] = useState(s.git_branch ?? "main");
   const [path, setPath] = useState(s.git_path ?? "/");
+  const [provider, setProvider] = useState<number | null>(s.git_provider_id);
   const [builder, setBuilder] = useState(s.builder);
   const [dockerfilePath, setDockerfilePath] = useState(s.dockerfile_path ?? "Dockerfile");
   const [dockerfile, setDockerfile] = useState(s.dockerfile ?? "FROM nginx:1.27-alpine\n");
@@ -722,6 +840,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
                 git_url: gitUrl.trim(),
                 git_branch: branch.trim() || null,
                 git_path: path.trim() || "/",
+                git_provider_id: provider === null ? null : String(provider),
                 compose_file: composeFile.trim() || "docker-compose.yml",
               });
             } else if (source === "image") {
@@ -732,6 +851,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
                 git_url: gitUrl.trim(),
                 git_branch: branch.trim() || null,
                 git_path: path.trim() || "/",
+                git_provider_id: provider === null ? null : String(provider),
                 builder,
                 dockerfile_path: dockerfilePath.trim() || "Dockerfile",
               });
@@ -760,7 +880,20 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
           )}
           {isCompose && source === "git" && (
             <>
-              <Field label={t("Repository URL")} help={t("https://github.com/org/app.git, or git@github.com:org/app.git with a deploy key")} error={fields.git_url}>
+              <GitHubPicker
+                {...props}
+                provider={provider}
+                url={gitUrl}
+                error={fields.git_provider_id}
+                disabled={disabled}
+                onProvider={setProvider}
+                onRepo={(url, defaultBranch) => {
+                  setGitUrl(url);
+                  if (defaultBranch) setBranch(defaultBranch);
+                }}
+                branch={branch}
+              />
+              <Field label={t("Repository URL")} help={provider ? t("https://github.com/<owner>/<repo>.git, cloned with the token") : t("https://github.com/org/app.git, or git@github.com:org/app.git with a deploy key")} error={fields.git_url}>
                 <Input value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} disabled={disabled} placeholder="https://github.com/org/app.git" />
               </Field>
               <div className="rdp2-grid2">
@@ -793,7 +926,20 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
           )}
           {!isCompose && source === "git" && (
             <>
-              <Field label={t("Repository URL")} help={t("https://github.com/org/app.git, or git@github.com:org/app.git with a deploy key")} error={fields.git_url}>
+              <GitHubPicker
+                {...props}
+                provider={provider}
+                url={gitUrl}
+                error={fields.git_provider_id}
+                disabled={disabled}
+                onProvider={setProvider}
+                onRepo={(url, defaultBranch) => {
+                  setGitUrl(url);
+                  if (defaultBranch) setBranch(defaultBranch);
+                }}
+                branch={branch}
+              />
+              <Field label={t("Repository URL")} help={provider ? t("https://github.com/<owner>/<repo>.git, cloned with the token") : t("https://github.com/org/app.git, or git@github.com:org/app.git with a deploy key")} error={fields.git_url}>
                 <Input value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} disabled={disabled} placeholder="https://github.com/org/app.git" />
               </Field>
               <div className="rdp2-grid2">

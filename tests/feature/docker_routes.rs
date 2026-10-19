@@ -62,6 +62,43 @@ db_test!(
                 Case::new(Method::GET, "/apps/overview")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                // GitHub tokens: system.manage; a service's: services.update.
+                Case::new(Method::GET, "/apps/git/providers")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/git/providers").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::PATCH, "/apps/git/providers/1").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::DELETE, "/apps/git/providers/1").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::POST, "/apps/git/providers/1/test").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::GET, "/apps/services/1/github")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/services/1/github/1/repos").expect(
+                    "viewer",
+                    &viewer,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::GET, "/apps/services/1/github/1/branches").expect(
+                    "viewer",
+                    &viewer,
+                    StatusCode::FORBIDDEN,
+                ),
                 // Settings → Panel's controls: system.manage.
                 Case::new(Method::GET, "/apps/system/status")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)

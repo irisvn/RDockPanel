@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 
 use crate::support::{self, fake_docker::FakeDocker};
 
-const FAST: Timings = Timings {
+pub(crate) const FAST: Timings = Timings {
     poll: Duration::from_millis(5),
     settle: Duration::from_millis(20),
     timeout: Duration::from_secs(2),

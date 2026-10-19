@@ -12,7 +12,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Overview: metrics, notes | Done | CPU and memory of each task (sparklines); notes for the team |
 | Overview: Force Rebuild, recent errors | Done | Force rebuild builds without the cache (Compose: `build --no-cache`, `up --force-recreate`), pulls an image again and replaces every task; recent errors: failed tasks (exit code, Swarm's error) and the last failed deployment with the end of its log |
 | Source: Docker image (private registry) | Done | pinned to its digest |
-| Source: Git, GitHub | Done | https or ssh with a generated deploy key; branch, tag or commit; build path |
+| Source: Git, GitHub | Done | https or ssh with a generated deploy key; branch, tag or commit; build path; a GitHub token (Settings → Git, sealed, given to chosen projects): repositories and branches picked from a list, the token handed to Git apart from the URL (never logged) |
 | Source: Dockerfile | Done | written in the panel |
 | Source: Upload | Missing | |
 | Build: Dockerfile, Nixpacks | Done | BuildKit; Nixpacks in the panel's image |

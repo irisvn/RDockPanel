@@ -43,6 +43,9 @@ pub struct Model {
     pub deploy_key: Option<Encrypted<String>>,
     /// Its public half, to add to the repository.
     pub deploy_key_public: Option<String>,
+    /// The GitHub token its repository is cloned with (`git_providers`;
+    /// none: its deploy key, or a public repository).
+    pub git_provider_id: Option<i64>,
     /// SHA-256 of the deployment trigger's token (`/api/deploy/…`).
     pub trigger_hash: Option<String>,
     /// A Compose service's file, written in the panel (`source = image`), or

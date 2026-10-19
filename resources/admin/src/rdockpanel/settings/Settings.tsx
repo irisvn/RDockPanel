@@ -12,6 +12,7 @@ import { Certificates } from "./Certificates";
 import { UploadedCertificates } from "./Uploaded";
 import { Traefik } from "./Traefik";
 import { Panel } from "./Panel";
+import { Git } from "./Git";
 
 type Provider = {
   id: number;
@@ -236,6 +237,7 @@ const TABS: Array<{ id: string; label: string; permission: string }> = [
   { id: "panel", label: "Panel", permission: "system.manage" },
   { id: "traefik", label: "Traefik", permission: "system.manage" },
   { id: "certificates", label: "Certificates", permission: "system.manage" },
+  { id: "git", label: "Git", permission: "system.manage" },
   { id: "backups", label: "Backups", permission: "storage_providers.view_any" },
   { id: "notifications", label: "Notifications", permission: "notification_channels.view_any" },
 ];
@@ -264,6 +266,7 @@ export function Settings(props: PageProps<unknown>) {
             <UploadedCertificates {...props} />
           </>
         )}
+        {tab === "git" && <Git {...props} />}
         {tab === "backups" && <StorageProviders {...props} />}
         {tab === "notifications" && <Notifications {...props} />}
       </Tabs>

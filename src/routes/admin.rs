@@ -8,7 +8,7 @@ use rustcms::prelude::*;
 use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
     deploy_controller as deploy, docker_controller as docker, domains_controller as domains,
-    notifications_controller as notifications, server_controller as server,
+    git_controller as git, notifications_controller as notifications, server_controller as server,
     system_controller as system, templates_controller as templates, traefik_controller as traefik,
 };
 
@@ -93,6 +93,46 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                .get(
+                    "/git/providers",
+                    AdminAccess::can("system.manage"),
+                    git::index,
+                )
+                .post(
+                    "/git/providers",
+                    AdminAccess::can("system.manage"),
+                    git::create,
+                )
+                .patch(
+                    "/git/providers/{id}",
+                    AdminAccess::can("system.manage"),
+                    git::update,
+                )
+                .delete(
+                    "/git/providers/{id}",
+                    AdminAccess::can("system.manage"),
+                    git::delete,
+                )
+                .post(
+                    "/git/providers/{id}/test",
+                    AdminAccess::can("system.manage"),
+                    git::test,
+                )
+                .get(
+                    "/services/{id}/github",
+                    AdminAccess::can("services.update"),
+                    git::for_service,
+                )
+                .get(
+                    "/services/{id}/github/{provider}/repos",
+                    AdminAccess::can("services.update"),
+                    git::repositories,
+                )
+                .get(
+                    "/services/{id}/github/{provider}/branches",
+                    AdminAccess::can("services.update"),
+                    git::branches,
+                )
                 .get(
                     "/system/status",
                     AdminAccess::can("system.manage"),

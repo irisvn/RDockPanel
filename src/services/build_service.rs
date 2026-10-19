@@ -106,17 +106,114 @@ async fn run(
     }
 }
 
+/// How Git reaches a repository: its deploy key (ssh), a GitHub token
+/// (https, handed to Git apart from the URL), or neither (public).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct GitAuth<'a> {
+    pub deploy_key: Option<&'a str>,
+    pub token: Option<&'a str>,
+    /// Why its GitHub token may not be used (removed, or taken from the
+    /// project): said when Git would need it.
+    pub denied: Option<&'a str>,
+}
+
+/// A token is only GitHub's: `https://github.com/<owner>/<repo>`.
+fn check_token_url(url: &str, auth: GitAuth<'_>) -> Result<(), Outcome> {
+    if let Some(why) = auth.denied {
+        return Err(failed(why));
+    }
+    if auth.token.is_some() && crate::services::github_service::repository_of(url).is_none() {
+        return Err(failed(
+            "a GitHub token clones only https://github.com/<owner>/<repo>",
+        ));
+    }
+    Ok(())
+}
+
+/// Writes Git's credentials in `home` (a directory of their own, never in
+/// a checkout or a build context, removed with it): the deploy key, the
+/// token and the program that hands it to Git (`GIT_ASKPASS`).
+fn write_credentials(home: &Path, auth: GitAuth<'_>) -> Result<(), Outcome> {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    if auth.deploy_key.is_none() && auth.token.is_none() {
+        return Ok(());
+    }
+    if !home.is_dir() {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(home)
+            .map_err(|e| failed(format!("the credentials: {e}")))?;
+    }
+    let write = |name: &str, mode: u32, content: &[u8]| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(home.join(name))
+            .and_then(|mut file| file.write_all(content))
+            .map_err(|e| failed(format!("the credentials: {e}")))
+    };
+    if let Some(key) = auth.deploy_key {
+        write("key", 0o600, format!("{key}\n").as_bytes())?;
+    }
+    if let Some(token) = auth.token {
+        write("token", 0o600, token.trim().as_bytes())?;
+        // Asked for a user name, then for a password: the token, read from
+        // its file (never an argument, nor in the environment).
+        write(
+            "askpass",
+            0o700,
+            b"#!/bin/sh\ncase \"$1\" in\n  Username*) echo x-access-token ;;\n  *) cat \"$RDP_GIT_TOKEN_FILE\" ;;\nesac\n",
+        )?;
+    }
+    Ok(())
+}
+
+/// `git args` with `home` for its credentials ([`write_credentials`]): no
+/// environment of the panel's, no credential helper or system
+/// configuration (nothing stored, nothing asked).
+fn git_command(home: &Path, auth: GitAuth<'_>, args: &[&str]) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new("git");
+    command
+        .args(["-c", "credential.helper=", "-c", "core.askPass="])
+        .args(args)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    if auth.deploy_key.is_some() {
+        command.env(
+            "GIT_SSH_COMMAND",
+            format!(
+                "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={}",
+                home.join("key").display(),
+                home.join("known_hosts").display()
+            ),
+        );
+    }
+    if auth.token.is_some() {
+        command
+            .env("GIT_ASKPASS", home.join("askpass"))
+            .env("RDP_GIT_TOKEN_FILE", home.join("token"));
+    }
+    command
+}
+
 /// Clones `build`'s repository into `dir/src`: its commit.
 async fn clone(
     build: &Build,
     dir: &Path,
-    deploy_key: Option<&str>,
+    auth: GitAuth<'_>,
     log: &mut RunLog<'_>,
 ) -> Result<String, Outcome> {
     let url = build.git_url.as_deref().unwrap_or_default();
     if !valid_git_url(url) {
         return Err(failed("the repository's URL is not an https or ssh URL"));
     }
+    check_token_url(url, auth)?;
     let branch = build
         .git_branch
         .as_deref()
@@ -126,45 +223,15 @@ async fn clone(
         return Err(failed("the branch is not a branch, tag or commit"));
     }
     let src = dir.join("src");
-    // The key beside the checkout, never in it (nor in a build context).
-    let ssh = dir.join("ssh");
-    let git = |args: &[&str]| {
-        let mut command = tokio::process::Command::new("git");
-        command
-            .args(args)
-            .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .env("HOME", &ssh)
-            .env("GIT_TERMINAL_PROMPT", "0");
-        if deploy_key.is_some() {
-            command.env(
-                "GIT_SSH_COMMAND",
-                format!(
-                    "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={}",
-                    ssh.join("key").display(),
-                    ssh.join("known_hosts").display()
-                ),
-            );
-        }
-        command
-    };
-    if let Some(key) = deploy_key {
-        use std::io::Write;
-        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&ssh)
-            .map_err(|e| failed(format!("the deploy key: {e}")))?;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(ssh.join("key"))
-            .map_err(|e| failed(format!("the deploy key: {e}")))?;
-        file.write_all(key.as_bytes())
-            .and_then(|()| file.write_all(b"\n"))
-            .map_err(|e| failed(format!("the deploy key: {e}")))?;
+    // The credentials beside the checkout, never in it (nor in a build
+    // context), removed once cloned (before any builder runs).
+    let ssh = WorkDir(dir.join("ssh"));
+    let ssh = &ssh.0;
+    if let Some(token) = auth.token {
+        log.hide(token);
     }
+    write_credentials(ssh, auth)?;
+    let git = |args: &[&str]| git_command(ssh, auth, args);
     log.line(format!(
         "cloning {url}{}",
         branch.map(|b| format!(" ({b})")).unwrap_or_default()
@@ -211,12 +278,13 @@ pub(crate) async fn sync_repo(
     url: &str,
     branch: Option<&str>,
     checkout: &Path,
-    deploy_key: Option<&str>,
+    auth: GitAuth<'_>,
     log: &mut RunLog<'_>,
 ) -> Result<String, Outcome> {
     if !valid_git_url(url) {
         return Err(failed("the repository's URL is not an https or ssh URL"));
     }
+    check_token_url(url, auth)?;
     let branch = branch.map(str::trim).filter(|b| !b.is_empty());
     if branch.is_some_and(|b| !valid_ref(b)) {
         return Err(failed("the branch is not a branch, tag or commit"));
@@ -232,39 +300,11 @@ pub(crate) async fn sync_repo(
             .create(&ssh)
             .map_err(|e| failed(format!("the deploy key: {e}")))?;
     }
-    if let Some(key) = deploy_key {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(ssh.join("key"))
-            .map_err(|e| failed(format!("the deploy key: {e}")))?;
-        file.write_all(key.as_bytes())
-            .and_then(|()| file.write_all(b"\n"))
-            .map_err(|e| failed(format!("the deploy key: {e}")))?;
+    if let Some(token) = auth.token {
+        log.hide(token);
     }
-    let git = |args: &[&str]| {
-        let mut command = tokio::process::Command::new("git");
-        command
-            .args(args)
-            .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .env("HOME", &ssh)
-            .env("GIT_TERMINAL_PROMPT", "0");
-        if deploy_key.is_some() {
-            command.env(
-                "GIT_SSH_COMMAND",
-                format!(
-                    "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={}",
-                    ssh.join("key").display(),
-                    ssh.join("known_hosts").display()
-                ),
-            );
-        }
-        command
-    };
+    write_credentials(&ssh, auth)?;
+    let git = |args: &[&str]| git_command(&ssh, auth, args);
     let at = checkout.to_string_lossy().into_owned();
     let reference = branch.unwrap_or("HEAD");
     // The first time an empty repository (any reference fetches then, a
@@ -468,7 +508,7 @@ pub(crate) async fn build(
     docker: &Docker,
     build: &Build,
     tag: &str,
-    deploy_key: Option<&str>,
+    auth: GitAuth<'_>,
     no_cache: bool,
     log: &mut RunLog<'_>,
 ) -> Result<String, Outcome> {
@@ -478,7 +518,7 @@ pub(crate) async fn build(
     std::fs::create_dir_all(&dir.0).map_err(|e| failed(format!("the build directory: {e}")))?;
     let context = match build.source.as_str() {
         "git" => {
-            let commit = clone(build, &dir.0, deploy_key, log).await?;
+            let commit = clone(build, &dir.0, auth, log).await?;
             log.line(format!("commit {commit}")).await;
             let path = inside(build.git_path.as_deref().unwrap_or("/"))
                 .ok_or_else(|| failed("the build path leaves the repository"))?;
@@ -578,6 +618,66 @@ pub(crate) async fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_token_reaches_git_apart() {
+        use std::os::unix::fs::PermissionsExt;
+        const TOKEN: &str = "ghp_secret_0123456789";
+        let home =
+            std::env::temp_dir().join(format!("rdp-cred-{}", random_string(8).to_lowercase()));
+        let auth = GitAuth {
+            token: Some(TOKEN),
+            ..Default::default()
+        };
+        write_credentials(&home, auth).unwrap();
+        let mode = |name: &str| {
+            std::fs::metadata(home.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode(""), 0o700);
+        assert_eq!(mode("token"), 0o600);
+        // Neither an argument nor a variable of Git's: the file, read by askpass.
+        let command = git_command(
+            &home,
+            auth,
+            &["ls-remote", "--", "https://github.com/o/r.git"],
+        );
+        let std = command.as_std();
+        assert!(std.get_args().all(|a| !a.to_string_lossy().contains(TOKEN)));
+        assert!(
+            std.get_envs()
+                .all(|(_, v)| v.is_none_or(|v| !v.to_string_lossy().contains(TOKEN)))
+        );
+        let ask = |prompt: &str| {
+            let out = std::process::Command::new(home.join("askpass"))
+                .arg(prompt)
+                .env("RDP_GIT_TOKEN_FILE", home.join("token"))
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        assert_eq!(
+            ask("Username for 'https://github.com': ").trim(),
+            "x-access-token"
+        );
+        assert_eq!(
+            ask("Password for 'https://x-access-token@github.com': "),
+            TOKEN
+        );
+        // Only for GitHub.
+        assert!(check_token_url("https://github.com/o/r.git", auth).is_ok());
+        assert!(check_token_url("https://evil.example/o/r.git", auth).is_err());
+        assert!(check_token_url("https://evil.example/o/r.git", GitAuth::default()).is_ok());
+        let denied = GitAuth {
+            denied: Some("its GitHub token was removed"),
+            ..Default::default()
+        };
+        assert!(check_token_url("https://github.com/o/r.git", denied).is_err());
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn paths_and_urls_stay_in_bounds() {

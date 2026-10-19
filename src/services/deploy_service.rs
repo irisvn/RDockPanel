@@ -140,6 +140,9 @@ pub struct Compose {
     /// The file in that directory (`docker-compose.yml`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// The GitHub token the repository is cloned with (`git_providers`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_provider: Option<i64>,
 }
 
 /// A service's image built by the panel: from a Git repository, or from a
@@ -155,6 +158,9 @@ pub struct Build {
     /// The context in the repository (`/`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_path: Option<String>,
+    /// The GitHub token the repository is cloned with (`git_providers`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_provider: Option<i64>,
     /// `dockerfile` or `nixpacks`.
     pub builder: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -437,6 +443,9 @@ impl Snapshot {
                 file: (service.source == "git")
                     .then(|| service.compose_file.clone())
                     .flatten(),
+                git_provider: (service.source == "git")
+                    .then_some(service.git_provider_id)
+                    .flatten(),
             }),
             build: match service.source.as_str() {
                 "git" | "dockerfile" if service.kind != "compose" => Some(Build {
@@ -449,6 +458,9 @@ impl Snapshot {
                         .flatten(),
                     git_path: (service.source == "git")
                         .then(|| service.git_path.clone())
+                        .flatten(),
+                    git_provider: (service.source == "git")
+                        .then_some(service.git_provider_id)
                         .flatten(),
                     builder: if service.source == "git" {
                         service.builder.clone()

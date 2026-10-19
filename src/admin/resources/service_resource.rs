@@ -62,6 +62,7 @@ impl Resource for ServiceResource {
                 .max_length(255),
             Field::column(service::Column::Source),
             Field::column(service::Column::GitUrl).max_length(512),
+            Field::column(service::Column::GitProviderId),
             Field::column(service::Column::GitBranch).max_length(255),
             Field::column(service::Column::GitPath).max_length(255),
             Field::column(service::Column::Builder),
@@ -230,11 +231,12 @@ impl Resource for ServiceResource {
 
     async fn mutate_before_create(
         ctx: &Ctx,
-        _txn: &DatabaseTransaction,
+        txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
         let mut data = normalize(data);
         check(ctx, &data, None)?;
+        check_git_provider(ctx, txn, &data, None).await?;
         // Built by the panel: no image to name (the column holds one).
         if !data.contains_key("image") {
             data.insert("image".to_owned(), serde_json::Value::String(String::new()));
@@ -264,8 +266,69 @@ impl Resource for ServiceResource {
             return Err(rustcms::AppError::Forbidden);
         }
         check(ctx, &data, Some(&record))?;
+        check_git_provider(ctx, txn, &data, Some(&record)).await?;
         Ok(data)
     }
+}
+
+/// A GitHub token (Settings → Git) clones a repository of GitHub, for the
+/// projects it is given to. Checked when the repository or the token
+/// changes (a token taken from the project later fails its deployments).
+async fn check_git_provider(
+    ctx: &Ctx,
+    txn: &DatabaseTransaction,
+    data: &Data,
+    record: Option<&service::Model>,
+) -> AppResult<()> {
+    if !["git_provider_id", "git_url", "source", "project_id"]
+        .iter()
+        .any(|f| data.contains_key(*f))
+    {
+        return Ok(());
+    }
+    let provider = if data.contains_key("git_provider_id") {
+        int(data, "git_provider_id")
+    } else {
+        record.and_then(|r| r.git_provider_id)
+    };
+    let source = text(data, "source")
+        .map(str::to_owned)
+        .or(record.map(|r| r.source.clone()))
+        .unwrap_or_default();
+    let (Some(provider), "git") = (provider, source.as_str()) else {
+        return Ok(());
+    };
+    let project = int(data, "project_id").or(record.map(|r| r.project_id));
+    // Held until the write commits: a deletion of the token waits for it
+    // (and then counts this service), or went first.
+    let found = crate::models::git_provider::Entity::find_by_id(provider)
+        .lock_shared()
+        .one(txn)
+        .await?;
+    if !found.is_some_and(|p| project.is_some_and(|project| p.allows(project))) {
+        return Err(ValidationErrors::field(
+            "git_provider_id",
+            ctx.t("is not a GitHub token given to this project (Settings → Git)"),
+        )
+        .into());
+    }
+    let url = if data.contains_key("git_url") {
+        text(data, "git_url").map(str::to_owned)
+    } else {
+        record.and_then(|r| r.git_url.clone())
+    };
+    if url
+        .as_deref()
+        .and_then(crate::services::github_service::repository_of)
+        .is_none()
+    {
+        return Err(ValidationErrors::field(
+            "git_url",
+            ctx.t("must be https://github.com/<owner>/<repo> with a GitHub token"),
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// Whether a service runs with added capabilities or sysctls.

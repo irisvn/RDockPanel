@@ -13,6 +13,7 @@ mod deployments;
 mod docker;
 mod docker_routes;
 mod domains;
+mod git;
 mod health;
 mod live;
 mod notifications;

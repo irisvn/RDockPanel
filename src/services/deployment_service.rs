@@ -486,6 +486,8 @@ pub(crate) struct RunLog<'a> {
     text: String,
     saved: std::time::Instant,
     held: std::time::Instant,
+    /// Values never written (a token a tool might print).
+    hidden: Vec<String>,
 }
 
 impl<'a> RunLog<'a> {
@@ -497,6 +499,14 @@ impl<'a> RunLog<'a> {
             text: row.log.clone().unwrap_or_default(),
             saved: std::time::Instant::now(),
             held: std::time::Instant::now(),
+            hidden: vec![],
+        }
+    }
+
+    /// Never writes `secret` (replaced by `******`) from now on.
+    pub(crate) fn hide(&mut self, secret: &str) {
+        if secret.len() >= 4 && !self.hidden.iter().any(|h| h == secret) {
+            self.hidden.push(secret.to_owned());
         }
     }
 
@@ -523,11 +533,12 @@ impl<'a> RunLog<'a> {
     }
 
     pub(crate) async fn line(&mut self, message: impl AsRef<str>) {
-        self.text.push_str(&format!(
-            "{} {}\n",
-            Utc::now().format("%H:%M:%S"),
-            message.as_ref()
-        ));
+        let mut message = message.as_ref().to_owned();
+        for secret in &self.hidden {
+            message = message.replace(secret.as_str(), "******");
+        }
+        self.text
+            .push_str(&format!("{} {}\n", Utc::now().format("%H:%M:%S"), message));
         if self.text.len() > 2 * crate::models::action::LOG_LIMIT {
             self.text = crate::models::action::tail(&self.text).to_owned();
         }
@@ -617,7 +628,14 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
     let traefik = state.service::<Traefik>();
     let outcome = match state.service::<Docker>() {
         Some(docker) => {
-            let secrets = Secrets::of(&row, &service, state.keyring());
+            let secrets = match Secrets::of(&row, &service, state.keyring()) {
+                Ok(secrets) => {
+                    secrets
+                        .with_git_token(db, state.keyring(), &row, &service)
+                        .await
+                }
+                Err(err) => Err(err),
+            };
             if let Ok(secrets) = &secrets
                 && let Some(note) = secrets.unmatched(&row)
             {
@@ -827,6 +845,11 @@ pub(crate) struct Secrets {
     pub(crate) env: BTreeMap<String, String>,
     /// The service's deploy key (a private repository's).
     pub(crate) deploy_key: Option<String>,
+    /// The GitHub token its repository is cloned with.
+    pub(crate) git_token: Option<String>,
+    /// Why that token may not be used (a clone fails, saying it; Stop,
+    /// Restart and Rollback of what runs need none).
+    git_denied: Option<String>,
     /// Its file mounts' contents by path.
     files: BTreeMap<String, String>,
     /// Keys the digest of the environment as resolved (the task template's).
@@ -849,6 +872,8 @@ impl Secrets {
             return Ok(Self {
                 env: BTreeMap::new(),
                 deploy_key: None,
+                git_token: None,
+                git_denied: None,
                 files: BTreeMap::new(),
                 digest_key,
                 registry: None,
@@ -906,10 +931,67 @@ impl Secrets {
         Ok(Self {
             env,
             deploy_key,
+            git_token: None,
+            git_denied: None,
             files,
             digest_key,
             registry,
         })
+    }
+
+    /// How Git reaches the service's repository.
+    pub(crate) fn git(&self) -> crate::services::build_service::GitAuth<'_> {
+        crate::services::build_service::GitAuth {
+            deploy_key: self.deploy_key.as_deref(),
+            token: self.git_token.as_deref(),
+            denied: self.git_denied.as_deref(),
+        }
+    }
+
+    /// The GitHub token `row`'s repository is cloned with, opened: still
+    /// there, and still given to the service's project.
+    async fn with_git_token(
+        mut self,
+        db: &DatabaseConnection,
+        keyring: &Keyring,
+        row: &deployment::Model,
+        service: &service::Model,
+    ) -> Result<Self, Outcome> {
+        let snapshot: Option<Snapshot> = serde_json::from_value(row.spec.clone()).ok();
+        let provider = snapshot.and_then(|s| {
+            s.build
+                .and_then(|b| b.git_provider)
+                .or(s.compose.and_then(|c| c.git_provider))
+        });
+        let Some(provider) = provider else {
+            return Ok(self);
+        };
+        if Trigger::parse(&row.trigger) == Some(Trigger::Destroy) {
+            return Ok(self);
+        }
+        let found = crate::models::git_provider::Entity::find_by_id(provider)
+            .one(db)
+            .await
+            .map_err(|e| Outcome::Failed(e.to_string()))?
+            .filter(|p| p.allows(service.project_id));
+        let Some(found) = found else {
+            self.git_denied = Some(
+                "its GitHub token was removed, or no longer given to this project (Settings → Git)"
+                    .into(),
+            );
+            return Ok(self);
+        };
+        match found
+            .token
+            .open(keyring, &crate::models::git_provider::token_context())
+        {
+            Ok(token) => self.git_token = Some(token),
+            Err(_) => {
+                self.git_denied =
+                    Some("the GitHub token cannot be read (sealed with another APP_KEY)".into());
+            }
+        }
+        Ok(self)
     }
 
     /// Credentials for `snapshot`'s image: the service's, only when they are
@@ -1147,7 +1229,7 @@ async fn apply(
                 docker,
                 build,
                 &tag,
-                secrets.deploy_key.as_deref(),
+                secrets.git(),
                 row.force_rebuild,
                 log,
             )
