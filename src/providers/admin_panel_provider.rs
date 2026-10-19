@@ -9,6 +9,8 @@ pub fn provider() -> AdminProvider {
         // `/admin` opens the Dashboard; the resources stay reachable (their routes
         // serve the React pages) but have no sidebar entry (`navigation(false)`).
         .home("dashboard")
+        // Light by default, as EasyPanel; not the operating system's scheme.
+        .theme(rustcms::admin::Theme::new().color_scheme(rustcms::admin::ColorScheme::Light))
         // Labels in Vietnamese (`rustcms lang:missing vi` lists what is missing).
         .translations("vi", include_str!("../../lang/vi.toml"))
         .resource::<crate::admin::resources::project_resource::ProjectResource>()
