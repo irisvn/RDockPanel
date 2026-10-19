@@ -112,16 +112,36 @@ pub fn valid_volume_name(name: &str) -> bool {
 /// at least two labels (`app.example.com`, `app.localhost`), 253 bytes at most.
 pub fn valid_hostname(host: &str) -> bool {
     let labels: Vec<&str> = host.split('.').collect();
-    host.len() <= 253
-        && labels.len() >= 2
-        && labels.iter().all(|label| {
-            let b = label.as_bytes();
-            (1..=63).contains(&b.len())
-                && b[0].is_ascii_alphanumeric()
-                && b[b.len() - 1].is_ascii_alphanumeric()
-                && b.iter()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
-        })
+    host.len() <= 253 && labels.len() >= 2 && labels.iter().all(|label| valid_label(label))
+}
+
+/// A domain's host: a hostname, or a wildcard `*.example.com` (every name
+/// one level under it).
+pub fn valid_domain_host(host: &str) -> bool {
+    match host.strip_prefix("*.") {
+        Some(rest) => valid_hostname(rest),
+        None => valid_hostname(host),
+    }
+}
+
+/// A Traefik middleware a domain names (`ratelimit@file`, `auth@docker`):
+/// letters, digits, `-`, `_`, `.`, one `@`.
+pub fn valid_middleware(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 100
+        && name.matches('@').count() <= 1
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
+}
+
+fn valid_label(label: &str) -> bool {
+    let b = label.as_bytes();
+    (1..=63).contains(&b.len())
+        && b[0].is_ascii_alphanumeric()
+        && b[b.len() - 1].is_ascii_alphanumeric()
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
 /// A path prefix Traefik routes: `/` or `/segment/...` of URL-safe characters

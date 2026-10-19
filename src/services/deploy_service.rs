@@ -194,6 +194,9 @@ pub struct Domain {
     /// A Compose service's container the domain leads to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compose_service: Option<String>,
+    /// Traefik middlewares of its own (defined in Traefik's files).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub middlewares: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -286,6 +289,15 @@ impl Snapshot {
                     port: u16::try_from(d.port).ok()?,
                     https: d.https,
                     compose_service: d.compose_service.clone(),
+                    middlewares: d
+                        .middlewares
+                        .as_deref()
+                        .unwrap_or_default()
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|m| crate::services::deploy_rules_service::valid_middleware(m))
+                        .map(str::to_owned)
+                        .collect(),
                 })
             })
             .collect();
@@ -980,6 +992,16 @@ pub fn check_redirect(regex: &str, replacement: &str) -> Result<(), &'static str
     Ok(())
 }
 
+/// Traefik's rule for a host: `Host`, or for `*.example.com` a regular
+/// expression of one label under it (the host was checked: letters, digits,
+/// `-`, `.`).
+fn host_rule(host: &str) -> String {
+    match host.strip_prefix("*.") {
+        Some(rest) => format!("HostRegexp(`^[a-z0-9-]+\\.{}$`)", rest.replace('.', "\\.")),
+        None => format!("Host(`{host}`)"),
+    }
+}
+
 /// A Compose service's container on its project's network:
 /// `<project>_<service>_<container>`.
 pub fn compose_alias(base: &str, container: &str) -> String {
@@ -1041,7 +1063,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
             http.middlewares.entry(path.clone()).or_insert_with(
                 || json!({"replacePath": {"path": format!("/api/v1/maintenance/{base}")}}),
             );
-            let mut rule = format!("Host(`{}`)", domain.host);
+            let mut rule = host_rule(&domain.host);
             if domain.path != "/" {
                 rule.push_str(&format!(" && PathPrefix(`{}`)", domain.path));
             }
@@ -1081,11 +1103,14 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
             load_balancer: json!({"servers": [{"url": format!("http://{host}:{}", domain.port)}]}),
         });
         // Host and path were checked (no backticks, nothing that ends a rule).
-        let mut rule = format!("Host(`{}`)", domain.host);
+        let mut rule = host_rule(&domain.host);
         if domain.path != "/" {
             rule.push_str(&format!(" && PathPrefix(`{}`)", domain.path));
         }
         let router = format!("{base}-{index}");
+        // The panel's (redirects, authentication), then the domain's own.
+        let mut access = access.clone();
+        access.extend(domain.middlewares.iter().cloned());
         if domain.https {
             let tls = if options.cert_resolver.is_empty() {
                 json!({})
@@ -1134,6 +1159,34 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wildcard_hosts_and_own_middlewares() {
+        let mut s = snapshot();
+        s.domains[0].host = "*.shop.example.com".to_owned();
+        s.domains[0].middlewares = vec!["ratelimit@file".to_owned()];
+        let yaml = routes(&s, &DeployOptions::default()).unwrap().to_yaml();
+        assert!(
+            yaml.contains(r"HostRegexp(`^[a-z0-9-]+\.shop\.example\.com$`)"),
+            "{yaml}"
+        );
+        assert!(yaml.contains("ratelimit@file"), "{yaml}");
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).unwrap();
+        let rule = parsed["http"]["routers"]["shop_web-0"]["rule"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(rule, r"HostRegexp(`^[a-z0-9-]+\.shop\.example\.com$`)");
+        assert!(crate::services::deploy_rules_service::valid_domain_host(
+            "*.a.com"
+        ));
+        assert!(!crate::services::deploy_rules_service::valid_domain_host(
+            "*.*.a.com"
+        ));
+        assert!(!crate::services::deploy_rules_service::valid_middleware(
+            "a{{x}}"
+        ));
+    }
 
     #[test]
     fn maintenance_routes_to_the_panel() {
@@ -1222,6 +1275,7 @@ mod tests {
                     port: 80,
                     https: true,
                     compose_service: None,
+                    middlewares: vec![],
                 },
                 Domain {
                     host: "shop.example.com".to_owned(),
@@ -1229,6 +1283,7 @@ mod tests {
                     port: 8080,
                     https: true,
                     compose_service: None,
+                    middlewares: vec![],
                 },
                 Domain {
                     host: "shop.localhost".to_owned(),
@@ -1236,6 +1291,7 @@ mod tests {
                     port: 80,
                     https: false,
                     compose_service: None,
+                    middlewares: vec![],
                 },
             ],
             ports: vec![],

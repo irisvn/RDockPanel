@@ -15,6 +15,8 @@ pub struct Model {
     pub https: bool,
     /// A Compose service's container (its service in the Compose file).
     pub compose_service: Option<String>,
+    /// Traefik middlewares of its own, comma-separated (`ratelimit@file`).
+    pub middlewares: Option<String>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

@@ -189,6 +189,14 @@ A service's trigger URL (`/api/v1/deploy/{id}?token={token}`) deploys it without
 (40 characters) is shown once, only its SHA-256 is stored and compared in constant time; a new
 one replaces it. Unknown, wrong or malformed answers 404 the same; a deployment under way, 409.
 
+### Wildcard domains and middlewares
+
+A domain's host may be a wildcard, `*.example.com`: every name one level under it, as Traefik's
+`HostRegexp`. Its HTTPS certificate needs a DNS-challenge resolver (the installer's uses the HTTP
+challenge: Traefik serves its default certificate then). A domain may name middlewares of its own,
+defined in Traefik's files (`ratelimit@file`, in a file of `/etc/rdockpanel/traefik/dynamic` the
+panel does not write), applied after the panel's (redirects, authentication).
+
 ### Redirects and basic authentication
 
 As EasyPanel's Redirects and Security tabs. A service's redirects (`service_redirects`: a regular

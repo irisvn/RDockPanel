@@ -513,6 +513,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
   const [path, setPath] = useState("/");
   const [port, setPort] = useState("80");
   const [container, setContainer] = useState("");
+  const [middlewares, setMiddlewares] = useState("");
   const isCompose = d.service.kind === "compose";
   const [https, setHttps] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -591,6 +592,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                   port: Number(port),
                   https,
                   ...(isCompose ? { compose_service: container.trim() } : {}),
+                  ...(middlewares.trim() ? { middlewares: middlewares.trim() } : {}),
                 });
                 setAdding(false);
                 setHost("");
@@ -600,7 +602,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
               }
             }}
           >
-            <Field label={t("Host")} help={t("e.g. app.example.com (DNS pointing to this server)")} error={fields.host}>
+            <Field label={t("Host")} help={t("e.g. app.example.com, or *.example.com for every name under it (DNS pointing to this server)")} error={fields.host}>
               <Input autoFocus value={host} onChange={(e) => setHost(e.target.value)} placeholder="app.example.com" />
             </Field>
             <div className="rdp2-grid2">
@@ -611,6 +613,9 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                 <Input type="number" value={port} onChange={(e) => setPort(e.target.value)} />
               </Field>
             </div>
+            <Field label={t("Traefik middlewares")} help={t("Optional, comma-separated, defined in Traefik's files, e.g. ratelimit@file")} error={fields.middlewares}>
+              <Input className="rdp2-mono" value={middlewares} onChange={(e) => setMiddlewares(e.target.value)} />
+            </Field>
             {isCompose && (
               <Field label={t("Compose service")} help={t("The service of the Compose file it leads to")} error={fields.compose_service}>
                 <Input value={container} onChange={(e) => setContainer(e.target.value)} placeholder="web" />

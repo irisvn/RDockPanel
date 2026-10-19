@@ -21,7 +21,8 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Auto deploy (GitHub) | Done | signed webhook; pushes during a deployment are kept |
 | Environment (`.env` text) | Done | encrypted; values shown only with `services.secrets` (audited) |
 | Domains: host, path, port, HTTPS, primary, generated domains | Done | Let's Encrypt in the installer |
-| Domains: wildcard, custom middlewares, certificate resolver per domain | Missing | one resolver for the panel |
+| Domains: wildcard, custom middlewares | Done | `*.example.com` (one level); middlewares defined in Traefik's files (`ratelimit@file`) |
+| Domains: certificate resolver per domain | Missing | one resolver for the panel (a wildcard's certificate needs a DNS-challenge resolver) |
 | Redirects | Done | Go regular expressions, permanent or not, on or off |
 | Security: basic authentication | Done | bcrypt; applies at the next deployment |
 | Scripts | Partly | run non-interactively, at most 25 s, output shown (EasyPanel runs them in a shell) |

@@ -18,8 +18,8 @@ use crate::models::{project, service, service_domain, service_mount, service_por
 use crate::services::build_service::{inside, valid_git_url, valid_ref};
 use crate::services::database_service::{Credentials, Engine, random_password};
 use crate::services::deploy_rules_service::{
-    config, valid_container_path, valid_hostname, valid_image_reference, valid_name, valid_port,
-    valid_route_path, valid_volume_name,
+    config, valid_container_path, valid_image_reference, valid_name, valid_port, valid_route_path,
+    valid_volume_name,
 };
 use crate::services::deploy_service::{command_args, valid_env_name};
 
@@ -349,7 +349,7 @@ pub async fn create(
         new.replicas.clamp(0, 100)
     };
     for domain in &new.domains {
-        if !valid_hostname(&domain.host) {
+        if !crate::services::deploy_rules_service::valid_domain_host(&domain.host) {
             errors.add("domains", format!("{} is not a hostname", domain.host));
         }
         if !valid_route_path(&domain.path) {

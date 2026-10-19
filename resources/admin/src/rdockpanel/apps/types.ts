@@ -14,7 +14,7 @@ export type ServiceCard = {
 export type Project = { id: number; name: string; description: string | null; services: ServiceCard[] };
 export type Overview = { projects: Project[]; services_visible: boolean };
 
-export type Domain = { id: number; service_id: number; host: string; path: string; port: number; https: boolean; compose_service: string | null };
+export type Domain = { id: number; service_id: number; host: string; path: string; port: number; https: boolean; compose_service: string | null; middlewares: string | null };
 export type Port = { id: number; published: number; target: number; protocol: string; mode: string };
 export type Mount = { id: number; kind: string; name: string | null; source: string | null; target: string; read_only: boolean };
 

@@ -382,6 +382,11 @@ window.rustcms?.registerTranslations?.("vi", {
   "Drop capabilities": "Bỏ capability",
   Sysctls: "Sysctl",
   "One key=value a line, e.g. net.ipv4.ip_forward=1": "Mỗi dòng một key=value, ví dụ net.ipv4.ip_forward=1",
+  "e.g. app.example.com, or *.example.com for every name under it (DNS pointing to this server)":
+    "ví dụ app.example.com, hoặc *.example.com cho mọi tên bên dưới (DNS trỏ về server này)",
+  "Traefik middlewares": "Middleware Traefik",
+  "Optional, comma-separated, defined in Traefik's files, e.g. ratelimit@file":
+    "Không bắt buộc, cách nhau bằng dấu phẩy, định nghĩa trong file của Traefik, ví dụ ratelimit@file",
 });
 
 export {};

@@ -9,7 +9,9 @@ use serde_json::Value;
 
 use crate::admin::{int, is_set, text};
 use crate::models::service_domain;
-use crate::services::deploy_rules_service::{valid_hostname, valid_port, valid_route_path};
+use crate::services::deploy_rules_service::{
+    valid_domain_host, valid_middleware, valid_port, valid_route_path,
+};
 
 pub struct ServiceDomainResource;
 
@@ -49,6 +51,7 @@ impl Resource for ServiceDomainResource {
             Field::column(service_domain::Column::Port).required(),
             Field::column(service_domain::Column::Https),
             Field::column(service_domain::Column::ComposeService).max_length(64),
+            Field::column(service_domain::Column::Middlewares).max_length(1000),
         ]
     }
 
@@ -151,7 +154,7 @@ fn check(ctx: &Ctx, mut data: Data) -> AppResult<Data> {
     }
     let mut errors = ValidationErrors::new();
     if let Some(host) = text(&data, "host")
-        && !valid_hostname(host)
+        && !valid_domain_host(host)
     {
         errors.add("host", ctx.t("is not a host name like app.example.com"));
     }
@@ -161,6 +164,18 @@ fn check(ctx: &Ctx, mut data: Data) -> AppResult<Data> {
         errors.add(
             "path",
             ctx.t("must start with / and use letters, digits, - _ . ~"),
+        );
+    }
+    if let Some(list) = text(&data, "middlewares")
+        && !list
+            .split(',')
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .all(valid_middleware)
+    {
+        errors.add(
+            "middlewares",
+            ctx.t("must be middleware names like ratelimit@file, comma-separated"),
         );
     }
     if is_set(&data, "port") && !int(&data, "port").is_some_and(valid_port) {
