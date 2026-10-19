@@ -47,6 +47,8 @@ window.rustcms?.registerTranslations?.("vi", {
   "Remove this service from Docker? Its volumes are kept.": "Gỡ service khỏi Docker? Volume được giữ lại.",
   "Saved. Deploy to apply it.": "Đã lưu. Bấm Deploy để áp dụng.",
   "Saved.": "Đã lưu.",
+  "Certificate resolvers": "Certificate resolver",
+  "Nothing to set here with your permissions.": "Quyền của bạn không có mục cài đặt nào ở đây.",
   "Panel": "Panel",
   "The panel's domain, its Let's Encrypt email and the apps' domain. Changed by the installer: check new ones here, then run the command shown on the server.": "Domain của panel, email Let's Encrypt và domain cho app. Installer là nơi đổi các giá trị này: kiểm tra giá trị mới ở đây, rồi chạy lệnh hiện ra trên server.",
   "Panel address": "Địa chỉ panel",

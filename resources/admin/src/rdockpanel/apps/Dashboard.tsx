@@ -211,7 +211,19 @@ export function NewService(props: {
   );
 }
 
+/** The server's metrics, then the projects (with their permission). */
 export function Dashboard(props: PageProps<unknown>) {
+  if (!props.can("projects.view_any")) {
+    return (
+      <div className="rdp2-page">
+        <ServerTiles {...props} />
+      </div>
+    );
+  }
+  return <Projects {...props} />;
+}
+
+function Projects(props: PageProps<unknown>) {
   const t = props.t;
   const overview = useAdminQuery<Overview>(props, "/apps/overview", { refetchInterval: 5000 });
   const [creating, setCreating] = useState(false);

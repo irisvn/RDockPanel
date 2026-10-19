@@ -5,7 +5,7 @@ Permissions live in the `admin` guard and are granted through roles (System → 
 
 | Permission | Allows |
 |---|---|
-| `server.view` | the Monitor page: host facts and live CPU, memory, network and disk |
+| `server.view` | the Dashboard's server metrics: live CPU, memory, network and disk |
 | `docker.view` | the Containers, Images, Volumes and Networks pages; container inspect and live stats; an action's progress (own actions only) |
 | `docker.logs` | container logs (snapshot and live follow) |
 | `docker.manage` | start, stop, restart, pause, unpause, kill and remove containers; pull and remove images; prune; create and remove volumes and networks |
@@ -14,9 +14,10 @@ Permissions live in the `admin` guard and are granted through roles (System → 
 
 ## Projects and services (Phase 2)
 
-The pages of the sidebar need: the Dashboard (projects, services and their tabs) `projects.view_any`;
-Actions `projects.view_any`; Monitor `server.view`; Settings `storage_providers.view_any` or
-`notification_channels.view_any` (each section shows with its own). The resources behind them have no
+The pages of the sidebar need: the Dashboard `projects.view_any` (projects, services and their
+tabs) or `server.view` (its server metrics only); Actions `projects.view_any`; Settings
+`storage_providers.view_any` (its Backups tab), `notification_channels.view_any` (Notifications) or
+`system.manage` (Panel, Traefik, Certificates): each tab shows with its own. The resources behind them have no
 sidebar entry, so give a role that manages services `projects.view_any` as well (their routes,
 `/admin/r/<slug>`, still answer to the resource's own permissions).
 
@@ -43,7 +44,7 @@ The resources use the panel's standard permissions, one set per resource
   only. Choosing a resolver on a domain, and changing or removing a domain that has one, need
   `system.manage` too (a resolver asks for a certificate for any name it is given). No domain may use
   the panel's own host;
-- uploaded certificates (Settings → Uploaded certificates: upload, replace, delete): `system.manage`
+- uploaded certificates (Settings → Certificates, Uploaded certificates: upload, replace, delete): `system.manage`
   only; choosing one on a domain too;
 - Traefik (Settings → Traefik: its state, restart, live logs, custom middlewares): `system.manage` only;
 - the panel's domain, Let's Encrypt email and apps' domain (Settings → Panel: shown, checked, the

@@ -18,16 +18,14 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 **Giao diện giống EasyPanel**
 
-- Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Actions, Monitor, Settings và các trang Docker.
+- Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Actions, Settings và các trang Docker.
 - **Trang service** có header (trạng thái, Deploy, Start/Stop, Restart, Open, Logs, Shell) và các tab: Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts, Storage, Backups (với database), Advanced.
 - **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** chứa nơi lưu backup và kênh thông báo; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
 
 **Server và Docker**
 
 
-- **Monitor:**
-  - biểu đồ CPU, RAM (kèm số liệu swap), network vào/ra, ổ đĩa, cập nhật trực tiếp (lấy mẫu mỗi 2 giây, giữ 5 phút gần nhất);
-  - thông tin máy: OS, kernel, số nhân, uptime.
+- **Số liệu server** ngay trên Dashboard: CPU, RAM, ổ đĩa, network vào/ra trực tiếp, kèm lịch sử gần đây.
 - **Container:**
   - danh sách có tìm kiếm;
   - chạy, dừng, khởi động lại, tạm dừng, kill, xoá;
@@ -77,10 +75,10 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 | ![Trang service](docs/images/service.png) | ![Template](docs/images/templates.png) | ![Tạo service](docs/images/new-service.png) |
 | Lịch sử deploy | Domain | Database |
 | ![Lịch sử deploy](docs/images/deployments.png) | ![Domain](docs/images/domains.png) | ![Database](docs/images/database.png) |
-| Monitor | Actions | Settings |
-| ![Monitor](docs/images/monitor.png) | ![Actions](docs/images/actions.png) | ![Settings](docs/images/settings.png) |
-| Container | Log trực tiếp | Terminal |
-| ![Container](docs/images/containers.png) | ![Log trực tiếp](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |
+| Actions | Settings | Container |
+| ![Actions](docs/images/actions.png) | ![Settings](docs/images/settings.png) | ![Container](docs/images/containers.png) |
+| Log trực tiếp | Terminal |   |
+| ![Log trực tiếp](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |   |
 
 ## Cài đặt
 

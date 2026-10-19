@@ -71,7 +71,7 @@ RustCMS extension host v2:
 - **Styles:** `dashboard.css`, theme variables, `rdp2-` prefix. Status dots use fixed colors (the
   theme keeps `--success` and `--warning` grey).
 
-**The Docker and Monitor pages** are plain JavaScript (`resources/admin/js/rdockpanel/`), loaded with
+**The Docker pages** are plain JavaScript (`resources/admin/js/rdockpanel/`), loaded with
 `extension_script` and styled by `resources/admin/css/rdockpanel/panel.css` (theme variables, `rdp-`
 prefix, no inline styles). Shared helpers are in `panel.js` (`window.rdockPanel`): `h` builds elements
 (never `innerHTML`), `api` calls the routes with the CSRF token. Translations: `registerTranslations`

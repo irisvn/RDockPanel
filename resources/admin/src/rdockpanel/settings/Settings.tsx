@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section } from "../lib/ui";
+import { ErrorNote, Field, Section, Tabs } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 import { Notifications } from "./Notifications";
 import { Certificates } from "./Certificates";
@@ -231,16 +231,42 @@ function StorageProviders(props: PageProps<unknown>) {
   );
 }
 
+/** Its sub-pages (`/p/settings/<tab>`), each shown with its own permission. */
+const TABS: Array<{ id: string; label: string; permission: string }> = [
+  { id: "panel", label: "Panel", permission: "system.manage" },
+  { id: "traefik", label: "Traefik", permission: "system.manage" },
+  { id: "certificates", label: "Certificates", permission: "system.manage" },
+  { id: "backups", label: "Backups", permission: "storage_providers.view_any" },
+  { id: "notifications", label: "Notifications", permission: "notification_channels.view_any" },
+];
+
 export function Settings(props: PageProps<unknown>) {
-  // The page opens with either permission (`permission_any`): each section with its own.
+  const t = props.t;
+  // The page opens with any of these permissions (`permission_any`): each
+  // tab with its own.
+  const tabs = TABS.filter((tab) => props.can(tab.permission));
+  const wanted = (props.path ?? "").split("/")[0];
+  const tab = tabs.find((x) => x.id === wanted)?.id ?? tabs[0]?.id;
+  if (!tab) return <p className="rdp2-muted">{t("Nothing to set here with your permissions.")}</p>;
   return (
     <div className="rdp2-page">
-      {props.can("storage_providers.view_any") && <StorageProviders {...props} />}
-      {props.can("notification_channels.view_any") && <Notifications {...props} />}
-      {props.can("system.manage") && <Panel {...props} />}
-      {props.can("system.manage") && <Traefik {...props} />}
-      {props.can("system.manage") && <Certificates {...props} />}
-      {props.can("system.manage") && <UploadedCertificates {...props} />}
+      <Tabs
+        label={t("Settings")}
+        value={tab}
+        onSelect={(id) => props.navigate(`/p/settings/${id}`)}
+        tabs={tabs.map((x) => ({ id: x.id, label: t(x.label) }))}
+      >
+        {tab === "panel" && <Panel {...props} />}
+        {tab === "traefik" && <Traefik {...props} />}
+        {tab === "certificates" && (
+          <>
+            <Certificates {...props} />
+            <UploadedCertificates {...props} />
+          </>
+        )}
+        {tab === "backups" && <StorageProviders {...props} />}
+        {tab === "notifications" && <Notifications {...props} />}
+      </Tabs>
     </div>
   );
 }

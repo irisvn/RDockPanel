@@ -122,21 +122,9 @@
     return `${v >= 10 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
   }
 
-  function percent(part, whole) {
-    return whole > 0 ? Math.min(100, (part / whole) * 100) : 0;
-  }
-
   // Unix seconds → local date and time.
   function date(seconds) {
     return seconds ? new Date(seconds * 1000).toLocaleString() : "";
-  }
-
-  function duration(seconds) {
-    const s = Math.max(0, Math.floor(seconds));
-    const d = Math.floor(s / 86400);
-    const hours = Math.floor((s % 86400) / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    return d ? `${d}d ${hours}h` : hours ? `${hours}h ${m}m` : `${m}m`;
   }
 
   function shortId(id) {
@@ -237,7 +225,7 @@
     else note.error(t("Live updates stopped."));
   }
 
-  window.rdockPanel = { showState, resourceAction, api, ApiError, h, bytes, percent, date, duration, shortId, poll, table, badge, button, act, page };
+  window.rdockPanel = { showState, resourceAction, api, ApiError, h, bytes, date, shortId, poll, table, badge, button, act, page };
 
   window.rustcms.registerTranslations("vi", {
     Server: "Máy chủ",
@@ -252,12 +240,6 @@
     Disk: "Ổ đĩa",
     "In": "Vào",
     "Out": "Ra",
-    Hostname: "Tên máy",
-    "Operating system": "Hệ điều hành",
-    Kernel: "Kernel",
-    Architecture: "Kiến trúc",
-    Cores: "Số nhân",
-    Uptime: "Thời gian chạy",
     Docker: "Docker",
     Swarm: "Swarm",
     "Docker is unavailable": "Không kết nối được Docker",

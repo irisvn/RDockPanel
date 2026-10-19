@@ -26,7 +26,7 @@ RDockPanel aims at EasyPanel's features, all free.
 Done (feature by feature in [the EasyPanel comparison](easypanel-comparison.md)):
 
 - The EasyPanel-like interface (React): the Dashboard as the panel's home, service pages and their
-  tabs, Actions, Monitor, Settings, ⌘K.
+  tabs, Actions, Settings (tabbed), server metrics on the Dashboard, ⌘K.
 - Databases (PostgreSQL, MySQL, MariaDB, MongoDB, Redis), EasyPanel templates, Create from Schema,
   Compose services.
 - Builds from Git or an inline Dockerfile (Dockerfile, Nixpacks), trigger URLs, GitHub webhooks.

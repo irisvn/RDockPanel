@@ -16,10 +16,10 @@ src/
                     deployment_service (running deployments), traefik_service (route files)
   models/           action (the actions log); project, service, service_domain/port/mount, deployment
   jobs/             pull_image, run_deployment, publish_routes
-  admin/pages/      Server, Containers, Images, Volumes, Networks (script pages)
+  admin/pages/      Dashboard, Actions, Settings (React); Containers, Images, Volumes, Networks (script pages)
   admin/resources/  Projects, Services, Domains, Ports, Mounts, Deployments (schema-driven resources)
   admin/slots/      the service page's aside (state, actions, live deployment log)
-resources/admin/    src/: the React apps interface (built to js/, css/); js/: the Docker and Monitor pages'
+resources/admin/    src/: the React apps interface (built to js/, css/); js/: the Docker pages'
                     plain JavaScript (+ vendored xterm.js), css/
 scripts/            dev-swarm.sh (a development Swarm with Traefik)
 tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER and
@@ -454,7 +454,7 @@ edited as `.env` text (`services/dotenv.rs`): `PUT /apps/services/{id}/env` seal
 clear needs `services.secrets` and is audited.
 
 The sidebar is EasyPanel's: Dashboard (the panel's home, `AdminProvider::home`, RustCMS 0.5.1), Actions,
-Monitor, Settings, then the Docker pages, then RustCMS's System. The resources (projects, services,
+Settings (its tabs: Panel, Traefik, Certificates, Backups, Notifications, each by its permission), then the Docker pages, then RustCMS's System. The resources (projects, services,
 domains, …) have no sidebar entry (`navigation(false)`): their routes and API stay, as the React pages
 write through them, and an administrator can still open `/admin/r/<slug>`. The panel is light by default,
 whatever the operating system prefers (`Theme::color_scheme`); each user can pick Light, Dark or System

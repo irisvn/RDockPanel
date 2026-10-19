@@ -54,7 +54,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Create from Schema | Done | |
 | Dashboard: server metrics, projects and services | Done | |
 | Actions page | Done | deployments, backups, Docker actions |
-| Monitor (server, per service) | Done | the Monitor page; per service on its Overview |
+| Monitor (server, per service) | Done | the server on the Dashboard; per service on its Overview |
 | Settings: storage providers (Local, S3) | Done | with a Test button |
 | Settings: notifications (Discord, Slack, Telegram, email, webhook) | Done | deployments, backups, a full disk; Send test |
 | Settings: Traefik (state, restart, logs, custom configuration) | Done | in the panel, no SSH: custom middlewares only (`custom-<name>`, the types that change a request or an answer), used by domains as `custom-<name>@file` |

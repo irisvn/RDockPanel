@@ -50,8 +50,6 @@
 .rdp-card, .rdp-detail { border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; background: var(--card, var(--background)); min-width: 0; }
 .rdp-card-title { font-size: 0.875rem; font-weight: 500; color: var(--muted-foreground); margin: 0 0 0.25rem; }
 .rdp-card-value { font-size: 1.35rem; font-weight: 600; }
-.rdp-card-detail { font-size: 0.8rem; min-height: 1.2em; }
-.rdp-chart { display: block; width: 100%; height: 160px; margin-top: 0.5rem; }
 
 .rdp-detail-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.75rem; }
 .rdp-detail-body { display: flex; flex-direction: column; gap: 0.5rem; }

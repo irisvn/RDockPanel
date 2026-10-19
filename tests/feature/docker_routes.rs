@@ -445,23 +445,18 @@ db_test!(
         let app = support::app_with_docker(db, FakeDocker::with_app_and_panel()).await;
         let viewer = support::user_with(&app, "viewer", VIEWER).await;
         let operator = support::user_with(&app, "operator", OPERATOR).await;
-        let server_only = support::user_with(&app, "watcher", &["server.view"]).await;
         let viewer = app.acting_as(&viewer).await;
         let operator = app.acting_as(&operator).await;
-        let server_only = app.acting_as(&server_only).await;
         let page = |slug: &str| format!("/admin/api/pages/{slug}");
 
-        for slug in ["server", "containers", "images", "volumes", "networks"] {
+        for slug in ["containers", "images", "volumes", "networks"] {
             viewer.get(&page(slug)).await.assert_status(StatusCode::OK);
         }
-        server_only
+        // The server's state is the Dashboard's (no page of its own).
+        viewer
             .get(&page("server"))
             .await
-            .assert_status(StatusCode::OK);
-        server_only
-            .get(&page("containers"))
-            .await
-            .assert_status(StatusCode::FORBIDDEN);
+            .assert_status(StatusCode::NOT_FOUND);
 
         let offered = |response: rustcms_testing::TestResponse| response.json().to_string();
         let as_viewer = offered(viewer.get(&page("containers")).await);

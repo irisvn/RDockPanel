@@ -18,7 +18,7 @@ feature is free: no project limits, no paid tiers.
 **The interface, like EasyPanel's**
 
 - `/admin` opens the **Dashboard**: server tiles, projects with their service cards, **+ Service**
-  and **Templates**. The sidebar has Dashboard, Actions, Monitor, Settings and the Docker pages.
+  and **Templates**. The sidebar has Dashboard, Actions, Settings and the Docker pages.
 - A **service page** has its header (status, Deploy, Start/Stop, Restart, Open, Logs, Shell) and tabs:
   Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts,
   Storage, Backups (databases), Advanced.
@@ -29,8 +29,8 @@ feature is free: no project limits, no paid tiers.
 **Server and Docker**
 
 
-- **Monitor**: live CPU, memory (with swap), network in/out and disk charts (2-second samples, the last
-  5 minutes), plus host facts (OS, kernel, cores, uptime).
+- **Server metrics** on the Dashboard: live CPU, memory, disk and network in/out, with their recent
+  history.
 - **Containers**: list, search, start/stop/restart/pause/kill/remove; live logs (follow, stderr
   highlighted), live stats, inspect (secret-looking env values hidden), and a **terminal** in the
   browser.
@@ -100,10 +100,10 @@ feature is free: no project limits, no paid tiers.
 | ![A service](docs/images/service.png) | ![Templates](docs/images/templates.png) | ![+ Service](docs/images/new-service.png) |
 | Deployments | Domains | A database |
 | ![Deployments](docs/images/deployments.png) | ![Domains](docs/images/domains.png) | ![A database](docs/images/database.png) |
-| Monitor | Actions | Settings |
-| ![Monitor](docs/images/monitor.png) | ![Actions](docs/images/actions.png) | ![Settings](docs/images/settings.png) |
-| Containers | Live logs | Terminal |
-| ![Containers](docs/images/containers.png) | ![Live logs](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |
+| Actions | Settings | Containers |
+| ![Actions](docs/images/actions.png) | ![Settings](docs/images/settings.png) | ![Containers](docs/images/containers.png) |
+| Live logs | Terminal |   |
+| ![Live logs](docs/images/logs.png) | ![Terminal](docs/images/terminal.png) |   |
 
 ## Install
 
@@ -165,7 +165,7 @@ rolling updates under load, and checks HTTPS and project isolation.
 - **Docker Swarm** runs the apps; **[Traefik](https://traefik.io)** v3 routes their domains, from
   files the panel writes.
 - The apps interface is React pages on RustCMS's extension host (the built files are committed:
-  Node is needed only to change them); the Docker and Monitor pages are scripts; the terminal uses
+  Node is needed only to change them); the Docker pages are scripts; the terminal uses
   [xterm.js](https://xtermjs.org) (vendored, MIT).
 
 More in [docs/architecture.md](docs/architecture.md).

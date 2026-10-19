@@ -30,7 +30,6 @@ pub fn provider() -> AdminProvider {
         .page::<crate::admin::pages::dashboard_page::DashboardPage>()
         .page::<crate::admin::pages::actions_page::ActionsPage>()
         .page::<crate::admin::pages::settings_page::SettingsPage>()
-        .page::<crate::admin::pages::server_page::ServerPage>()
         .page::<crate::admin::pages::containers_page::ContainersPage>()
         .page::<crate::admin::pages::images_page::ImagesPage>()
         .page::<crate::admin::pages::volumes_page::VolumesPage>()
@@ -58,10 +57,6 @@ pub fn provider() -> AdminProvider {
         .extension_script(
             "panel",
             include_str!("../../resources/admin/js/rdockpanel/panel.js"),
-        )
-        .extension_script(
-            "server",
-            include_str!("../../resources/admin/js/rdockpanel/server.js"),
         )
         .extension_script(
             "containers",

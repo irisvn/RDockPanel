@@ -125,7 +125,7 @@ export function Certificates(props: PageProps<unknown>) {
   return (
     <Section
       level={2}
-      title={t("Certificates")}
+      title={t("Certificate resolvers")}
       description={t("Certificate resolvers of Traefik: a domain chooses one in its dialog (else the panel's default). A wildcard needs a DNS one.")}
       actions={<Button onClick={() => setEditing("new")}>{t("Add certificate resolver")}</Button>}
     >
