@@ -5,8 +5,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use chrono::Utc;
 use rdockpanel::database::migrations::Migrator;
 use rdockpanel::services::deployment_service::{self, Timings};
+use rdockpanel::services::docker_service::TaskState;
 use rustcms::axum::http::StatusCode;
 use rustcms_testing::{TestDb, db_test};
 use serde_json::{Value, json};
@@ -189,5 +191,204 @@ db_test!(
             !failed["error"].as_str().unwrap().contains("secret-path"),
             "{failed}"
         );
+    }
+);
+
+async fn list_id(
+    app: &rustcms_testing::TestApp,
+    admin: &rustcms_testing::TestClient<'_>,
+    name: &str,
+) -> i64 {
+    let list = admin
+        .get(&app.admin_api("x/apps/notification-channels"))
+        .await
+        .json();
+    list["channels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == name)
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap()
+}
+
+db_test!(
+    the_panels_alerts_reach_the_channels_that_hear_them,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        let (url, got) = receiver().await;
+        let channels = records(&app, "notification_channels");
+
+        // Unknown events refused; a channel set before `events` hears its
+        // choices and the panel's alerts.
+        admin
+            .post_json(&channels, &json!({"name": "x", "kind": "webhook", "secret": {"replace": url}, "events": "[\"everything\"]"}))
+            .await
+            .assert_validation_error("events");
+        create(&app, &admin, "notification_channels", json!({"name": "legacy", "kind": "webhook", "secret": {"replace": format!("{url}?legacy")}, "on_backup": false})).await;
+        create(&app, &admin, "notification_channels", json!({"name": "ops", "kind": "webhook", "secret": {"replace": url}, "events": "[\"service\",\"prune\",\"login\"]"})).await;
+        // An older client's flag still counts, in step with the events.
+        let ops = list_id(&app, &admin, "ops").await;
+        let on = admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{channels}/{ops}"),
+                Some(&json!({"on_deploy": true})),
+            )
+            .await;
+        assert!(on.status.is_success(), "{}", on.text());
+        let seen = admin
+            .get(&app.admin_api("x/apps/notification-channels"))
+            .await
+            .json();
+        let ops_events = seen["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "ops")
+            .unwrap()["events"]
+            .clone();
+        assert_eq!(ops_events, json!(["service", "prune", "login", "deploy"]));
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{channels}/{ops}"),
+                Some(&json!({"events": "[\"service\",\"prune\",\"login\"]"})),
+            )
+            .await;
+        let list = admin
+            .get(&app.admin_api("x/apps/notification-channels"))
+            .await
+            .json();
+        let legacy = list["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "legacy")
+            .unwrap();
+        assert_eq!(
+            legacy["events"],
+            json!([
+                "deploy",
+                "disk",
+                "certificate",
+                "service",
+                "traefik",
+                "update"
+            ])
+        );
+
+        // A running service whose tasks fail: said once, then its return.
+        let project = create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let web: i64 = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await
+        .parse()
+        .unwrap();
+        let deployed = crate::deployments::run(&app, &admin, "deploy", web).await;
+        assert_eq!(deployed.status, "succeeded", "{:?}", deployed.error);
+        let alerts = |got: &Arc<Mutex<Vec<Value>>>, event: &str| {
+            got.lock()
+                .unwrap()
+                .iter()
+                .filter(|v| v["event"] == event)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        rdockpanel::services::alert_service::check_health(app.state())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(alerts(&got, "service").is_empty());
+        *fake.task_state.lock().unwrap() = Some(TaskState::FAILED);
+        rdockpanel::services::alert_service::check_health(app.state())
+            .await
+            .unwrap();
+        // Failing at one check only (a task being replaced): not yet.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(alerts(&got, "service").is_empty());
+        rdockpanel::services::alert_service::check_health(app.state())
+            .await
+            .unwrap();
+        let down = wait_for(&got, "service").await;
+        assert_eq!(down["data"]["down"], true, "{down}");
+        assert_eq!(down["data"]["service"], "web");
+        rdockpanel::services::alert_service::check_health(app.state())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Both channels hear it once (the legacy one too): no repeat.
+        assert_eq!(alerts(&got, "service").len(), 2);
+        *fake.task_state.lock().unwrap() = None;
+        rdockpanel::services::alert_service::check_health(app.state())
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if alerts(&got, "service").len() == 4 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let back = alerts(&got, "service");
+        assert_eq!(back.len(), 4, "{back:?}");
+        assert_eq!(back[3]["data"]["down"], false);
+
+        // A prune: only the channel that asked.
+        admin
+            .post_json(&app.admin_api("x/apps/system/prune/images"), &json!({}))
+            .await
+            .assert_status(StatusCode::OK);
+        wait_for(&got, "prune").await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(alerts(&got, "prune").len(), 1);
+
+        // Sign-ins: from an address new for its user (the first read only starts).
+        use rustcms::models::audit_log;
+        use sea_orm::{ActiveModelTrait, Set};
+        rdockpanel::services::alert_service::check_logins(app.state())
+            .await
+            .unwrap();
+        let mut n = 0u128;
+        let mut signed_in = |ip: &str, at: chrono::DateTime<Utc>| {
+            n += 1;
+            audit_log::ActiveModel {
+                id: Set(sea_orm::prelude::Uuid::from_u128(n)),
+                at: Set(at),
+                event: Set("auth.signed_in".to_owned()),
+                subject_type: Set("session".to_owned()),
+                actor_kind: Set("user".to_owned()),
+                actor_user_id: Set(Some(user.id)),
+                ip: Set(Some(ip.to_owned())),
+                ..Default::default()
+            }
+        };
+        let now = Utc::now();
+        for row in [
+            signed_in("10.0.0.1", now - chrono::TimeDelta::hours(1)),
+            signed_in("10.0.0.1", now + chrono::TimeDelta::seconds(1)),
+            signed_in("203.0.114.9", now + chrono::TimeDelta::seconds(2)),
+        ] {
+            row.insert(app.state().db()).await.unwrap();
+        }
+        rdockpanel::services::alert_service::check_logins(app.state())
+            .await
+            .unwrap();
+        let login = wait_for(&got, "login").await;
+        assert_eq!(login["data"]["ip"], "203.0.114.9", "{login}");
+        rdockpanel::services::alert_service::check_logins(app.state())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(alerts(&got, "login").len(), 1);
     }
 );

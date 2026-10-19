@@ -62,7 +62,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Build:** app từ repo Git (https, ssh với deploy key sinh sẵn, hoặc GitHub token ở Settings → Git được cấp cho project, chọn repo từ danh sách; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo hoặc Nixpacks, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI, và webhook GitHub có chữ ký để tự deploy mỗi lần push.
 - **Compose:** file Compose (viết trong panel hoặc lấy từ Git) chạy bằng `docker compose` trong network của project, domain trỏ tới một service trong file.
 - **Backup:** dump PostgreSQL, MySQL, MariaDB và MongoDB, và nén volume, theo lịch (cron) vào thư mục trên server hoặc bucket tương thích S3, giữ lại N bản, có log từng lần chạy, nút "Run now" và Khôi phục.
-- **Thông báo:** Discord, Slack, Telegram, email (SMTP) và webhook, cho deploy, backup và ổ đĩa sắp đầy, có nút "Gửi thử".
+- **Thông báo:** Discord, Slack, Telegram, email (SMTP) và webhook; mỗi kênh tự chọn sự kiện: deploy, backup, ổ đĩa sắp đầy, service lỗi và chạy lại, Traefik ngừng và chạy lại, certificate sắp hết hạn, có bản panel mới, dọn Docker, đăng nhập từ IP mới; có nút "Gửi thử".
 - **Panel trong Settings:** domain panel, email Let's Encrypt và domain cho app được kiểm tra (DNS, tên đang dùng), kèm sẵn lệnh installer để áp dụng.
 - **Traefik trong Settings:** xem trạng thái, khởi động lại, log trực tiếp, và middleware tuỳ chỉnh (`custom-<tên>`: headers, giới hạn tốc độ, danh sách IP…) cho domain, không cần SSH.
 - **Từng service:** biểu đồ CPU và RAM, ghi chú cho nhóm, script (lệnh chạy một lần trong container đang chạy, hiện output); quản trị panel còn đặt được capability, sysctl và group bổ sung.

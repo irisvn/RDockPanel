@@ -43,7 +43,6 @@ Next:
 - Builds from uploads, Railpack and buildpacks; a GitHub token.
 - Certificate status of the resolvers; drift checks (RustCMS W4).
 - A web database client; the panel's domain applied from Settings (today: checked there, applied by the installer).
-- Notifications of Docker prunes and panel updates.
 
 ## Later
 

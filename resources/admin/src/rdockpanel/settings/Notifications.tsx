@@ -16,6 +16,8 @@ type Channel = {
   on_backup: boolean;
   on_disk: boolean;
   disk_threshold: number;
+  /** The events it hears (names of EVENTS). */
+  events: string[];
   chat_id: string | null;
   smtp_host: string | null;
   smtp_port: number | null;
@@ -24,6 +26,19 @@ type Channel = {
   email_to: string | null;
   secret_set: boolean;
 };
+
+/** What a channel may hear, and whether a new one does. */
+const EVENTS: Array<{ name: string; label: string; short: string; on: boolean }> = [
+  { name: "deploy", label: "App deployment (and every failure)", short: "deployments", on: true },
+  { name: "backup", label: "Database backup and restore", short: "backups", on: true },
+  { name: "disk", label: "Disk usage at or over", short: "disk", on: true },
+  { name: "service", label: "A running service fails, and when it is back", short: "services", on: true },
+  { name: "traefik", label: "Traefik stops, and when it is back", short: "Traefik", on: true },
+  { name: "certificate", label: "An uploaded certificate expires soon", short: "certificates", on: true },
+  { name: "update", label: "A newer RDockPanel is out", short: "updates", on: true },
+  { name: "prune", label: "Docker pruned", short: "prunes", on: false },
+  { name: "login", label: "A sign-in from a new address", short: "sign-ins", on: false },
+];
 
 const KINDS: Array<[string, string]> = [
   ["discord", "Discord"],
@@ -46,9 +61,9 @@ function ChannelForm(props: PageProps<unknown> & { channel: Channel | null; onCl
   const [from, setFrom] = useState(c?.smtp_from ?? "");
   const [to, setTo] = useState(c?.email_to ?? "");
   const [enabled, setEnabled] = useState(c?.enabled ?? true);
-  const [onDeploy, setOnDeploy] = useState(c?.on_deploy ?? true);
-  const [onBackup, setOnBackup] = useState(c?.on_backup ?? true);
-  const [onDisk, setOnDisk] = useState(c?.on_disk ?? true);
+  const [events, setEvents] = useState<string[]>(c?.events ?? EVENTS.filter((e) => e.on).map((e) => e.name));
+  const hears = (name: string) => events.includes(name);
+  const toggle = (name: string) => (on: boolean) => setEvents((old) => (on ? [...old.filter((e) => e !== name), name] : old.filter((e) => e !== name)));
   const [threshold, setThreshold] = useState(String(c?.disk_threshold ?? 90));
   const [fields, setFields] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<unknown>(null);
@@ -65,9 +80,11 @@ function ChannelForm(props: PageProps<unknown> & { channel: Channel | null; onCl
             name: name.trim(),
             kind,
             enabled,
-            on_deploy: onDeploy,
-            on_backup: onBackup,
-            on_disk: onDisk,
+            events: JSON.stringify(EVENTS.map((e) => e.name).filter(hears)),
+            // As before `events` (kept in step).
+            on_deploy: hears("deploy"),
+            on_backup: hears("backup"),
+            on_disk: hears("disk"),
             disk_threshold: Number(threshold),
           };
           if (kind === "telegram") data.chat_id = chatId.trim();
@@ -133,16 +150,17 @@ function ChannelForm(props: PageProps<unknown> & { channel: Channel | null; onCl
         )}
         <fieldset className="rdp2-form">
           <legend className="rdp2-field-label">{t("Events")}</legend>
-          <label className="rdp2-row">
-            <Switch checked={onDeploy} onCheckedChange={setOnDeploy} /> {t("App deployment (and every failure)")}
-          </label>
-          <label className="rdp2-row">
-            <Switch checked={onBackup} onCheckedChange={setOnBackup} /> {t("Database backup and restore")}
-          </label>
-          <label className="rdp2-row">
-            <Switch checked={onDisk} onCheckedChange={setOnDisk} /> {t("Disk usage at or over")}
-            <Input className="rdp2-narrow" type="number" min={1} max={100} value={threshold} onChange={(e) => setThreshold(e.target.value)} /> %
-          </label>
+          {EVENTS.map((e) => (
+            <label key={e.name} className="rdp2-row">
+              <Switch checked={hears(e.name)} onCheckedChange={toggle(e.name)} /> {t(e.label)}
+              {e.name === "disk" && (
+                <>
+                  <Input className="rdp2-narrow" type="number" min={1} max={100} value={threshold} onChange={(ev) => setThreshold(ev.target.value)} /> %
+                </>
+              )}
+            </label>
+          ))}
+          {fields.events && <p className="rdp2-small rdp2-error">{fields.events.join(" ")}</p>}
         </fieldset>
         <label className="rdp2-row">
           <Switch checked={enabled} onCheckedChange={setEnabled} /> {t("Enabled")}
@@ -168,7 +186,7 @@ export function Notifications(props: PageProps<unknown>) {
     <Section
       level={2}
       title={t("Notifications")}
-      description={t("Where the panel says what happened: deployments, backups, a full disk.")}
+      description={t("Where the panel says what happened: deployments, backups, failing services, Traefik, a full disk, updates.")}
       actions={props.can("notification_channels.create") && <Button onClick={() => setEditing("new")}>{t("Add channel")}</Button>}
     >
       <ErrorNote error={error} />
@@ -186,8 +204,8 @@ export function Notifications(props: PageProps<unknown>) {
           <tbody>
             {list.data.channels.map((c) => {
               const result = tested[c.id];
-              const events = [c.on_deploy && t("deployments"), c.on_backup && t("backups"), c.on_disk && `${t("disk")} ≥ ${c.disk_threshold}%`]
-                .filter(Boolean)
+              const events = EVENTS.filter((e) => c.events.includes(e.name))
+                .map((e) => (e.name === "disk" ? `${t("disk")} ≥ ${c.disk_threshold}%` : t(e.short)))
                 .join(", ");
               return (
                 <tr key={c.id}>

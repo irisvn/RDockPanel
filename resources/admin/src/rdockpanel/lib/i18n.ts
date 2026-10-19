@@ -507,6 +507,20 @@ window.rustcms?.registerTranslations?.("vi", {
   "Every service, the panel and Traefik stop until the server is back (usually a minute or two).":
     "Mọi service, panel và Traefik sẽ dừng tới khi server chạy lại (thường một, hai phút).",
   "Type the server's hostname to confirm": "Gõ hostname của server để xác nhận",
+  // Notification events
+  "A running service fails, and when it is back": "Service đang chạy bị lỗi, và khi chạy lại",
+  "Traefik stops, and when it is back": "Traefik ngừng chạy, và khi chạy lại",
+  "An uploaded certificate expires soon": "Certificate tải lên sắp hết hạn",
+  "A newer RDockPanel is out": "Có bản RDockPanel mới",
+  "Docker pruned": "Đã dọn Docker",
+  "A sign-in from a new address": "Đăng nhập từ địa chỉ IP mới",
+  services: "service",
+  certificates: "certificate",
+  updates: "cập nhật",
+  prunes: "dọn Docker",
+  "sign-ins": "đăng nhập",
+  "Where the panel says what happened: deployments, backups, failing services, Traefik, a full disk, updates.":
+    "Nơi panel báo những gì xảy ra: deploy, backup, service lỗi, Traefik, ổ đĩa đầy, cập nhật.",
   // GitHub tokens
   "Edit GitHub token": "Sửa GitHub token",
   "Add a GitHub token": "Thêm GitHub token",

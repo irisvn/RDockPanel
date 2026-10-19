@@ -248,7 +248,8 @@ set -- --env-add "APP_URL=$APP_URL" \
   --env-add HOST_PROC=/host/proc \
   --env-add "RUSTCMS_PANEL__COMPOSE_DIR=$COMPOSE" \
   --env-add RUSTCMS_PANEL__INTERNAL_URL=http://rdockpanel:3000 \
-  --env-add RUSTCMS_PANEL__INSTALLED=true
+  --env-add RUSTCMS_PANEL__INSTALLED=true \
+  --env-add 'RUSTCMS_HTTP__TRUSTED_PROXIES=["10.0.0.0/8","172.16.0.0/12"]'
 
 mounted() { docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{.Target}} {{end}}' rdockpanel | grep -qw "$1"; }
 published() { docker service inspect --format '{{range .Endpoint.Ports}}{{.PublishedPort}} {{end}}' rdockpanel | grep -qw 3000; }

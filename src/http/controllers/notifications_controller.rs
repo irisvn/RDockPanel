@@ -24,6 +24,7 @@ pub async fn index(State(app): State<AppState>) -> AppResult<Json<Value>> {
             "on_deploy": c.on_deploy,
             "on_backup": c.on_backup,
             "on_disk": c.on_disk,
+            "events": notify_service::events_of(c),
             "disk_threshold": c.disk_threshold,
             "chat_id": c.chat_id,
             "smtp_host": c.smtp_host,

@@ -154,5 +154,16 @@ pub async fn prune(
         docker.prune_kind(kind),
     )
     .await?;
+    crate::services::notify_service::notify(
+        &app,
+        crate::services::notify_service::Event::Prune {
+            kind: name.replace('_', " "),
+            removed: report.containers_deleted
+                + report.images_deleted
+                + report.volumes_deleted
+                + report.build_caches_deleted,
+            reclaimed: report.space_reclaimed,
+        },
+    );
     Ok(Json(json!({ "report": report })))
 }

@@ -28,6 +28,7 @@ mod m20261020_000000_create_certificates;
 mod m20261020_010000_create_panel_settings;
 mod m20261020_020000_add_force_rebuild_to_deployments;
 mod m20261020_030000_create_git_providers;
+mod m20261020_040000_add_events_to_notification_channels;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -62,6 +63,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261020_010000_create_panel_settings::Migration),
             Box::new(m20261020_020000_add_force_rebuild_to_deployments::Migration),
             Box::new(m20261020_030000_create_git_providers::Migration),
+            Box::new(m20261020_040000_add_events_to_notification_channels::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

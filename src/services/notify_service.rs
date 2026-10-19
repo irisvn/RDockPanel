@@ -19,6 +19,43 @@ const SEND_TIME: Duration = Duration::from_secs(15);
 /// A full disk is said again after this long (per channel).
 const DISK_AGAIN: Duration = Duration::from_secs(6 * 60 * 60);
 
+/// The events a channel may hear (`notification_channels.events`), and
+/// whether a channel set before they existed hears it.
+pub const EVENTS: [(&str, bool); 9] = [
+    ("deploy", true),
+    ("backup", true),
+    ("disk", true),
+    ("certificate", true),
+    // A running service whose tasks fail, or that came back.
+    ("service", true),
+    ("traefik", true),
+    ("update", true),
+    ("prune", false),
+    ("login", false),
+];
+
+/// The events `channel` hears.
+pub fn events_of(channel: &notification_channel::Model) -> Vec<String> {
+    if let Some(list) = channel
+        .events
+        .as_deref()
+        .and_then(|e| serde_json::from_str::<Vec<String>>(e).ok())
+    {
+        return list;
+    }
+    // Set before `events`: its choices, and the panel's alerts.
+    EVENTS
+        .iter()
+        .filter(|(name, legacy)| match *name {
+            "deploy" => channel.on_deploy,
+            "backup" => channel.on_backup,
+            "disk" => channel.on_disk,
+            _ => *legacy,
+        })
+        .map(|(name, _)| (*name).to_owned())
+        .collect()
+}
+
 /// What happened.
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -52,6 +89,33 @@ pub enum Event {
         names: String,
         days_left: i64,
     },
+    /// A running service's tasks fail (`down`: none runs, or they keep
+    /// restarting), or it came back (`!down`).
+    Service {
+        project: String,
+        service: String,
+        down: bool,
+        error: Option<String>,
+    },
+    /// Traefik stopped answering (no task runs), or runs again.
+    Traefik {
+        down: bool,
+    },
+    /// A newer image of the panel is out (the installer updates it).
+    Update {
+        image: String,
+    },
+    /// Docker objects pruned (Settings → Panel → Docker).
+    Prune {
+        kind: String,
+        removed: usize,
+        reclaimed: u64,
+    },
+    /// An administrator signed in from an address never seen for them.
+    Login {
+        user: String,
+        ip: String,
+    },
     /// The "Send test notification" button.
     Test,
 }
@@ -63,18 +127,26 @@ impl Event {
             Self::Backup { .. } => "backup",
             Self::Disk { .. } => "disk",
             Self::Certificate { .. } => "certificate",
+            Self::Service { .. } => "service",
+            Self::Traefik { .. } => "traefik",
+            Self::Update { .. } => "update",
+            Self::Prune { .. } => "prune",
+            Self::Login { .. } => "login",
             Self::Test => "test",
         }
     }
 
     fn wants(&self, channel: &notification_channel::Model) -> bool {
+        // A test reaches it whatever it hears.
+        if matches!(self, Self::Test) {
+            return true;
+        }
+        if !events_of(channel).iter().any(|e| e == self.name()) {
+            return false;
+        }
         match self {
-            Self::Deploy { .. } => channel.on_deploy,
-            Self::Backup { .. } => channel.on_backup,
-            Self::Disk { percent, .. } => {
-                channel.on_disk && i32::from(*percent) >= channel.disk_threshold
-            }
-            Self::Certificate { .. } | Self::Test => true,
+            Self::Disk { percent, .. } => i32::from(*percent) >= channel.disk_threshold,
+            _ => true,
         }
     }
 
@@ -121,6 +193,20 @@ impl Event {
             } => {
                 format!("the certificate {name} expires in {days_left} days")
             }
+            Self::Service {
+                project,
+                service,
+                down: true,
+                ..
+            } => format!("{project}/{service} is failing"),
+            Self::Service {
+                project, service, ..
+            } => format!("{project}/{service} runs again"),
+            Self::Traefik { down: true } => "Traefik is not running: no domain answers".to_owned(),
+            Self::Traefik { down: false } => "Traefik runs again".to_owned(),
+            Self::Update { .. } => "a newer RDockPanel is out".to_owned(),
+            Self::Prune { kind, removed, .. } => format!("Docker {kind} pruned: {removed} removed"),
+            Self::Login { user, ip } => format!("{user} signed in from a new address ({ip})"),
             Self::Test => "a test notification from RDockPanel".to_owned(),
         }
     }
@@ -141,6 +227,17 @@ impl Event {
             Self::Certificate { names, .. } => {
                 format!("{names}: upload a renewed one (Settings → Certificates)")
             }
+            Self::Service { error, .. } => error.clone().unwrap_or_default(),
+            Self::Traefik { .. } => String::new(),
+            Self::Update { image } => {
+                format!("{image}: Settings → Panel → Check for updates gives the installer command")
+            }
+            Self::Prune { reclaimed, .. } => {
+                format!("{} MB freed", reclaimed / 1_000_000)
+            }
+            Self::Login { .. } => {
+                "Not you? Change the password and sign the sessions out.".to_owned()
+            }
             Self::Test => "This channel works.".to_owned(),
         }
     }
@@ -148,8 +245,12 @@ impl Event {
     fn ok(&self) -> bool {
         match self {
             Self::Deploy { status, .. } | Self::Backup { status, .. } => status == "succeeded",
-            Self::Disk { .. } | Self::Certificate { .. } => false,
-            Self::Test => true,
+            Self::Service { down, .. } | Self::Traefik { down } => !down,
+            Self::Prune { .. } | Self::Test => true,
+            Self::Disk { .. }
+            | Self::Certificate { .. }
+            | Self::Update { .. }
+            | Self::Login { .. } => false,
         }
     }
 
@@ -185,6 +286,20 @@ impl Event {
                 names,
                 days_left,
             } => json!({"name": name, "names": names, "days_left": days_left}),
+            Self::Service {
+                project,
+                service,
+                down,
+                error,
+            } => json!({"project": project, "service": service, "down": down, "error": error}),
+            Self::Traefik { down } => json!({"down": down}),
+            Self::Update { image } => json!({"image": image}),
+            Self::Prune {
+                kind,
+                removed,
+                reclaimed,
+            } => json!({"kind": kind, "removed": removed, "reclaimed": reclaimed}),
+            Self::Login { user, ip } => json!({"user": user, "ip": ip}),
             Self::Test => json!({}),
         }
     }
@@ -361,18 +476,31 @@ pub fn notify(state: &AppState, event: Event) {
                 return;
             }
         };
-        for channel in channels.iter().filter(|c| event.wants(c)) {
+        // Each channel on its own: one that fails (and is retried) never
+        // delays another.
+        for channel in channels.into_iter().filter(|c| event.wants(c)) {
             if matches!(event, Event::Disk { .. }) && !disk_due(channel.id) {
                 continue;
             }
-            if let Err(err) = send(&state, channel, &event).await {
-                tracing::warn!(
-                    channel = channel.name,
-                    event = event.name(),
-                    err,
-                    "notification not sent"
-                );
-            }
+            let state = state.clone();
+            let event = event.clone();
+            tokio::spawn(async move {
+                // Twice more, a few seconds apart, then given up (logged).
+                let mut tries = 0;
+                while let Err(err) = send(&state, &channel, &event).await {
+                    tries += 1;
+                    if tries == 3 {
+                        tracing::warn!(
+                            channel = channel.name,
+                            event = event.name(),
+                            err,
+                            "notification not sent"
+                        );
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_secs(5 * tries)).await;
+                }
+            });
         }
     });
 }

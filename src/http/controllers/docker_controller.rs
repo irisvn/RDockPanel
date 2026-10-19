@@ -523,6 +523,14 @@ pub async fn prune(
     let by = initiator(&auth, request);
     let report =
         action_service::run(app.db(), &by, "system.prune", "docker", docker.prune()).await?;
+    crate::services::notify_service::notify(
+        &app,
+        crate::services::notify_service::Event::Prune {
+            kind: "containers and dangling images".to_owned(),
+            removed: report.containers_deleted + report.images_deleted,
+            reclaimed: report.space_reclaimed,
+        },
+    );
     Ok(Json(json!({ "report": report })))
 }
 

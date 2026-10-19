@@ -195,6 +195,26 @@ impl ServiceProvider for AppServiceProvider {
                     Ok(())
                 }),
         );
+        // Running services and Traefik failing or back; a newer panel; a
+        // sign-in from a new address (each said once: `alert_service`).
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "health-alerts",
+                std::time::Duration::from_secs(120),
+            )
+            .run(|state| async move { crate::services::alert_service::check_health(&state).await }),
+        );
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "update-alerts",
+                std::time::Duration::from_secs(6 * 60 * 60),
+            )
+            .run(|state| async move { crate::services::alert_service::check_update(&state).await }),
+        );
+        app.schedule(
+            rustcms::schedule::Schedule::every("login-alerts", std::time::Duration::from_secs(60))
+                .run(|state| async move { crate::services::alert_service::check_logins(&state).await }),
+        );
         // rustcms:jobs
         // rustcms:commands
     }

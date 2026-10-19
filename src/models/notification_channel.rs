@@ -23,6 +23,12 @@ pub struct Model {
     /// The server's disk used at `disk_threshold` % or more.
     pub on_disk: bool,
     pub disk_threshold: i32,
+    /// The events it hears by name (a JSON array of [`EVENTS`]' names);
+    /// none: its `on_*` choices and the panel's alerts, as before.
+    ///
+    /// [`EVENTS`]: crate::services::notify_service::EVENTS
+    #[sea_orm(column_type = "Text", nullable)]
+    pub events: Option<String>,
     /// Telegram: the chat (`-100…` for a group).
     pub chat_id: Option<String>,
     pub smtp_host: Option<String>,

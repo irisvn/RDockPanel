@@ -150,3 +150,21 @@ streams and sockets per user and per instance.
 
 Please open a private security advisory on GitHub
 (https://github.com/irisvn/rdockpanel/security/advisories) rather than a public issue.
+
+## Client addresses and sign-in alerts
+
+The panel reads a client's address from `X-Forwarded-For` only when the connection comes from a
+trusted proxy (`http.trusted_proxies`). The installer trusts the private ranges Traefik reaches the
+panel from (`10.0.0.0/8`, `172.16.0.0/12`); a client connecting to port 3000 directly is never
+trusted. Without that setting, every sign-in seems to come from Traefik, and the "sign-in from a new
+address" notification (off by default) says nothing useful. Running the panel behind another proxy
+(Cloudflare, a load balancer), add its addresses there.
+
+## GitHub tokens
+
+A token of Settings → Git is sealed with `APP_KEY`, never shown again, and usable only by the
+projects it is given to: their developers (`services.update`) can list and clone every repository
+it reaches, so give each project the narrowest token (a fine-grained one, read-only, for the
+repositories it needs). Git gets it through `GIT_ASKPASS` from a file of its own (mode 0600),
+removed once the clone ends: never in a URL, an argument, `.git/config` or a log (the deployment's
+log hides it).

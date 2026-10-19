@@ -44,6 +44,7 @@ impl Resource for NotificationChannelResource {
             Field::column(notification_channel::Column::OnBackup),
             Field::column(notification_channel::Column::OnDisk),
             Field::column(notification_channel::Column::DiskThreshold),
+            Field::column(notification_channel::Column::Events).max_length(1000),
             Field::column(notification_channel::Column::ChatId).max_length(64),
             Field::column(notification_channel::Column::SmtpHost).max_length(255),
             Field::column(notification_channel::Column::SmtpPort),
@@ -93,7 +94,7 @@ impl Resource for NotificationChannelResource {
         data: Data,
     ) -> AppResult<Data> {
         check(ctx, &data, None)?;
-        Ok(data)
+        Ok(in_step(data, None))
     }
 
     async fn mutate_before_update(
@@ -103,8 +104,55 @@ impl Resource for NotificationChannelResource {
         data: Data,
     ) -> AppResult<Data> {
         check(ctx, &data, Some(record))?;
-        Ok(data)
+        Ok(in_step(data, Some(record)))
     }
+}
+
+/// `events` and the older `on_deploy`, `on_backup`, `on_disk` kept in step,
+/// whichever a write sets: the events decide what a channel hears.
+fn in_step(mut data: Data, record: Option<&notification_channel::Model>) -> Data {
+    const FLAGS: [(&str, &str); 3] = [
+        ("deploy", "on_deploy"),
+        ("backup", "on_backup"),
+        ("disk", "on_disk"),
+    ];
+    if let Some(list) =
+        text(&data, "events").and_then(|e| serde_json::from_str::<Vec<String>>(e).ok())
+    {
+        for (event, flag) in FLAGS {
+            data.insert(
+                flag.to_owned(),
+                Value::Bool(list.iter().any(|e| e == event)),
+            );
+        }
+        return data;
+    }
+    let set: Vec<(&str, bool)> = FLAGS
+        .iter()
+        .filter_map(|(event, flag)| {
+            data.get(*flag)
+                .and_then(Value::as_bool)
+                .map(|on| (*event, on))
+        })
+        .collect();
+    if set.is_empty() {
+        return data;
+    }
+    // Its events now (when it has some), each flag set applied.
+    if let Some(record) = record.filter(|r| r.events.is_some()) {
+        let mut list = crate::services::notify_service::events_of(record);
+        for (event, on) in set {
+            list.retain(|e| e != event);
+            if on {
+                list.push(event.to_owned());
+            }
+        }
+        data.insert(
+            "events".to_owned(),
+            Value::String(serde_json::to_string(&list).expect("names serialize")),
+        );
+    }
+    data
 }
 
 /// The secret a write sets (`{"replace": "…"}`), if any.
@@ -125,6 +173,20 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&notification_channel::Model>) -
         }
     };
     let kind = after("kind", record.map(|r| r.kind.as_str())).unwrap_or_default();
+    // The events it hears: a JSON array of known names.
+    if let Some(events) = text(data, "events") {
+        let known = |e: &String| {
+            crate::services::notify_service::EVENTS
+                .iter()
+                .any(|(name, _)| name == e)
+        };
+        if !serde_json::from_str::<Vec<String>>(events).is_ok_and(|list| list.iter().all(known)) {
+            errors.add(
+                "events",
+                ctx.t("must be a list of deploy, backup, disk, certificate, service, traefik, update, prune, login"),
+            );
+        }
+    }
     let secret = new_secret(data);
     // A secret goes where it was meant to: another kind of channel, or
     // another SMTP server, needs it entered again (never the old one sent

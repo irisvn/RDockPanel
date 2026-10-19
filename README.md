@@ -82,8 +82,9 @@ feature is free: no project limits, no paid tiers.
 - **Backups**: scheduled dumps (cron) of PostgreSQL, MySQL, MariaDB and MongoDB, and archives of
   volumes, to a local directory or an S3-compatible bucket, with retention, a log per run, "Run now"
   and Restore.
-- **Notifications**: Discord, Slack, Telegram, email (SMTP) and webhooks, for deployments, backups
-  and a full disk, with "Send test notification".
+- **Notifications**: Discord, Slack, Telegram, email (SMTP) and webhooks; each channel picks its
+  events (deployments, backups, a full disk, a failing service and its return, Traefik down, expiring
+  certificates, a newer panel, Docker prunes, a sign-in from a new address), with "Send test notification".
 - **Panel in Settings**: its domain, Let's Encrypt email and apps' domain, checked (DNS, names in
   use) with the installer command that applies them.
 - **Traefik in Settings**: its state, a restart, its live logs, and middlewares of your own

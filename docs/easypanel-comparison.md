@@ -57,7 +57,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Actions page | Done | deployments, backups, Docker actions |
 | Monitor (server, per service) | Done | the server on the Dashboard; per service on its Overview |
 | Settings: storage providers (Local, S3) | Done | with a Test button |
-| Settings: notifications (Discord, Slack, Telegram, email, webhook) | Done | deployments, backups, a full disk; Send test |
+| Settings: notifications (Discord, Slack, Telegram, email, webhook) | Done | each channel picks its events: deployments, backups, a full disk, a running service failing and back, Traefik down and back, expiring certificates, a newer panel, Docker prunes, a sign-in from a new address; said once (kept across restarts), retried twice; Send test |
 | Settings: Traefik (state, restart, logs, custom configuration) | Done | in the panel, no SSH: custom middlewares only (`custom-<name>`, the types that change a request or an answer), used by domains as `custom-<name>@file` |
 | Settings: Easypanel ▾ / Server ▾ / Traefik ▾ / Docker ▾ menus | Done | the panel's logs (Docker's installed, the process's last lines from source), restart, update check (the registry's digest; the update is the installer's command); Refresh IP; Reboot (the hostname typed, installed only); prune stopped containers, unused images, the build cache, unused volumes (never `rdp_…`, Compose's or the panel's) |
 | Settings: panel domain, Let's Encrypt email | Partly | Settings → Panel checks new ones (DNS, a taken name) and gives the installer command to run on the server (the panel never moves itself) |
