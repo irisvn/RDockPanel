@@ -201,6 +201,24 @@ impl ServiceProvider for AppServiceProvider {
         // `tracing`'s).
         log::set_max_level(log::LevelFilter::Info.min(log::max_level()));
         crate::services::deploy_service::set_instance(state.keyring());
+        // The public address Refresh IP found (else the installer's).
+        if let Err(err) = crate::services::system_service::load_public_ip(state.db()).await {
+            tracing::debug!(%err, "public address not read");
+        }
+        // A restart of the panel or a reboot it asked for: it came back
+        // (the server only; a console command is not the panel).
+        if std::env::args().nth(1).as_deref() == Some("serve") {
+            match crate::services::action_service::came_back(
+                state.db(),
+                &crate::services::system_service::DISRUPTIVE,
+            )
+            .await
+            {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(n, "restart or reboot done"),
+                Err(err) => tracing::debug!(%err, "restarts not checked"),
+            }
+        }
         // Deployments whose run died: interrupted, their services released.
         match crate::services::deployment_service::recover_interrupted(state.db()).await {
             Ok(0) => {}

@@ -5,6 +5,11 @@ fn main() -> std::process::ExitCode {
     {
         return rdockpanel::services::template_engine::child_main();
     }
+    // The panel's log kept in memory too (Settings → Panel → Logs), before
+    // RustCMS installs its own (it then leaves this one).
+    if let Ok(config) = rustcms::Config::load() {
+        rdockpanel::services::panel_log::init(&config.log.filter, config.log.json);
+    }
     rustcms::Console::<rdockpanel::database::migrations::Migrator>::new(
         rdockpanel::bootstrap::build,
     )

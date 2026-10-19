@@ -1022,7 +1022,7 @@ pub fn placeholder_vars(snapshot: &Snapshot) -> placeholders::Vars {
         service: snapshot.service.clone(),
         primary_domain: snapshot.primary_domain.clone(),
         host: set(&cfg.service_domain),
-        host_ip: set(&cfg.public_ip),
+        host_ip: set(&crate::services::system_service::public_ip()),
     }
 }
 

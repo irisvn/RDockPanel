@@ -18,6 +18,7 @@ mod live;
 mod notifications;
 mod projects;
 mod routing;
+mod system;
 mod templates;
 mod terminal;
 // rustcms:tests

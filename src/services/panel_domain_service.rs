@@ -14,7 +14,7 @@ use crate::services::deploy_rules_service::{config, valid_domain_host};
 /// How long one name may take to resolve.
 const LOOKUP_TIME: Duration = Duration::from_secs(5);
 /// Where the installer is fetched from.
-const INSTALLER: &str =
+pub const INSTALLER: &str =
     "https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh";
 
 /// What the installer set: the panel's host, its Let's Encrypt email (from
@@ -46,6 +46,7 @@ pub async fn current(
     }
     let host = cfg.panel_host.clone();
     let ip = host.parse::<std::net::IpAddr>().is_ok();
+    let public_ip = crate::services::system_service::public_ip();
     json!({
         // Where it runs now (`APP_URL`): development's too.
         "url": cfg.panel_url,
@@ -56,7 +57,7 @@ pub async fn current(
         "email": email,
         // As set (development's `localhost` too).
         "apps_domain": if cfg.service_domain.is_empty() { Value::Null } else { json!(cfg.service_domain) },
-        "public_ip": if cfg.public_ip.is_empty() { Value::Null } else { json!(cfg.public_ip) },
+        "public_ip": if public_ip.is_empty() { Value::Null } else { json!(public_ip) },
         "https": cfg.https_port == 443 && !cfg.cert_resolver.is_empty(),
     })
 }
@@ -181,7 +182,7 @@ pub async fn check<C: sea_orm::ConnectionTrait>(
             ));
         }
     }
-    let public_ip = config().public_ip.clone();
+    let public_ip = crate::services::system_service::public_ip();
     let mut checks = vec![];
     if errors.is_empty() {
         if !domain.is_empty() {

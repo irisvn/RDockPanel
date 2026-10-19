@@ -9,7 +9,7 @@ use futures_util::stream::{self, BoxStream};
 use rdockpanel::services::docker_service::{
     BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
     DockerResult, ExecChunk, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream,
-    NetworkItem, NetworkRequest, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec,
+    NetworkItem, NetworkRequest, PruneKind, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec,
     ServiceUpdateStatus, ServiceUpdateStatusStateEnum, SwarmRole, SwarmService, SwarmTask,
     TaskState, TermSize, VolumeItem,
 };
@@ -47,6 +47,10 @@ pub struct FakeDocker {
     pub exec_exit: Arc<Mutex<i64>>,
     /// `"restart web"`, `"remove web"`, `"prune rdockpanel.system"`, …
     pub calls: Arc<Mutex<Vec<String>>>,
+    /// Volumes a container mounts (not unused).
+    pub mounted: Arc<Mutex<Vec<String>>>,
+    /// What the registry serves an image reference as (`registry_digest`).
+    pub registry: Arc<Mutex<HashMap<String, String>>>,
 }
 
 pub fn labels(system: bool) -> HashMap<String, String> {
@@ -354,6 +358,28 @@ impl DockerApi for FakeDocker {
 
     async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()> {
         self.record(format!("end exec {container} {token}"));
+        Ok(())
+    }
+    async fn prune_kind(&self, kind: PruneKind, exclude_label: &str) -> DockerResult<PruneReport> {
+        self.record(format!("prune {kind:?} {exclude_label}"));
+        Ok(PruneReport::default())
+    }
+    async fn unused_volumes(&self) -> DockerResult<Vec<VolumeItem>> {
+        let mounted = self.mounted.lock().unwrap().clone();
+        Ok(self
+            .volumes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|v| !mounted.contains(&v.name))
+            .cloned()
+            .collect())
+    }
+    async fn registry_digest(&self, reference: &str) -> DockerResult<Option<String>> {
+        Ok(self.registry.lock().unwrap().get(reference).cloned())
+    }
+    async fn run_on_host(&self, image: &str, cmd: Vec<String>) -> DockerResult<()> {
+        self.record(format!("host {image} {}", cmd.join(" ")));
         Ok(())
     }
     async fn resize_exec(&self, exec_id: &str, size: TermSize) -> DockerResult<()> {

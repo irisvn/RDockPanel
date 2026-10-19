@@ -62,6 +62,38 @@ db_test!(
                 Case::new(Method::GET, "/apps/overview")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                // Settings → Panel's controls: system.manage.
+                Case::new(Method::GET, "/apps/system/status")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/system/logs/10")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/system/restart").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::POST, "/apps/system/reboot").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::POST, "/apps/system/update").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::POST, "/apps/system/ip").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::POST, "/apps/system/prune/volumes").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
                 Case::new(Method::GET, "/apps/domains")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

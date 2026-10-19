@@ -58,6 +58,43 @@ where
     outcome.map_err(Into::into)
 }
 
+/// For work that may stop the panel itself (its restart, the server's
+/// reboot): its row (running) and its audit entry, committed before the
+/// work starts. A row such work leaves running is closed at the next boot
+/// ([`came_back`]).
+pub async fn announce(
+    db: &sea_orm::DatabaseConnection,
+    by: &Initiator,
+    kind: &str,
+    target: &str,
+) -> AppResult<action::Model> {
+    use sea_orm::TransactionTrait;
+    let txn = db.begin().await?;
+    let row = start(&txn, by, kind, target, action::RUNNING).await?;
+    let entry = AuditEntry::new(format!("system.{kind}"), "system")
+        .key(target)
+        .meta(json!({ "action": row.id }));
+    audit::record(&txn, &by.audit, entry).await?;
+    txn.commit().await?;
+    Ok(row)
+}
+
+/// The panel's restarts and the server's reboots still running when it
+/// starts: done (it came back).
+pub async fn came_back<C: ConnectionTrait>(db: &C, kinds: &[&str]) -> AppResult<usize> {
+    use sea_orm::{ColumnTrait, QueryFilter};
+    let rows = action::Entity::find()
+        .filter(action::Column::Kind.is_in(kinds.iter().copied()))
+        .filter(action::Column::Status.eq(action::RUNNING))
+        .all(db)
+        .await?;
+    let n = rows.len();
+    for row in rows {
+        finish(db, row, None, Some("the panel started again")).await?;
+    }
+    Ok(n)
+}
+
 /// A new row in `status` (`queued` for work a job does later).
 pub async fn start<C: ConnectionTrait>(
     db: &C,

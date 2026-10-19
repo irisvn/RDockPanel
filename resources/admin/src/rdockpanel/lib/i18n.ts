@@ -466,6 +466,47 @@ window.rustcms?.registerTranslations?.("vi", {
   "Traefik middlewares": "Middleware Traefik",
   "Optional, comma-separated, defined in Traefik's files, e.g. ratelimit@file":
     "Không bắt buộc, cách nhau bằng dấu phẩy, định nghĩa trong file của Traefik, ví dụ ratelimit@file",
+  // Settings → Panel's controls
+  "Check for updates": "Kiểm tra cập nhật",
+  Server: "Server",
+  "Refresh IP": "Lấy lại IP",
+  Reboot: "Khởi động lại server",
+  "Prune stopped containers": "Dọn container đã dừng",
+  "Prune unused images": "Dọn image không dùng",
+  "Prune build cache": "Dọn build cache",
+  "Prune unused volumes": "Dọn volume không dùng",
+  "Remove every stopped container (not the panel's)?": "Xoá mọi container đã dừng (trừ của panel)?",
+  "Remove every image no container uses (tagged ones too, not the panel's)? They are pulled again when needed.":
+    "Xoá mọi image không container nào dùng (cả image có tag, trừ của panel)? Khi cần sẽ pull lại.",
+  "Remove the builder's cache? The next builds start from scratch.": "Xoá build cache? Các lần build sau sẽ build lại từ đầu.",
+  "Remove volumes no container uses? The data of the panel's services (rdp_…), Compose projects and the panel itself are always kept.":
+    "Xoá volume không container nào dùng? Dữ liệu của service (rdp_…), project Compose và của panel luôn được giữ lại.",
+  "Restart the panel? It is unavailable for a few seconds; the page reloads when it is back.":
+    "Khởi động lại panel? Panel sẽ không truy cập được vài giây; trang tự tải lại khi panel chạy lại.",
+  "The panel restarts…": "Panel đang khởi động lại…",
+  "Public address": "Địa chỉ public",
+  was: "trước đó",
+  "Public address unchanged": "Địa chỉ public không đổi",
+  Removed: "Đã xoá",
+  "space freed": "giải phóng",
+  "from source": "chạy từ mã nguồn",
+  installed: "đã cài",
+  "RDockPanel logs": "Log của RDockPanel",
+  "Traefik logs": "Log của Traefik",
+  "From source: the last lines this process wrote.": "Chạy từ mã nguồn: các dòng log gần nhất của process này.",
+  "This panel runs from source: update it with git pull and a new build.": "Panel này chạy từ mã nguồn: cập nhật bằng git pull rồi build lại.",
+  Running: "Đang chạy",
+  Latest: "Mới nhất",
+  "A newer image is out. Run this on the server (as root): the installer keeps your settings.":
+    "Đã có image mới. Chạy lệnh này trên server (quyền root): installer giữ nguyên cài đặt của anh.",
+  "The panel runs the latest image.": "Panel đang chạy image mới nhất.",
+  "The registry did not say (offline, or it needs a login). The installer updates it anyway:":
+    "Registry không trả lời (mất mạng hoặc cần đăng nhập). Vẫn có thể cập nhật bằng installer:",
+  "The server reboots… the page reloads when the panel is back.": "Server đang khởi động lại… trang tự tải lại khi panel chạy lại.",
+  "Reboot the server": "Khởi động lại server",
+  "Every service, the panel and Traefik stop until the server is back (usually a minute or two).":
+    "Mọi service, panel và Traefik sẽ dừng tới khi server chạy lại (thường một, hai phút).",
+  "Type the server's hostname to confirm": "Gõ hostname của server để xác nhận",
   // Domains page
   "Edit domain": "Sửa domain",
   "Choose a service": "Chọn service",

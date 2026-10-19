@@ -29,14 +29,15 @@ custom-security:
     stsSeconds: 31536000
 `;
 
-function Logs(props: PageProps<unknown>) {
+/** A service's live log (`url`: an SSE route sending `lines`). */
+export function Logs(props: PageProps<unknown> & { url?: string }) {
   const t = props.t;
   const [lines, setLines] = useState<Array<{ text: string; err: boolean }>>([]);
-  useEvents(props, "/apps/traefik/logs/200", {
+  useEvents(props, props.url ?? "/apps/traefik/logs/200", {
     onEvent(name, data) {
       if (name !== "lines") return;
       const batch = (data as { lines: Array<{ stream: string; text: string }> }).lines;
-      // Traefik colours its output (ANSI escapes): shown plain.
+      // Coloured output (ANSI escapes): shown plain.
       const plain = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, "");
       setLines((old) => [...old, ...batch.map((l) => ({ text: plain(l.text), err: l.stream === "stderr" }))].slice(-1000));
     },

@@ -9,7 +9,7 @@ use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
     deploy_controller as deploy, docker_controller as docker, domains_controller as domains,
     notifications_controller as notifications, server_controller as server,
-    templates_controller as templates, traefik_controller as traefik,
+    system_controller as system, templates_controller as templates, traefik_controller as traefik,
 };
 
 /// Every admin route, with the access it requires.
@@ -93,6 +93,41 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                .get(
+                    "/system/status",
+                    AdminAccess::can("system.manage"),
+                    system::status,
+                )
+                .events(
+                    "/system/logs/{tail}",
+                    AdminAccess::can("system.manage"),
+                    system::logs,
+                )
+                .post(
+                    "/system/restart",
+                    AdminAccess::can("system.manage"),
+                    system::restart,
+                )
+                .post(
+                    "/system/reboot",
+                    AdminAccess::can("system.manage"),
+                    system::reboot,
+                )
+                .post(
+                    "/system/update",
+                    AdminAccess::can("system.manage"),
+                    system::check_update,
+                )
+                .post(
+                    "/system/ip",
+                    AdminAccess::can("system.manage"),
+                    system::refresh_ip,
+                )
+                .post(
+                    "/system/prune/{kind}",
+                    AdminAccess::can("system.manage"),
+                    system::prune,
+                )
                 .post(
                     "/panel/check",
                     AdminAccess::can("system.manage"),

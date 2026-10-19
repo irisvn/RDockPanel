@@ -8,6 +8,7 @@ import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, CodeBlock, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Facts, Field, Section } from "../lib/ui";
+import { Controls } from "./Controls";
 
 type Current = {
   url: string;
@@ -49,6 +50,8 @@ export function Panel(props: PageProps<unknown>) {
     setChecked(null);
   };
   return (
+    <>
+    <Controls {...props} />
     <Section
       level={2}
       title={t("Panel")}
@@ -135,5 +138,6 @@ export function Panel(props: PageProps<unknown>) {
         </div>
       )}
     </Section>
+    </>
   );
 }

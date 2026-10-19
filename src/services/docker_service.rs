@@ -277,7 +277,30 @@ impl TermSize {
 pub struct PruneReport {
     pub containers_deleted: usize,
     pub images_deleted: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub volumes_deleted: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub build_caches_deleted: usize,
     pub space_reclaimed: u64,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// What Settings → Panel → Docker removes, each on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PruneKind {
+    /// Stopped containers.
+    Containers,
+    /// Images no container uses (tagged ones too).
+    Images,
+    /// The builder's cache.
+    BuildCache,
+    /// Volumes no container uses, but the panel's services' and Compose's
+    /// ([`Docker::prune_volumes`]).
+    Volumes,
 }
 
 /// The Docker engine. Implementations report what Docker says, unfiltered;
@@ -400,6 +423,36 @@ pub trait DockerApi: Send + Sync {
     /// Ends every process of the container's sessions marked with `token`:
     /// hangs them up, then kills what is left.
     async fn end_exec(&self, container: &str, token: &str) -> DockerResult<()>;
+    /// Removes stopped containers, unused images or the build cache, except
+    /// what is labelled `exclude_label=true`.
+    async fn prune_kind(&self, kind: PruneKind, exclude_label: &str) -> DockerResult<PruneReport> {
+        let _ = (kind, exclude_label);
+        Err(DockerError::Unavailable(
+            "prune is not supported".to_owned(),
+        ))
+    }
+    /// Volumes no container (running or stopped) mounts.
+    async fn unused_volumes(&self) -> DockerResult<Vec<VolumeItem>> {
+        Err(DockerError::Unavailable(
+            "volume usage is not supported".to_owned(),
+        ))
+    }
+    /// The digest the registry serves `reference` (`name:tag`) as now: a
+    /// multi-platform image's index. None: the registry did not say.
+    async fn registry_digest(&self, reference: &str) -> DockerResult<Option<String>> {
+        let _ = reference;
+        Err(DockerError::Unavailable(
+            "registry lookups are not supported".to_owned(),
+        ))
+    }
+    /// Starts `cmd` in a new privileged container of `image` (local) in the
+    /// host's process namespace, removed when it ends; not waited for.
+    async fn run_on_host(&self, image: &str, cmd: Vec<String>) -> DockerResult<()> {
+        let _ = (image, cmd);
+        Err(DockerError::Unavailable(
+            "host commands are not supported".to_owned(),
+        ))
+    }
 }
 
 /// Whether the caller may see and touch the panel's own objects
@@ -542,6 +595,34 @@ impl Docker {
 
     pub async fn prune(&self) -> DockerResult<PruneReport> {
         self.0.prune(SYSTEM_LABEL).await
+    }
+
+    /// Removes what `kind` names; never the panel's own objects, nor (for
+    /// volumes) data a service of the panel's or a Compose project keeps.
+    pub async fn prune_kind(&self, kind: PruneKind) -> DockerResult<PruneReport> {
+        match kind {
+            PruneKind::Volumes => self.prune_volumes().await,
+            kind => self.0.prune_kind(kind, SYSTEM_LABEL).await,
+        }
+    }
+
+    /// Unused volumes, but those the panel's services keep (`rdp_<project>_…`,
+    /// kept when a service is destroyed), Compose's and Swarm stacks', and
+    /// the panel's own.
+    async fn prune_volumes(&self) -> DockerResult<PruneReport> {
+        let mut report = PruneReport::default();
+        for volume in self.0.unused_volumes().await? {
+            if !disposable_volume(&volume) {
+                continue;
+            }
+            match self.0.remove_volume(&volume.name).await {
+                Ok(()) => report.volumes_deleted += 1,
+                // Taken meanwhile, or gone: left.
+                Err(DockerError::Conflict(_) | DockerError::NotFound) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(report)
     }
 
     pub async fn volumes(&self, scope: Scope) -> DockerResult<Vec<VolumeItem>> {
@@ -723,6 +804,17 @@ impl Docker {
 
 /// Container, volume and network identifiers as Docker allows them; anything
 /// else (`/`, `..`, `%`) never reaches an Engine API URL.
+/// Whether an unused volume may go: none a service of the panel's
+/// (`rdp_…`), a Compose project, a Swarm stack or the panel keeps.
+pub fn disposable_volume(volume: &VolumeItem) -> bool {
+    const KEPT_BY: [&str; 3] = [
+        SYSTEM_LABEL,
+        "com.docker.compose.project",
+        "com.docker.stack.namespace",
+    ];
+    !volume.name.starts_with("rdp_") && !KEPT_BY.iter().any(|l| volume.labels.contains_key(*l))
+}
+
 fn checked_name(name: &str) -> DockerResult<()> {
     let mut chars = name.chars();
     let valid = name.len() <= 255

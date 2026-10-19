@@ -27,8 +27,8 @@ use ::bollard::query_parameters::ResizeExecOptionsBuilder;
 use super::{
     BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
     DockerResult, ExecChunk, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream,
-    NetworkItem, NetworkRequest, PruneReport, RegistryAuth, SESSION_ENV, ServiceSpec, SwarmRole,
-    SwarmService, SwarmTask, TermSize, VolumeItem,
+    NetworkItem, NetworkRequest, PruneKind, PruneReport, RegistryAuth, SESSION_ENV, ServiceSpec,
+    SwarmRole, SwarmService, SwarmTask, TermSize, VolumeItem,
 };
 
 /// bash when the image has it, else sh.
@@ -371,6 +371,7 @@ impl DockerApi for BollardDocker {
             images_deleted: images.images_deleted.map_or(0, |v| v.len()),
             space_reclaimed: reclaimed(containers.space_reclaimed)
                 + reclaimed(images.space_reclaimed),
+            ..Default::default()
         })
     }
 
@@ -945,6 +946,126 @@ end HUP; sleep 2; end KILL; true"#
             .build();
         self.client
             .resize_exec(exec_id, options)
+            .await
+            .map_err(map_err)
+    }
+
+    async fn prune_kind(&self, kind: PruneKind, exclude_label: &str) -> DockerResult<PruneReport> {
+        let filters = HashMap::from([("label!", vec![format!("{exclude_label}=true")])]);
+        let reclaimed = |n: Option<i64>| u64::try_from(n.unwrap_or(0)).unwrap_or(0);
+        match kind {
+            PruneKind::Containers => {
+                let out = self
+                    .client
+                    .prune_containers(Some(
+                        PruneContainersOptionsBuilder::new()
+                            .filters(&filters)
+                            .build(),
+                    ))
+                    .await
+                    .map_err(map_err)?;
+                Ok(PruneReport {
+                    containers_deleted: out.containers_deleted.map_or(0, |v| v.len()),
+                    space_reclaimed: reclaimed(out.space_reclaimed),
+                    ..Default::default()
+                })
+            }
+            PruneKind::Images => {
+                // Tagged ones too (`docker image prune -a`).
+                let mut filters = filters.clone();
+                filters.insert("dangling", vec!["false".to_owned()]);
+                let out = self
+                    .client
+                    .prune_images(Some(
+                        PruneImagesOptionsBuilder::new().filters(&filters).build(),
+                    ))
+                    .await
+                    .map_err(map_err)?;
+                Ok(PruneReport {
+                    images_deleted: out.images_deleted.map_or(0, |v| v.len()),
+                    space_reclaimed: reclaimed(out.space_reclaimed),
+                    ..Default::default()
+                })
+            }
+            PruneKind::BuildCache => {
+                let options = ::bollard::query_parameters::PruneBuildOptions {
+                    all: Some(true),
+                    ..Default::default()
+                };
+                let out = self
+                    .client
+                    .prune_build(Some(options))
+                    .await
+                    .map_err(map_err)?;
+                Ok(PruneReport {
+                    build_caches_deleted: out.caches_deleted.map_or(0, |v| v.len()),
+                    space_reclaimed: reclaimed(out.space_reclaimed),
+                    ..Default::default()
+                })
+            }
+            PruneKind::Volumes => Err(DockerError::Other(
+                "volumes are pruned one by one (Docker::prune_kind)".to_owned(),
+            )),
+        }
+    }
+
+    async fn unused_volumes(&self) -> DockerResult<Vec<VolumeItem>> {
+        // Listed before the containers: a volume created between the two
+        // reads counts as used by nothing only if no container saw it.
+        let volumes = self.volumes().await?;
+        let containers = self
+            .client
+            .list_containers(Some(ListContainersOptionsBuilder::new().all(true).build()))
+            .await
+            .map_err(map_err)?;
+        let used: std::collections::HashSet<String> = containers
+            .iter()
+            .flat_map(|c| c.mounts.iter().flatten())
+            .filter_map(|m| m.name.clone())
+            .collect();
+        Ok(volumes
+            .into_iter()
+            .filter(|v| !used.contains(&v.name))
+            .collect())
+    }
+
+    async fn registry_digest(&self, reference: &str) -> DockerResult<Option<String>> {
+        let found = self
+            .client
+            .inspect_registry_image(reference, None)
+            .await
+            .map_err(map_err)?;
+        Ok(found.descriptor.digest.filter(|d| d.starts_with("sha256:")))
+    }
+
+    async fn run_on_host(&self, image: &str, cmd: Vec<String>) -> DockerResult<()> {
+        // `cmd` as the entrypoint: the image's own (the panel's) never runs.
+        let body = ::bollard::models::ContainerCreateBody {
+            image: Some(image.to_owned()),
+            entrypoint: Some(cmd),
+            cmd: Some(vec![]),
+            labels: Some(HashMap::from([(
+                super::SYSTEM_LABEL.to_owned(),
+                "true".to_owned(),
+            )])),
+            host_config: Some(::bollard::models::HostConfig {
+                privileged: Some(true),
+                pid_mode: Some("host".to_owned()),
+                auto_remove: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let created = self
+            .client
+            .create_container(
+                None::<::bollard::query_parameters::CreateContainerOptions>,
+                body,
+            )
+            .await
+            .map_err(map_err)?;
+        self.client
+            .start_container(&created.id, None::<StartContainerOptions>)
             .await
             .map_err(map_err)
     }
