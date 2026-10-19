@@ -492,7 +492,11 @@ impl DockerApi for FakeDocker {
         context: Vec<u8>,
         dockerfile: &str,
         tag: &str,
+        no_cache: bool,
     ) -> BoxStream<'static, DockerResult<BuildLine>> {
+        if no_cache {
+            self.record(format!("build no-cache {tag}"));
+        }
         let mut archive = tar::Archive::new(context.as_slice());
         let mut found = None;
         for entry in archive.entries().into_iter().flatten().flatten() {

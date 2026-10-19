@@ -10,7 +10,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Overview: Deploy, Start, Stop, Restart, Open | Done | always visible in the service's header |
 | Overview: Logs, Shell | Done | open the running container's live logs or terminal |
 | Overview: metrics, notes | Done | CPU and memory of each task (sparklines); notes for the team |
-| Overview: Force Rebuild, recent errors | Partly | Deploy rebuilds a built service; errors are in the deployment's log |
+| Overview: Force Rebuild, recent errors | Done | Force rebuild builds without the cache (Compose: `build --no-cache`, `up --force-recreate`), pulls an image again and replaces every task; recent errors: failed tasks (exit code, Swarm's error) and the last failed deployment with the end of its log |
 | Source: Docker image (private registry) | Done | pinned to its digest |
 | Source: Git, GitHub | Done | https or ssh with a generated deploy key; branch, tag or commit; build path |
 | Source: Dockerfile | Done | written in the panel |

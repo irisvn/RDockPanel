@@ -760,10 +760,12 @@ impl DockerApi for BollardDocker {
         context: Vec<u8>,
         dockerfile: &str,
         tag: &str,
+        no_cache: bool,
     ) -> BoxStream<'static, DockerResult<BuildLine>> {
         let options = ::bollard::query_parameters::BuildImageOptionsBuilder::new()
             .dockerfile(dockerfile)
             .t(tag)
+            .nocache(no_cache)
             .rm(true)
             .forcerm(true)
             .pull("true")

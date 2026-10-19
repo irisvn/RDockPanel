@@ -507,6 +507,19 @@ window.rustcms?.registerTranslations?.("vi", {
   "Every service, the panel and Traefik stop until the server is back (usually a minute or two).":
     "Mọi service, panel và Traefik sẽ dừng tới khi server chạy lại (thường một, hai phút).",
   "Type the server's hostname to confirm": "Gõ hostname của server để xác nhận",
+  // Force rebuild, recent errors
+  "Force rebuild": "Build lại từ đầu",
+  "force rebuild": "build lại từ đầu",
+  "Build again without the build cache (an image: pull it again), then replace every task":
+    "Build lại không dùng cache (service dùng image: pull lại image), rồi thay mọi task",
+  "Force rebuild? It builds from scratch (or pulls the image again) and replaces every task.":
+    "Build lại từ đầu? Service sẽ được build lại không dùng cache (hoặc pull lại image) và thay mọi task.",
+  "Recent errors": "Lỗi gần đây",
+  "Show all": "Xem tất cả",
+  "Show less": "Thu gọn",
+  "All deployments": "Mọi lần deploy",
+  rejected: "bị từ chối",
+  orphaned: "mất node",
   // Domains page
   "Edit domain": "Sửa domain",
   "Choose a service": "Chọn service",

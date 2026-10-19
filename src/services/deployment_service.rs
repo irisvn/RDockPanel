@@ -294,6 +294,21 @@ pub async fn has_pending_changes<C: ConnectionTrait>(
         != current.hash())
 }
 
+/// [`request`] a Deploy as "Force rebuild": built without the builder's
+/// cache (a Compose file's images too), pulled again, its tasks replaced
+/// even when nothing changed.
+pub async fn request_rebuild<C: ConnectionTrait>(
+    txn: &C,
+    service: &service::Model,
+    user_id: Option<i64>,
+    keyring: &Keyring,
+) -> AppResult<deployment::Model> {
+    let row = request(txn, service, Trigger::Deploy, None, user_id, keyring).await?;
+    let mut active = row.into_active_model();
+    active.force_rebuild = Set(true);
+    Ok(active.update(txn).await?)
+}
+
 /// Asks for a deployment of `service`, in `txn` (the caller queues
 /// [`crate::jobs::run_deployment::RunDeployment`] in it): takes the
 /// service's lock (409 when another deployment holds it) and records what
@@ -1061,7 +1076,13 @@ async fn apply(
                 .await;
         }
         return crate::services::compose_service::apply(
-            docker, traefik, &snapshot, source, trigger, secrets, log,
+            docker,
+            traefik,
+            &snapshot,
+            source,
+            (trigger, row.force_rebuild),
+            secrets,
+            log,
         )
         .await;
     }
@@ -1127,6 +1148,7 @@ async fn apply(
                 build,
                 &tag,
                 secrets.deploy_key.as_deref(),
+                row.force_rebuild,
                 log,
             )
             .await?;
@@ -1157,7 +1179,11 @@ async fn apply(
         log.line(format!("warning: {warning}")).await;
     }
     let options =
-        deploy_options(force_update_of(existing.as_ref()) + u64::from(trigger == Trigger::Restart));
+        // Restart and Force rebuild: new tasks even when nothing changed.
+        deploy_options(
+            force_update_of(existing.as_ref())
+                + u64::from(trigger == Trigger::Restart || row.force_rebuild),
+        );
     // Placeholders (`$(PROJECT_NAME)`, …) in the environment, as of now.
     let vars = placeholder_vars(&snapshot);
     let env: BTreeMap<String, String> = secrets
@@ -1635,6 +1661,7 @@ pub fn summary(row: &deployment::Model) -> serde_json::Value {
     json!({
         "id": row.id,
         "trigger": row.trigger,
+        "rebuild": row.force_rebuild,
         "status": row.status,
         "error": row.error,
         "image": row.image_digest,

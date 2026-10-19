@@ -1885,3 +1885,158 @@ db_test!(
         assert_eq!(refused.status, "failed", "{:?}", refused.error);
     }
 );
+
+db_test!(
+    force_rebuild_and_recent_errors,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, web) = shop(&app).await;
+        let project = service_row(&app, web).await.project_id.to_string();
+        let site: i64 = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "site", "replicas": 1, "source": "dockerfile", "dockerfile": "FROM nginx:1.27\n"}),
+        )
+        .await
+        .parse()
+        .unwrap();
+        let forced = |fake: &FakeDocker, name: &str| {
+            fake.services.lock().unwrap()[name]
+                .spec
+                .clone()
+                .unwrap()
+                .task_template
+                .unwrap()
+                .force_update
+                .unwrap_or(0)
+        };
+
+        // Built: again without the cache, its tasks replaced.
+        let first = run(&app, &admin, "deploy", site).await;
+        assert_eq!(first.status, "succeeded", "{:?}", first.error);
+        assert!(!first.force_rebuild);
+        let before = forced(&fake, "shop_site");
+        let rebuilt = run(&app, &admin, "rebuild", site).await;
+        assert_eq!(rebuilt.status, "succeeded", "{:?}", rebuilt.error);
+        assert_eq!(rebuilt.trigger, "deploy");
+        assert!(rebuilt.force_rebuild);
+        let calls = fake.calls();
+        assert!(
+            calls.contains(&format!("build no-cache rdp/shop_site:d{}", rebuilt.id)),
+            "{calls:?}"
+        );
+        assert!(!calls.contains(&format!("build no-cache rdp/shop_site:d{}", first.id)));
+        assert_eq!(forced(&fake, "shop_site"), before + 1);
+        // Back to it: its recorded image, nothing built.
+        action(
+            &app,
+            &admin,
+            "deployments",
+            "rollback",
+            &rebuilt.id.to_string(),
+        )
+        .await
+        .assert_status(StatusCode::OK);
+        let back = last_deployment(&app, site).await;
+        assert_eq!(back.trigger, "rollback");
+        assert!(!back.force_rebuild);
+        let builds = fake
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("build "))
+            .count();
+        deployment_service::run(app.state(), back.id, FAST)
+            .await
+            .unwrap();
+        assert_eq!(last_deployment(&app, site).await.status, "succeeded");
+        assert_eq!(
+            fake.calls()
+                .iter()
+                .filter(|c| c.starts_with("build "))
+                .count(),
+            builds
+        );
+        // A plain Deploy after it: with the cache again.
+        let again = run(&app, &admin, "deploy", site).await;
+        assert!(!again.force_rebuild);
+        assert!(
+            !fake
+                .calls()
+                .contains(&format!("build no-cache rdp/shop_site:d{}", again.id))
+        );
+
+        // An image: pulled again, its tasks replaced (nothing changed).
+        assert_eq!(run(&app, &admin, "deploy", web).await.status, "succeeded");
+        let before = forced(&fake, "shop_web");
+        assert_eq!(run(&app, &admin, "rebuild", web).await.status, "succeeded");
+        assert_eq!(forced(&fake, "shop_web"), before + 1);
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{web}")))
+            .await
+            .json();
+        assert_eq!(page["latest"]["rebuild"], true, "{page}");
+
+        // Recent errors: its failed tasks, its last failed deployment.
+        let errors = app.admin_api(&format!("x/apps/services/{web}/errors"));
+        let seen = admin.get(&errors).await;
+        seen.assert_status(StatusCode::OK);
+        assert_eq!(seen.json()["tasks"], json!([]));
+        assert_eq!(seen.json()["deployment"], Value::Null);
+        *fake.task_state.lock().unwrap() =
+            Some(rdockpanel::services::docker_service::TaskState::FAILED);
+        let failed = last_deployment(&app, web).await;
+        let mut row: deployment::ActiveModel = failed.clone().into();
+        row.status = sea_orm::Set("failed".to_owned());
+        row.error = sea_orm::Set(Some("health check failed".to_owned()));
+        row.log = sea_orm::Set(Some(format!("{}\nthe end\n", "é".repeat(3000))));
+        sea_orm::ActiveModelTrait::update(row, app.state().db())
+            .await
+            .unwrap();
+        let seen = admin.get(&errors).await.json();
+        let tasks = seen["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 6, "{seen}");
+        assert_eq!(tasks[0]["state"], "failed");
+        assert_eq!(tasks[0]["error"], "exit code 1");
+        assert_eq!(seen["deployment"]["id"], failed.id);
+        assert_eq!(seen["deployment"]["error"], "health check failed");
+        // Its end, at a line: no part of the long first line.
+        assert_eq!(seen["deployment"]["log_tail"], "the end\n");
+        // A last line longer than the tail: its end, kept.
+        let mut row: deployment::ActiveModel = last_deployment(&app, web).await.into();
+        row.log = sea_orm::Set(Some(format!("start\n{}\n", "é".repeat(3000))));
+        sea_orm::ActiveModelTrait::update(row, app.state().db())
+            .await
+            .unwrap();
+        let tail = admin.get(&errors).await.json()["deployment"]["log_tail"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            tail.len() <= 4096 && tail.len() > 4000 && tail.ends_with("é\n"),
+            "{}",
+            tail.len()
+        );
+        // The deployment only with deployments.view.
+        let viewer = support::user_with(&app, "viewer", &["services.view"]).await;
+        let viewer = app.acting_as(&viewer).await;
+        let seen = viewer.get(&errors).await;
+        seen.assert_status(StatusCode::OK);
+        let seen = seen.json();
+        assert_eq!(seen["tasks"].as_array().unwrap().len(), 6);
+        assert_eq!(seen["deployment"], Value::Null);
+        // A Compose service's: its administrators'.
+        let mut compose: service::ActiveModel = service_row(&app, web).await.into();
+        compose.kind = sea_orm::Set("compose".to_owned());
+        sea_orm::ActiveModelTrait::update(compose, app.state().db())
+            .await
+            .unwrap();
+        viewer
+            .get(&errors)
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        admin.get(&errors).await.assert_status(StatusCode::OK);
+    }
+);

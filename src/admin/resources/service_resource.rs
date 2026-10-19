@@ -163,6 +163,30 @@ impl Resource for ServiceResource {
     fn actions() -> Vec<Action<service::Entity>> {
         vec![
             deployment_action("deploy", Trigger::Deploy, "Deploy").icon("box"),
+            Action::<service::Entity>::new("rebuild", |ctx, txn, services, _| {
+                Box::pin(async move {
+                    let user = ctx.principal.id.parse().ok();
+                    for service in services {
+                        let row = deployment_service::request_rebuild(
+                            txn,
+                            &service,
+                            user,
+                            ctx.keyring()?,
+                        )
+                        .await?;
+                        ctx.dispatch(
+                            txn,
+                            &RunDeployment {
+                                deployment_id: row.id,
+                            },
+                        )
+                        .await?;
+                    }
+                    Ok(())
+                })
+            })
+            .label("Force rebuild")
+            .ability("deploy"),
             deployment_action("start", Trigger::Start, "Start"),
             deployment_action("stop", Trigger::Stop, "Stop")
                 .requires_confirmation("Stop this service? Its tasks are removed."),

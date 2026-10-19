@@ -28,6 +28,9 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub error: Option<String>,
     pub user_id: Option<i64>,
+    /// "Force rebuild": built without the builder's cache, its tasks
+    /// replaced even when nothing changed.
+    pub force_rebuild: bool,
     /// The environment it applies, sealed with `APP_KEY` (context
     /// `deployments.env`): a rollback applies it again.
     #[sea_orm(column_type = "Text", nullable)]

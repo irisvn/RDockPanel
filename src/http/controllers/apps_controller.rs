@@ -713,6 +713,104 @@ pub async fn trigger(
 /// A service's resources now (its Overview's monitor): CPU and memory of each
 /// running task on this node, and their sum. Two samples of Docker's stats
 /// (the first has no CPU delta), at most 3 s.
+/// How many task errors and how much of a failed deployment's log the
+/// Overview shows.
+const RECENT_ERRORS: usize = 10;
+const FAILED_LOG_BYTES: usize = 4_096;
+
+/// The service's recent errors, like EasyPanel's Overview: its tasks that
+/// failed (an exit code other than 0, refused by Swarm, lost with their
+/// node; not those stopped by a deployment), and its last failed deployment
+/// with the end of its log (`deployments.view`).
+pub async fn errors(
+    State(app): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    use crate::services::docker_service::{Docker, TaskState};
+    let row = service_of(&app, id).await?;
+    // A Compose or privileged service's diagnostics: its administrators'.
+    forbid_privileged(&auth, &row)?;
+    let name = snapshot_without_env(app.db(), &row).await?.service_name();
+    // Compose's containers are no Swarm tasks: none listed.
+    let tasks = match app.service::<Docker>() {
+        Some(docker) if row.kind != "compose" => {
+            docker.engine().list_tasks(&name).await.unwrap_or_default()
+        }
+        _ => vec![],
+    };
+    // Newest first (by time, not by text: precisions vary).
+    let mut tasks = tasks;
+    tasks.sort_by(|a, b| {
+        let at = |t: &crate::services::docker_service::SwarmTask| {
+            t.status.as_ref().and_then(|s| s.timestamp)
+        };
+        at(b).cmp(&at(a))
+    });
+    let mut failed: Vec<Value> = tasks
+        .iter()
+        .filter_map(|task| {
+            let status = task.status.as_ref()?;
+            let state = status.state?;
+            if !matches!(
+                state,
+                TaskState::FAILED | TaskState::REJECTED | TaskState::ORPHANED
+            ) {
+                return None;
+            }
+            let error: String = status
+                .err
+                .clone()
+                .or_else(|| status.message.clone())
+                .unwrap_or_default()
+                .chars()
+                .take(500)
+                .collect();
+            Some(json!({
+                "at": status.timestamp,
+                "slot": task.slot,
+                "state": state.to_string(),
+                "error": error,
+                "exit_code": status.container_status.as_ref().and_then(|c| c.exit_code),
+            }))
+        })
+        .collect();
+    failed.truncate(RECENT_ERRORS);
+    let deployment = if auth.principal().can("deployments.view") {
+        deployment::Entity::find()
+            .filter(deployment::Column::ServiceId.eq(id))
+            .filter(deployment::Column::Status.eq(crate::services::deployment_service::FAILED))
+            .order_by_desc(deployment::Column::Id)
+            .one(app.db())
+            .await?
+            .map(|d| {
+                let log = d.log.as_deref().unwrap_or_default();
+                // Its end, cut at a line (and a character) boundary.
+                let mut start = log.len().saturating_sub(FAILED_LOG_BYTES);
+                while !log.is_char_boundary(start) {
+                    start += 1;
+                }
+                let tail = &log[start..];
+                // From its first whole line, unless that leaves nothing.
+                let tail = match tail.split_once('\n') {
+                    Some((_, rest)) if start > 0 && !rest.trim().is_empty() => rest,
+                    _ => tail,
+                };
+                json!({
+                    "id": d.id,
+                    "trigger": d.trigger,
+                    "error": d.error,
+                    "created_at": d.created_at,
+                    "finished_at": d.finished_at,
+                    "log_tail": tail,
+                })
+            })
+    } else {
+        None
+    };
+    Ok(Json(json!({ "tasks": failed, "deployment": deployment })))
+}
+
 pub async fn stats(
     State(app): State<AppState>,
     auth: Auth,

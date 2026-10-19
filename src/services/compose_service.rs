@@ -246,7 +246,7 @@ pub(crate) async fn apply(
     traefik: Option<&crate::services::traefik_service::Traefik>,
     snapshot: &Snapshot,
     source: &Compose,
-    trigger: Trigger,
+    (trigger, rebuild): (Trigger, bool),
     secrets: &Secrets,
     log: &mut RunLog<'_>,
 ) -> Result<(Outcome, Option<String>), Outcome> {
@@ -393,11 +393,39 @@ pub(crate) async fn apply(
         .collect();
     write_env(&project_dir, &env).map_err(|e| failed(format!(".env: {e}")))?;
     crate::services::deployment_service::project_network(docker, traefik, snapshot, log).await?;
+    // Force rebuild: its images built again without the builder's cache
+    // (and pulled again), every container made again.
+    if rebuild {
+        compose(
+            docker,
+            &project_dir,
+            &name,
+            &["build", "--no-cache", "--pull"],
+            log,
+        )
+        .await?;
+    }
     // A stopped service is deployed stopped (its containers made, not started).
-    let up: &[&str] = if snapshot.running {
-        &["up", "-d", "--build", "--remove-orphans"]
-    } else {
-        &["create", "--build", "--remove-orphans"]
+    let up: &[&str] = match (snapshot.running, rebuild) {
+        (true, false) => &["up", "-d", "--build", "--remove-orphans"],
+        (true, true) => &[
+            "up",
+            "-d",
+            "--build",
+            "--pull",
+            "always",
+            "--force-recreate",
+            "--remove-orphans",
+        ],
+        (false, false) => &["create", "--build", "--remove-orphans"],
+        (false, true) => &[
+            "create",
+            "--build",
+            "--pull",
+            "always",
+            "--force-recreate",
+            "--remove-orphans",
+        ],
     };
     compose(docker, &project_dir, &name, up, log).await?;
     Ok((Outcome::Succeeded, None))

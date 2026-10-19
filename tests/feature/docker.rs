@@ -832,9 +832,10 @@ async fn a_real_build_uses_buildkit() {
         tar.append_data(&mut header, name, body.as_bytes()).unwrap();
     }
     let tag = "rdp/test_build:d1";
-    let mut lines = docker
-        .engine()
-        .build_image(tar.into_inner().unwrap(), "Dockerfile", tag);
+    let mut lines =
+        docker
+            .engine()
+            .build_image(tar.into_inner().unwrap(), "Dockerfile", tag, false);
     let (mut image, mut log) = (None, vec![]);
     while let Some(line) = lines.next().await {
         match line.expect("the build") {
@@ -857,10 +858,12 @@ async fn a_real_build_uses_buildkit() {
     header.set_cksum();
     tar.append_data(&mut header, "Dockerfile", body.as_bytes())
         .unwrap();
-    let mut lines =
-        docker
-            .engine()
-            .build_image(tar.into_inner().unwrap(), "Dockerfile", "rdp/test_build:d2");
+    let mut lines = docker.engine().build_image(
+        tar.into_inner().unwrap(),
+        "Dockerfile",
+        "rdp/test_build:d2",
+        false,
+    );
     let mut failed = None;
     while let Some(line) = lines.next().await {
         if let Err(e) = line {

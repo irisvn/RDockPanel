@@ -21,6 +21,8 @@ export type Mount = { id: number; kind: string; name: string | null; source: str
 export type Deployment = {
   id: number;
   trigger: string;
+  /** Asked as "Force rebuild" (no build cache, new tasks). */
+  rebuild?: boolean;
   status: string;
   error: string | null;
   image: string | null;

@@ -124,6 +124,19 @@ db_test!(
             calls.contains(&"compose shop_stack up -d --build --remove-orphans".to_owned()),
             "{calls:?}"
         );
+        // Force rebuild: built without the cache, pulled, every container made again.
+        run(&app, &admin, "rebuild", id).await;
+        let calls = fake.calls();
+        assert!(
+            calls.contains(&"compose shop_stack build --no-cache --pull".to_owned()),
+            "{calls:?}"
+        );
+        assert!(
+            calls.contains(
+                &"compose shop_stack up -d --build --pull always --force-recreate --remove-orphans"
+                    .to_owned()
+            )
+        );
         let composed = fake.composed.lock().unwrap().clone().unwrap();
         assert!(
             composed.contains("shop_stack_web") && composed.contains("rdp_shop"),

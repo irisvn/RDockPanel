@@ -78,6 +78,14 @@ export function ServicePage(props: Props) {
             <Button variant="outline" disabled={s.busy || !running} onClick={() => run("restart")}>
               {t("Restart")}
             </Button>
+            <Button
+              variant="outline"
+              disabled={s.busy}
+              title={t("Build again without the build cache (an image: pull it again), then replace every task")}
+              onClick={() => run("rebuild", "Force rebuild? It builds from scratch (or pulls the image again) and replaces every task.")}
+            >
+              {t("Force rebuild")}
+            </Button>
           </>
         )}
         {primary && running && (
@@ -195,10 +203,11 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
         />
       </Section>
       {s.status === "running" && <Monitor {...props} />}
+      <RecentErrors {...props} d={d} />
       <Notes {...props} d={d} />
       {d.latest && (
         <Section
-          title={`${t("Deployment")} #${d.latest.id} · ${t(d.latest.trigger)}`}
+          title={`${t("Deployment")} #${d.latest.id} · ${t(d.latest.rebuild ? "force rebuild" : d.latest.trigger)}`}
           actions={<StatusBadge status={d.latest.status} label={t(d.latest.status)} />}
         >
           {d.latest.error && <Alert variant="destructive">{d.latest.error}</Alert>}
@@ -207,6 +216,62 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
       )}
       {!d.latest && d.can.deployments && <p className="rdp2-muted">{t("Not deployed yet: press Deploy.")}</p>}
     </div>
+  );
+}
+
+type Errors = {
+  tasks: Array<{ at: string | null; slot: number | null; state: string; error: string; exit_code: number | null }>;
+  deployment: { id: number; trigger: string; error: string | null; created_at: string; finished_at: string | null; log_tail: string } | null;
+};
+
+/** Its tasks that failed lately and its last failed deployment (EasyPanel's "recent errors"). */
+function RecentErrors(props: Props & { d: ServiceDetail }) {
+  const { d, t } = props;
+  const errors = useAdminQuery<Errors>(props, `/apps/services/${d.service.id}/errors`, { refetchInterval: 10000 });
+  const [open, setOpen] = useState(false);
+  const e = errors.data;
+  // The latest deployment (shown below) is not repeated.
+  const deployment = e?.deployment && e.deployment.id !== d.latest?.id ? e.deployment : null;
+  if (!e || (e.tasks.length === 0 && !deployment)) return null;
+  return (
+    <Section title={t("Recent errors")}>
+      {e.tasks.length > 0 && (
+        <ul className="rdp2-list">
+          {e.tasks.slice(0, open ? undefined : 3).map((task, i) => (
+            <li key={i} className="rdp2-list-row">
+              <span className="rdp2-error rdp2-small">
+                {t(task.state)}
+                {task.exit_code != null && task.exit_code !== 0 && ` · ${t("exit code")} ${task.exit_code}`}
+                {task.error && ` · ${task.error}`}
+              </span>
+              <span className="rdp2-muted rdp2-small">{when(task.at, props.locale)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {e.tasks.length > 3 && (
+        <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
+          {open ? t("Show less") : `${t("Show all")} (${e.tasks.length})`}
+        </Button>
+      )}
+      {deployment && (
+        <div className="rdp2-form">
+          <p className="rdp2-small">
+            <strong>
+              {t("Deployment")} #{deployment.id} · {t(deployment.trigger)}
+            </strong>{" "}
+            <span className="rdp2-muted">{when(deployment.finished_at ?? deployment.created_at, props.locale)}</span>
+          </p>
+          {deployment.error && <Alert variant="destructive">{deployment.error}</Alert>}
+          {deployment.log_tail && <pre className="rdp2-log rdp2-mono rdp2-small">{deployment.log_tail}</pre>}
+          <div className="rdp2-row">
+            <Button size="sm" variant="outline" onClick={() => props.navigate(`/p/dashboard/${props.project}/${d.service.name}/deployments`)}>
+              {t("All deployments")}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -382,7 +447,7 @@ function DeploymentsTab(props: Props & { d: ServiceDetail; onError: (e: unknown)
           {d.deployments.map((row) => (
             <tr key={row.id}>
               <td>{row.id}</td>
-              <td>{t(row.trigger)}</td>
+              <td>{t(row.rebuild ? "force rebuild" : row.trigger)}</td>
               <td>
                 <StatusBadge status={row.status} label={t(row.status)} />
               </td>

@@ -469,6 +469,7 @@ pub(crate) async fn build(
     build: &Build,
     tag: &str,
     deploy_key: Option<&str>,
+    no_cache: bool,
     log: &mut RunLog<'_>,
 ) -> Result<String, Outcome> {
     let dir = WorkDir(
@@ -544,9 +545,10 @@ pub(crate) async fn build(
         tar.len() / 1024
     ))
     .await;
-    let mut lines = docker
-        .engine()
-        .build_image(tar, &dockerfile_path.to_string_lossy(), tag);
+    let mut lines =
+        docker
+            .engine()
+            .build_image(tar, &dockerfile_path.to_string_lossy(), tag, no_cache);
     let mut image = None;
     // A quiet step (a long `RUN`) keeps the lock too.
     let mut renew = tokio::time::interval(RENEW);

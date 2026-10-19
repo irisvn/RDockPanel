@@ -52,7 +52,8 @@ feature is free: no project limits, no paid tiers.
   own network: a project's services cannot call another project's services directly (what is public,
   through a domain or a published port, stays public).
 - **Deployments**: Deploy, Start, Stop, Restart and Destroy from the service page, one at a time per
-  service, with a live log; Rollback from an earlier deployment ("Roll back to this"). Images are
+  service, with a live log; Rollback from an earlier deployment ("Roll back to this"); Force rebuild
+  (no build cache, the image pulled again, every task replaced); the Overview's recent errors. Images are
   pinned to their registry digest (a local-only image to its id, with a warning). Updates are rolling
   (start-first when zero downtime is on, the service has a health check and publishes no host-mode
   port; stop-first otherwise) and Swarm rolls back a failed one. Every deployment keeps its

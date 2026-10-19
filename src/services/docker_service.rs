@@ -355,12 +355,14 @@ pub trait DockerApi: Send + Sync {
     ) -> DockerResult<Vec<String>>;
     async fn delete_service(&self, name: &str) -> DockerResult<()>;
     /// Builds `context` (a tar) with its Dockerfile at `dockerfile`, tagged
-    /// `tag`: the build's lines, then the image's id.
+    /// `tag` (`no_cache`: none of the builder's cache): the build's lines,
+    /// then the image's id.
     fn build_image(
         &self,
         context: Vec<u8>,
         dockerfile: &str,
         tag: &str,
+        no_cache: bool,
     ) -> BoxStream<'static, DockerResult<BuildLine>>;
     /// Creates the Swarm config `name` holding `data`; its id (a name taken:
     /// `Conflict`).
@@ -990,6 +992,7 @@ impl DockerApi for Unavailable {
         _: Vec<u8>,
         _: &str,
         _: &str,
+        _: bool,
     ) -> BoxStream<'static, DockerResult<BuildLine>> {
         futures_util::stream::iter([Err(self.err())]).boxed()
     }

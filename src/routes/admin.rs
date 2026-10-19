@@ -269,6 +269,11 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("services.view"),
                     apps::stats,
                 )
+                .get(
+                    "/services/{id}/errors",
+                    AdminAccess::can("services.view"),
+                    apps::errors,
+                )
                 .post(
                     "/services/{id}/basic-auth",
                     AdminAccess::can("services.update"),
