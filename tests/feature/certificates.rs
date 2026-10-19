@@ -811,6 +811,15 @@ db_test!(
         let current = admin.get(&app.admin_api("x/apps/panel")).await;
         current.assert_status(StatusCode::OK);
         assert_eq!(current.json()["email"], "ops@example.com");
+        // Where it runs (APP_URL), not the installer's default port.
+        assert!(
+            current.json()["url"]
+                .as_str()
+                .is_some_and(|u| u.starts_with("http")),
+            "{}",
+            current.text()
+        );
+        assert_eq!(current.json()["installed"], false);
 
         let url = app.admin_api("x/apps/panel/check");
         let bad = admin

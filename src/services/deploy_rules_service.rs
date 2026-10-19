@@ -51,6 +51,13 @@ pub struct PanelConfig {
     /// The panel's own host (from `APP_URL`): no service may route it.
     #[serde(skip)]
     pub panel_host: String,
+    /// The panel's address (`APP_URL`), as its users open it (no
+    /// credentials, query or fragment).
+    #[serde(skip)]
+    pub panel_url: String,
+    /// Installed by install.sh (it sets RUSTCMS_PANEL__INSTALLED); else run
+    /// from source.
+    pub installed: bool,
 }
 
 impl Default for PanelConfig {
@@ -70,6 +77,8 @@ impl Default for PanelConfig {
             compose_dir: PathBuf::from("storage/compose"),
             internal_url: String::new(),
             panel_host: String::new(),
+            panel_url: String::new(),
+            installed: false,
         }
     }
 }
@@ -79,6 +88,7 @@ impl PanelConfig {
     pub fn from_config(config: &rustcms::Config) -> Self {
         let mut panel = config.section::<Self>("panel").unwrap_or_default();
         panel.panel_host = panel_host(&config.app.url);
+        panel.panel_url = shown_url(&config.app.url);
         panel
     }
 }
@@ -95,6 +105,19 @@ fn panel_host(url: &str) -> String {
         .next()
         .unwrap_or_default()
         .to_ascii_lowercase()
+}
+
+/// `url` as it may be shown: without credentials, query or fragment, no
+/// trailing slash (empty when it is no URL).
+fn shown_url(url: &str) -> String {
+    let Ok(mut parsed) = reqwest::Url::parse(url) else {
+        return String::new();
+    };
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.as_str().trim_end_matches('/').to_owned()
 }
 
 /// Whether `host` is the panel's own (no service may route it).
@@ -295,6 +318,16 @@ pub fn bind_source(source: &str, roots: &[PathBuf]) -> Result<PathBuf, BindRefus
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_panels_url_as_shown() {
+        assert_eq!(shown_url("http://localhost:8000"), "http://localhost:8000");
+        assert_eq!(
+            shown_url("https://user:secret@panel.example.com/admin/?token=x#y"),
+            "https://panel.example.com/admin"
+        );
+        assert_eq!(shown_url("not a url"), "");
+    }
 
     #[test]
     fn the_panels_host() {

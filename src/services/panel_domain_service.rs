@@ -47,9 +47,15 @@ pub async fn current(
     let host = cfg.panel_host.clone();
     let ip = host.parse::<std::net::IpAddr>().is_ok();
     json!({
+        // Where it runs now (`APP_URL`): development's too.
+        "url": cfg.panel_url,
+        // Installed by install.sh (`[panel] installed`); else run from
+        // source: the command is for an installed server.
+        "installed": cfg.installed,
         "domain": if host.is_empty() || ip || host == "localhost" { Value::Null } else { json!(host) },
         "email": email,
-        "apps_domain": if cfg.service_domain.is_empty() || cfg.service_domain == "localhost" { Value::Null } else { json!(cfg.service_domain) },
+        // As set (development's `localhost` too).
+        "apps_domain": if cfg.service_domain.is_empty() { Value::Null } else { json!(cfg.service_domain) },
         "public_ip": if cfg.public_ip.is_empty() { Value::Null } else { json!(cfg.public_ip) },
         "https": cfg.https_port == 443 && !cfg.cert_resolver.is_empty(),
     })

@@ -10,6 +10,8 @@ import { Alert, Button, CodeBlock, ErrorState, Input, Loading } from "@rustcms/a
 import { ErrorNote, Facts, Field, Section } from "../lib/ui";
 
 type Current = {
+  url: string;
+  installed: boolean;
   domain: string | null;
   email: string | null;
   apps_domain: string | null;
@@ -39,7 +41,8 @@ export function Panel(props: PageProps<unknown>) {
   const values = {
     domain: domain ?? c.domain ?? "",
     email: email ?? c.email ?? "",
-    apps_domain: apps ?? c.apps_domain ?? "",
+    // Development's `localhost` is no domain to give the installer.
+    apps_domain: apps ?? (c.apps_domain === "localhost" ? "" : (c.apps_domain ?? "")),
   };
   const edit = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     set(e.target.value);
@@ -51,9 +54,12 @@ export function Panel(props: PageProps<unknown>) {
       title={t("Panel")}
       description={t("The panel's domain, its Let's Encrypt email and the apps' domain. Changed by the installer: check new ones here, then run the command shown on the server.")}
     >
+      {!c.installed && (
+        <Alert>{t("This panel runs from source (development), not from install.sh: its address comes from APP_URL. The command below is for a server installed with install.sh.")}</Alert>
+      )}
       <Facts
         items={[
-          [t("Panel address"), c.domain ? `https://${c.domain}` : `http://${c.public_ip ?? "<ip>"}:3000`],
+          [t("Panel address"), c.url],
           [t("Let's Encrypt email"), c.email ?? t("none")],
           [t("Apps' domain"), c.apps_domain ? `<project>-<service>.${c.apps_domain}` : t("none (no generated domains)")],
           [t("Server address"), c.public_ip ?? t("unknown")],
@@ -78,7 +84,7 @@ export function Panel(props: PageProps<unknown>) {
         <div className="rdp2-grid2">
           <Field
             label={t("Panel domain")}
-            help={t("Empty: back to http://<ip>:3000. Point its DNS (A record) to this server first.")}
+            help={t("Empty: the installed panel answers at http://<server-ip>:3000. Point the domain's DNS (A record) to the server first.")}
             error={checked?.errors.domain ? [checked.errors.domain] : undefined}
           >
             <Input value={values.domain} placeholder="panel.example.com" onChange={edit(setDomain)} disabled={busy} />
