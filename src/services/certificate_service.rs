@@ -205,8 +205,8 @@ pub async fn sync(
     traefik: &crate::services::traefik_service::Traefik,
 ) -> Result<(), String> {
     use sea_orm::{EntityTrait, QueryOrder};
-    static WRITING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-    let _writing = WRITING.lock().await;
+    static STORE: Generations = Generations::new();
+    let generation = STORE.read();
     let rows = crate::models::certificate::Entity::find()
         .order_by_asc(crate::models::certificate::Column::Id)
         .all(db)
@@ -229,10 +229,12 @@ pub async fn sync(
         .traefik_mount
         .clone();
     let dir = traefik.dir.clone();
-    tokio::task::spawn_blocking(move || write_store(&dir, &mount, &stored))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| format!("the certificates cannot be written: {e}"))
+    tokio::task::spawn_blocking(move || {
+        STORE.write(generation, || write_store(&dir, &mount, &stored))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("the certificates cannot be written: {e}"))
 }
 
 /// The certificate `id`, its row locked until `db`'s transaction ends (a
@@ -437,6 +439,47 @@ pub async fn check_expiry(state: &rustcms::AppState) -> rustcms::AppResult<()> {
     Ok(())
 }
 
+/// Orders writes of one kind of file by when their content was read: a
+/// write whose read is older than the last one written is skipped (a
+/// request given up keeps writing in the background; it never lands last).
+pub(crate) struct Generations {
+    next: std::sync::atomic::AtomicU64,
+    written: std::sync::Mutex<u64>,
+}
+
+impl Generations {
+    pub(crate) const fn new() -> Self {
+        Self {
+            next: std::sync::atomic::AtomicU64::new(1),
+            written: std::sync::Mutex::new(0),
+        }
+    }
+
+    /// The generation of a read about to happen.
+    pub(crate) fn read(&self) -> u64 {
+        self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Runs `write` for the content read at `generation` unless newer content
+    /// was written already (held throughout: one write at a time).
+    pub(crate) fn write(
+        &self,
+        generation: u64,
+        write: impl FnOnce() -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let mut written = self
+            .written
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if generation < *written {
+            return Ok(());
+        }
+        write()?;
+        *written = generation;
+        Ok(())
+    }
+}
+
 /// A certificate as Traefik gets it.
 pub struct Stored {
     pub id: i64,
@@ -510,7 +553,7 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 /// Writes `name` in `dir` through a temporary file created `0600` (never
 /// readable by others, even for a moment), then renamed over it. A symlink
 /// in its place is replaced, never followed.
-fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
     // The same already: left alone (Traefik reloads on any write).
     if std::fs::symlink_metadata(dir.join(name)).is_ok_and(|m| m.is_file())
         && std::fs::read(dir.join(name)).is_ok_and(|old| old == bytes)
@@ -522,8 +565,10 @@ fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
         }
         return Ok(());
     }
-    let tmp = dir.join(format!(".{name}.tmp"));
-    let _ = std::fs::remove_file(&tmp);
+    // Its own temporary name: two writers never share one.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{name}.{}.{n}.tmp", std::process::id()));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -532,15 +577,41 @@ fn write_private(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
         options.mode(0o600);
     }
     let mut file = options.open(&tmp)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    drop(file);
-    std::fs::rename(&tmp, dir.join(name))
+    let written = file
+        .write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| {
+            drop(file);
+            std::fs::rename(&tmp, dir.join(name))
+        });
+    // Failed: no temporary file left behind.
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_older_read_never_lands_last() {
+        let g = Generations::new();
+        let (old, new) = (g.read(), g.read());
+        let mut order = vec![];
+        g.write(new, || {
+            order.push("new");
+            Ok(())
+        })
+        .unwrap();
+        g.write(old, || {
+            order.push("old");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(order, ["new"]);
+    }
 
     #[test]
     fn days_left_until_it_expires() {

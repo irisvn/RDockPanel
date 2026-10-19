@@ -35,12 +35,13 @@ Done (feature by feature in [the EasyPanel comparison](easypanel-comparison.md))
 - Redirects, basic authentication, maintenance mode, scripts, notes, per-service CPU and memory,
   wildcard domains, custom Traefik middlewares, capabilities, sysctls and supplemental groups.
 - Certificate resolvers per domain (Let's Encrypt over HTTP or DNS), applied to Traefik from the panel;
-  uploaded certificates with expiry warnings.
+  uploaded certificates with expiry warnings; Traefik in Settings (state, restart, logs, custom
+  middlewares).
 
 Next:
 
 - Builds from uploads, Railpack and buildpacks; a GitHub token.
-- A Traefik page (restart, logs, custom middlewares); certificate status of the resolvers; drift checks (RustCMS W4).
+- Certificate status of the resolvers; drift checks (RustCMS W4).
 - The panel's domain and Let's Encrypt email in Settings; a web database client.
 - Notifications of Docker prunes and panel updates.
 - RustCMS 0.6 for the React pages (its tabs, toasts and resource API).

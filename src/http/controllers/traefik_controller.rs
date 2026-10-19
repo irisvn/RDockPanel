@@ -5,6 +5,7 @@
 //! (`cert_resolvers`).
 
 use rustcms::audit::RequestMeta;
+use rustcms::auth::{EventStream, LiveSession};
 use rustcms::prelude::*;
 use rustcms::{AppError, AppResult, Json};
 use serde_json::Value;
@@ -286,4 +287,107 @@ pub async fn delete_certificate(
     txn.commit().await?;
     publish(&app, &auth, request, &name).await?;
     Ok(Json(json!({ "deleted": true })))
+}
+
+/// Traefik's state (whitelisted: image, ports, tasks, last update) and the
+/// administrators' middlewares (their YAML as saved).
+pub async fn status(State(app): State<AppState>) -> AppResult<Json<Value>> {
+    let (docker, traefik) = services(&app)?;
+    let state = if traefik.service.is_empty() {
+        json!({ "found": false })
+    } else {
+        crate::services::traefik_settings_service::status(&docker, &traefik).await?
+    };
+    let middlewares = crate::models::panel_setting::get(
+        app.db(),
+        crate::services::traefik_settings_service::MIDDLEWARES_KEY,
+    )
+    .await?
+    .unwrap_or_default();
+    Ok(Json(
+        json!({ "traefik": state, "middlewares": middlewares }),
+    ))
+}
+
+/// Restarts Traefik (a few seconds without routing). Logged as an action.
+pub async fn restart(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+) -> AppResult<Json<Value>> {
+    let (docker, traefik) = services(&app)?;
+    if traefik.service.is_empty() {
+        return Err(rustcms::ValidationErrors::field(
+            "traefik",
+            "Traefik is not a Swarm service of the panel's",
+        )
+        .into());
+    }
+    let by = Initiator::user(auth.principal(), request);
+    action_service::run(
+        app.db(),
+        &by,
+        "traefik.restart",
+        &traefik.service,
+        crate::services::traefik_settings_service::restart(&docker, &traefik),
+    )
+    .await?;
+    Ok(Json(json!({ "restarted": true })))
+}
+
+/// The administrators' middlewares, as YAML.
+#[derive(Debug, serde::Deserialize)]
+pub struct Middlewares {
+    #[serde(default)]
+    pub yaml: String,
+}
+
+/// Saves the administrators' middlewares (checked) and writes them for
+/// Traefik (no restart). Logged as an action.
+pub async fn save_middlewares(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Json(body): Json<Middlewares>,
+) -> AppResult<Json<Value>> {
+    let parsed = crate::services::traefik_settings_service::parse_middlewares(&body.yaml)
+        .map_err(|e| rustcms::ValidationErrors::field("yaml", e))?;
+    crate::models::panel_setting::set(
+        app.db(),
+        crate::services::traefik_settings_service::MIDDLEWARES_KEY,
+        &body.yaml,
+    )
+    .await?;
+    let (_, traefik) = services(&app)?;
+    let by = Initiator::user(auth.principal(), request);
+    action_service::run(app.db(), &by, "traefik.middlewares", "custom", async {
+        crate::services::traefik_settings_service::sync_middlewares(app.db(), &traefik)
+            .await
+            .map_err(AppError::internal)
+    })
+    .await?;
+    let names: Vec<String> = parsed
+        .map(|m| m.keys().map(|k| format!("{k}@file")).collect())
+        .unwrap_or_default();
+    Ok(Json(json!({ "middlewares": names })))
+}
+
+/// Traefik's output as it comes (`lines` events): the last `tail` lines first.
+pub async fn logs(
+    live: LiveSession,
+    State(app): State<AppState>,
+    Path(tail): Path<u32>,
+) -> AppResult<EventStream> {
+    let (docker, traefik) = services(&app)?;
+    if traefik.service.is_empty() {
+        return Err(AppError::NotFound);
+    }
+    let query = crate::services::docker_service::LogQuery {
+        follow: true,
+        tail: Some(tail.min(5_000)),
+        since: None,
+        timestamps: false,
+    };
+    let lines = docker.engine().service_logs(&traefik.service, query);
+    Ok(live.stream(crate::services::live_service::log_events(lines)))
 }

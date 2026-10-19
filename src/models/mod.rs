@@ -7,6 +7,7 @@ pub mod certificate;
 pub mod database_backup;
 pub mod deployment;
 pub mod notification_channel;
+pub mod panel_setting;
 pub mod project;
 pub mod service;
 pub mod service_basic_auth;

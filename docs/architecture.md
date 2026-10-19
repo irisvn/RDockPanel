@@ -426,6 +426,16 @@ must cover the host (a wildcard host only by a wildcard certificate). A renewed 
 place (domains refer to its id: nothing to deploy). The panel rewrites the files at boot, and warns
 the notification channels 14, 7 and 1 days before one expires, and once expired (each once).
 
+Settings → Traefik shows Traefik's state (image, published ports, tasks, last update: never its
+arguments), restarts it (its tasks replaced, through the same lock as its other changes), streams its
+logs, and keeps the administrators' middlewares (`panel_settings`, written to
+`rdp-custom-middlewares.yml`, no restart). Those are named `custom-<name>` and limited to the types
+that change only the request or the answer (headers, rate and in-flight limits, IP allow lists,
+redirects, prefixes, compression, retries, inline basic or digest users, chains of their own): none
+that sends requests elsewhere (`forwardAuth`, `errors`, plugins), reads Traefik's files
+(`usersFile`), or is a Go template; routers stay the panel's. A domain uses one as
+`custom-<name>@file`.
+
 ## The apps interface
 
 `Dashboard` (`/admin/p/dashboard`, React, RustCMS extension host v2) is the EasyPanel-like

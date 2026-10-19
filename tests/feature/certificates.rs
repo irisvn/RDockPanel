@@ -693,3 +693,108 @@ db_test!(
             .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
     }
 );
+
+db_test!(
+    the_traefik_page_shows_restarts_and_keeps_middlewares,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        installer_traefik(&fake);
+        let admin = admin(&app).await;
+        // Its state, never its arguments.
+        let status = admin.get(&app.admin_api("x/apps/traefik/status")).await;
+        status.assert_status(StatusCode::OK);
+        assert_eq!(status.json()["traefik"]["image"], "traefik:v3.5");
+        assert!(
+            !status.text().contains("certificatesresolvers"),
+            "{}",
+            status.text()
+        );
+
+        // A restart: its tasks replaced, logged.
+        let before = fake
+            .calls()
+            .iter()
+            .filter(|c| *c == "update service rdp-traefik")
+            .count();
+        admin
+            .post_json(&app.admin_api("x/apps/traefik/restart"), &json!({}))
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(
+            fake.calls()
+                .iter()
+                .filter(|c| *c == "update service rdp-traefik")
+                .count(),
+            before + 1
+        );
+        assert!(
+            args(&fake).iter().any(|a| a.contains(".mine.")),
+            "the rest kept"
+        );
+
+        // Middlewares: checked, kept, written for Traefik.
+        let url = app.admin_api("x/apps/traefik/middlewares");
+        let refused = admin
+            .send(
+                Method::PUT,
+                &url,
+                Some(&json!({"yaml": "custom-x:\n  forwardAuth:\n    address: http://evil\n"})),
+            )
+            .await;
+        refused.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(
+            errors(&refused).contains("not allowed"),
+            "{}",
+            errors(&refused)
+        );
+        let yaml = "custom-limit:\n  rateLimit:\n    average: 50\n";
+        let saved = admin
+            .send(Method::PUT, &url, Some(&json!({"yaml": yaml})))
+            .await;
+        saved.assert_status(StatusCode::OK);
+        assert_eq!(saved.json()["middlewares"][0], "custom-limit@file");
+        let file =
+            std::fs::read_to_string(support::traefik_dir(&app).join("rdp-custom-middlewares.yml"))
+                .unwrap();
+        assert!(
+            file.contains("custom-limit") && file.contains("average: 50"),
+            "{file}"
+        );
+        assert_eq!(
+            admin
+                .get(&app.admin_api("x/apps/traefik/status"))
+                .await
+                .json()["middlewares"],
+            yaml
+        );
+        // A domain uses one.
+        let project = create(&app, &admin, "projects", json!({"name": "mw"})).await;
+        let service = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await;
+        create(&app, &admin, "service_domains", json!({"service_id": service, "host": "mw.example.com", "path": "/", "port": 80, "https": false, "middlewares": "custom-limit@file"})).await;
+
+        // Not for others.
+        let operator = support::user_with(
+            &app,
+            "operator",
+            &["docker.view", "docker.manage", "docker.logs"],
+        )
+        .await;
+        let operator = app.acting_as(&operator).await;
+        operator
+            .get(&app.admin_api("x/apps/traefik/status"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        operator
+            .send(Method::PUT, &url, Some(&json!({"yaml": ""})))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+    }
+);

@@ -57,6 +57,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Monitor (server, per service) | Done | the Monitor page; per service on its Overview |
 | Settings: storage providers (Local, S3) | Done | with a Test button |
 | Settings: notifications (Discord, Slack, Telegram, email, webhook) | Done | deployments, backups, a full disk; Send test |
+| Settings: Traefik (state, restart, logs, custom configuration) | Done | in the panel, no SSH: custom middlewares only (`custom-<name>`, the types that change a request or an answer), used by domains as `custom-<name>@file` |
 | Settings: panel domain, Let's Encrypt email | Partly | set by the installer (run it again to change them) |
 | Users and roles | Done | RustCMS roles and fine-grained permissions |
 | Quick search (⌘K) | Done | |

@@ -25,6 +25,7 @@ mod m20261019_160000_add_capabilities_to_services;
 mod m20261019_180000_add_middlewares_to_service_domains;
 mod m20261019_200000_create_cert_resolvers;
 mod m20261020_000000_create_certificates;
+mod m20261020_010000_create_panel_settings;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -56,6 +57,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261019_180000_add_middlewares_to_service_domains::Migration),
             Box::new(m20261019_200000_create_cert_resolvers::Migration),
             Box::new(m20261020_000000_create_certificates::Migration),
+            Box::new(m20261020_010000_create_panel_settings::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

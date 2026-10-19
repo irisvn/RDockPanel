@@ -111,6 +111,10 @@ Resolvers are written through the `cert_resolvers` resource (their token sealed,
 |---|---|---|---|
 | GET | `/traefik/resolvers` | system.manage | the resolvers (`has_token`, `in_use`), the DNS providers, the default resolver, and whether Traefik runs them (`applied`: `null` without a Traefik service) |
 | POST | `/traefik/apply` | system.manage | gives Traefik the resolvers (it restarts); logged as an action |
+| GET | `/traefik/status` | system.manage | Traefik's image, published ports, tasks (state, error), last update; the custom middlewares' YAML (never its arguments) |
+| POST | `/traefik/restart` | system.manage | restarts Traefik (its tasks replaced); logged as an action |
+| PUT | `/traefik/middlewares` | system.manage | `{"yaml"}`: the custom middlewares, checked, written for Traefik (no restart): `{"middlewares": ["custom-x@file", …]}` |
+| GET (SSE) | `/traefik/logs/{tail}` | system.manage | `lines` events: Traefik's output, the last `tail` lines (5000 at most) first |
 | GET | `/certificates` | system.manage | the uploaded certificates (never their keys): names, expiry, `days_left`, `in_use` |
 | POST | `/certificates` | system.manage | `{"name"?, "chain", "key"}` (PEM): checked, the key sealed, served by Traefik at once: `{"id","self_signed"}` |
 | PUT | `/certificates/{id}` | system.manage | the same, replacing it (a renewed one: it must cover its domains' hosts; no deployment needed) |

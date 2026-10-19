@@ -226,7 +226,13 @@ impl ServiceProvider for AppServiceProvider {
                 Ok(n) => tracing::info!(n, dir = %traefik.dir.display(), "routes written"),
                 Err(err) => tracing::debug!(%err, "routes not written"),
             }
-            // The uploaded certificates too.
+            // The administrators' middlewares, the uploaded certificates too.
+            if let Err(err) =
+                crate::services::traefik_settings_service::sync_middlewares(state.db(), &traefik)
+                    .await
+            {
+                tracing::warn!(%err, "middlewares not written");
+            }
             if let Err(err) =
                 crate::services::certificate_service::sync(state.db(), state.keyring(), &traefik)
                     .await

@@ -21,4 +21,5 @@ pub mod system_stats_service;
 pub mod template_engine;
 pub mod template_service;
 pub mod traefik_service;
+pub mod traefik_settings_service;
 // rustcms:services

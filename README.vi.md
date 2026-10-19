@@ -62,12 +62,13 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Compose:** file Compose (viết trong panel hoặc lấy từ Git) chạy bằng `docker compose` trong network của project, domain trỏ tới một service trong file.
 - **Backup:** dump PostgreSQL, MySQL, MariaDB và MongoDB, và nén volume, theo lịch (cron) vào thư mục trên server hoặc bucket tương thích S3, giữ lại N bản, có log từng lần chạy, nút "Run now" và Khôi phục.
 - **Thông báo:** Discord, Slack, Telegram, email (SMTP) và webhook, cho deploy, backup và ổ đĩa sắp đầy, có nút "Gửi thử".
+- **Traefik trong Settings:** xem trạng thái, khởi động lại, log trực tiếp, và middleware tuỳ chỉnh (`custom-<tên>`: headers, giới hạn tốc độ, danh sách IP…) cho domain, không cần SSH.
 - **Từng service:** biểu đồ CPU và RAM, ghi chú cho nhóm, script (lệnh chạy một lần trong container đang chạy, hiện output); quản trị panel còn đặt được capability, sysctl và group bổ sung.
 - **Bí mật:** biến môi trường (sửa như file `.env`) và tài khoản registry riêng được mã hoá bằng app key; chỉ người có quyền `services.secrets` mới xem được giá trị, mỗi lần xem đều ghi audit. Rollback trả lại đúng biến môi trường của lần deploy đó.
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- Nguồn Upload, build bằng Railpack và Buildpacks; trang Traefik (restart, log, middleware tuỳ chỉnh); đổi domain panel và email Let's Encrypt trong Settings; web client cho database.
+- Nguồn Upload, build bằng Railpack và Buildpacks; đổi domain panel và email Let's Encrypt trong Settings; web client cho database.
 - **Sau đó:** nhiều node, Cloudflare Tunnel, xác thực 2 lớp, API và CLI.
 
 | Trang service | Template | Tạo service |

@@ -88,6 +88,26 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get(
+                    "/traefik/status",
+                    AdminAccess::can("system.manage"),
+                    traefik::status,
+                )
+                .post(
+                    "/traefik/restart",
+                    AdminAccess::can("system.manage"),
+                    traefik::restart,
+                )
+                .put(
+                    "/traefik/middlewares",
+                    AdminAccess::can("system.manage"),
+                    traefik::save_middlewares,
+                )
+                .events(
+                    "/traefik/logs/{tail}",
+                    AdminAccess::can("system.manage"),
+                    traefik::logs,
+                )
+                .get(
                     "/certificates",
                     AdminAccess::can("system.manage"),
                     traefik::certificates,

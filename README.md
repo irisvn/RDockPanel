@@ -79,6 +79,8 @@ feature is free: no project limits, no paid tiers.
   and Restore.
 - **Notifications**: Discord, Slack, Telegram, email (SMTP) and webhooks, for deployments, backups
   and a full disk, with "Send test notification".
+- **Traefik in Settings**: its state, a restart, its live logs, and middlewares of your own
+  (`custom-<name>`, headers, rate limits, IP allow lists…) for domains, all without SSH.
 - **Per service**: CPU and memory charts, notes for the team, scripts (one-off commands in the running
   container, their output shown), and, for administrators, capabilities, sysctls and supplemental
   groups.
@@ -88,7 +90,7 @@ feature is free: no project limits, no paid tiers.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Uploads as a source, Railpack and buildpacks; a Traefik page (restart, logs, custom middlewares); the panel's
+- Uploads as a source, Railpack and buildpacks; the panel's
   domain and Let's Encrypt email in Settings; a web database client.
 - Later: multiple nodes, Cloudflare Tunnel, two-factor authentication, an API and a CLI.
 
