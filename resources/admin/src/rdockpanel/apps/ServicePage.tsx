@@ -19,7 +19,6 @@ export function ServicePage(props: Props) {
   const t = props.t;
   const detail = useAdminQuery<ServiceDetail>(props, `/apps/services/${props.serviceId}`, { refetchInterval: 3000 });
   const [error, setError] = useState<unknown>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   if (detail.isLoading) return <Loading />;
   if (detail.error || !detail.data) return <ErrorState error={detail.error} />;
   const d = detail.data;
@@ -40,7 +39,7 @@ export function ServicePage(props: Props) {
     }
   };
   const saved = () => {
-    setNotice(t("Saved. Deploy to apply it."));
+    props.toast.success(t("Saved. Deploy to apply it."));
     refresh();
   };
   const primary = d.domains[0];
@@ -87,12 +86,10 @@ export function ServicePage(props: Props) {
         )}
       </div>
       {d.pending && s.status !== "new" && <Alert variant="warning">{t("The configuration changed since the last deployment: deploy to apply it.")}</Alert>}
-      {notice && <Alert>{notice}</Alert>}
       <ErrorNote error={error} />
       <Tabs
         value={tab}
         onSelect={(id) => {
-          setNotice(null);
           props.navigate(`${base}/${id}`);
         }}
         tabs={[
@@ -231,6 +228,7 @@ function Notes(props: Props & { d: ServiceDetail }) {
               try {
                 await resources.update("services", d.service.id, { notes: text });
                 setSaved(text);
+                props.toast.success(t("Saved."));
               } catch (err) {
                 setError(err);
               }
@@ -643,7 +641,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
 function useServiceSave(id: number, onSaved: () => void) {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const save = async (data: object) => {
+  const save = async (data: Record<string, unknown>) => {
     setBusy(true);
     setError(null);
     try {

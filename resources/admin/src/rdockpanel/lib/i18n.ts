@@ -46,6 +46,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "Stop this service? Its tasks are removed.": "Dừng service này? Các task sẽ bị gỡ.",
   "Remove this service from Docker? Its volumes are kept.": "Gỡ service khỏi Docker? Volume được giữ lại.",
   "Saved. Deploy to apply it.": "Đã lưu. Bấm Deploy để áp dụng.",
+  "Saved.": "Đã lưu.",
   "The configuration changed since the last deployment: deploy to apply it.":
     "Cấu hình đã thay đổi so với lần deploy trước: bấm Deploy để áp dụng.",
   Overview: "Tổng quan",

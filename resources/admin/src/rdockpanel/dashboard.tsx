@@ -14,7 +14,7 @@ import { Actions } from "./actions/Actions";
 import { Palette } from "./lib/Palette";
 import type { Overview } from "./apps/types";
 import { StatusDot } from "./lib/ui";
-import { bindSession } from "./lib/resources";
+import { bindResources } from "./lib/resources";
 import "./lib/i18n";
 import "./dashboard.css";
 
@@ -105,7 +105,7 @@ function ServiceRoute(props: PageProps<unknown> & { project: string; service: st
 }
 
 function Apps(props: PageProps<{ user?: string | number }>) {
-  bindSession(String(props.data.user ?? ""));
+  bindResources(props.resources);
   const [project, service, tab] = props.path ? props.path.split("/") : [];
   // A project or a service has its own header (breadcrumb, status, actions):
   // no "Dashboard" heading above it.
@@ -132,7 +132,7 @@ function Apps(props: PageProps<{ user?: string | number }>) {
 registerPage("rdockpanel/dashboard", Apps as (p: PageProps<unknown>) => ReturnType<typeof Apps>);
 
 function SettingsRoute(props: PageProps<{ user?: string | number }>) {
-  bindSession(String(props.data.user ?? ""));
+  bindResources(props.resources);
   return (
     <>
       <Settings {...props} />
@@ -144,7 +144,7 @@ function SettingsRoute(props: PageProps<{ user?: string | number }>) {
 registerPage("rdockpanel/settings", SettingsRoute as (p: PageProps<unknown>) => ReturnType<typeof SettingsRoute>);
 
 function ActionsRoute(props: PageProps<{ user?: string | number }>) {
-  bindSession(String(props.data.user ?? ""));
+  bindResources(props.resources);
   return (
     <>
       <Actions {...props} />
