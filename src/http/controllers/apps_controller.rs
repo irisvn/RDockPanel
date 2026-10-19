@@ -299,6 +299,19 @@ pub async fn service(
         "mounts": mounts,
         "latest": latest,
         "deployments": deployments,
+        // The certificate resolvers a domain may choose (the panel's administrators').
+        "cert_resolvers": if principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION) {
+            use sea_orm::QueryOrder;
+            crate::models::cert_resolver::Entity::find()
+                .order_by_asc(crate::models::cert_resolver::Column::Name)
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|r| json!({ "id": r.id, "name": r.name, "kind": r.kind }))
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        },
         "can": {
             "update": principal.can("services.update"),
             "delete": principal.can("services.delete"),

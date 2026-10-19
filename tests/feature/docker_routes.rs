@@ -74,6 +74,14 @@ db_test!(
                 Case::new(Method::GET, "/apps/templates/ghost")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                // Traefik's resolvers: the panel's administrators' only.
+                Case::new(Method::GET, "/apps/traefik/resolvers")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/traefik/apply")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
                 Case::new(Method::POST, "/apps/templates/refresh")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

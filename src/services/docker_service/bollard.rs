@@ -815,6 +815,44 @@ impl DockerApi for BollardDocker {
         self.client.delete_config(id).await.map_err(map_err)
     }
 
+    async fn create_secret(
+        &self,
+        name: &str,
+        data: &[u8],
+        labels: HashMap<String, String>,
+    ) -> DockerResult<String> {
+        use base64::Engine;
+        let spec = ::bollard::models::SecretSpec {
+            name: Some(name.to_owned()),
+            labels: Some(labels),
+            data: Some(base64::engine::general_purpose::STANDARD.encode(data)),
+            ..Default::default()
+        };
+        let created = self.client.create_secret(spec).await.map_err(map_err)?;
+        Ok(created.id)
+    }
+
+    async fn list_secrets(&self, key: &str, value: &str) -> DockerResult<Vec<(String, String)>> {
+        let label = format!("{key}={value}");
+        let filters = HashMap::from([("label", vec![label.as_str()])]);
+        let options = ::bollard::query_parameters::ListSecretsOptionsBuilder::new()
+            .filters(&filters)
+            .build();
+        let secrets = self
+            .client
+            .list_secrets(Some(options))
+            .await
+            .map_err(map_err)?;
+        Ok(secrets
+            .into_iter()
+            .filter_map(|s| Some((s.id?, s.spec?.name?)))
+            .collect())
+    }
+
+    async fn delete_secret(&self, id: &str) -> DockerResult<()> {
+        self.client.delete_secret(id).await.map_err(map_err)
+    }
+
     async fn list_tasks(&self, service: &str) -> DockerResult<Vec<SwarmTask>> {
         let filters = HashMap::from([("service", vec![service.to_owned()])]);
         let options = ::bollard::query_parameters::ListTasksOptionsBuilder::new()

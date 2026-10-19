@@ -45,6 +45,9 @@ pub struct PanelConfig {
     /// a service in maintenance is routed to its page there. Empty: no
     /// maintenance mode.
     pub internal_url: String,
+    /// The panel's own host (from `APP_URL`): no service may route it.
+    #[serde(skip)]
+    pub panel_host: String,
 }
 
 impl Default for PanelConfig {
@@ -62,6 +65,7 @@ impl Default for PanelConfig {
                 "https://raw.githubusercontent.com/easypanel-io/templates/main/templates".to_owned(),
             compose_dir: PathBuf::from("storage/compose"),
             internal_url: String::new(),
+            panel_host: String::new(),
         }
     }
 }
@@ -69,8 +73,30 @@ impl Default for PanelConfig {
 impl PanelConfig {
     /// From the app's configuration; defaults when the section is missing.
     pub fn from_config(config: &rustcms::Config) -> Self {
-        config.section::<Self>("panel").unwrap_or_default()
+        let mut panel = config.section::<Self>("panel").unwrap_or_default();
+        panel.panel_host = panel_host(&config.app.url);
+        panel
     }
+}
+
+/// The host of `url` (`https://panel.example.com:3000/` → `panel.example.com`),
+/// lowercase; empty for none.
+fn panel_host(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    host.split(':')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+/// Whether `host` is the panel's own (no service may route it).
+pub fn is_panel_host(host: &str) -> bool {
+    let panel = &config().panel_host;
+    !panel.is_empty() && panel != "localhost" && host.eq_ignore_ascii_case(panel)
 }
 
 static CONFIG: std::sync::OnceLock<PanelConfig> = std::sync::OnceLock::new();
@@ -265,6 +291,17 @@ pub fn bind_source(source: &str, roots: &[PathBuf]) -> Result<PathBuf, BindRefus
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_panels_host() {
+        assert_eq!(panel_host("https://Panel.Example.com"), "panel.example.com");
+        assert_eq!(panel_host("http://1.2.3.4:3000/admin?x=1"), "1.2.3.4");
+        assert_eq!(
+            panel_host("https://u:p@panel.example.com:8443/"),
+            "panel.example.com"
+        );
+        assert_eq!(panel_host(""), "");
+    }
 
     #[test]
     fn names() {

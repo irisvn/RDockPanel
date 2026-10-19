@@ -53,6 +53,7 @@ impl Resource for ServiceDomainResource {
             Field::column(service_domain::Column::Https),
             Field::column(service_domain::Column::ComposeService).max_length(64),
             Field::column(service_domain::Column::Middlewares).max_length(1000),
+            Field::column(service_domain::Column::CertResolverId),
         ]
     }
 
@@ -91,6 +92,7 @@ impl Resource for ServiceDomainResource {
         crate::admin::resources::guard::write(ctx, txn, &data, None).await?;
         let data = check(ctx, data)?;
         check_container(ctx, txn, &data, None).await?;
+        check_certificate(ctx, txn, &data, None).await?;
         Ok(data)
     }
 
@@ -109,7 +111,57 @@ impl Resource for ServiceDomainResource {
         crate::admin::resources::guard::write(ctx, txn, &data, Some(record.service_id)).await?;
         let data = check(ctx, data)?;
         check_container(ctx, txn, &data, Some(record)).await?;
+        check_certificate(ctx, txn, &data, Some(record)).await?;
         Ok(data)
+    }
+}
+
+/// The certificate a domain's HTTPS gets: choosing a resolver, and changing
+/// a domain that has one, are the panel's administrators' (a resolver issues
+/// for any name it is given); then its values after the write are checked
+/// ([`cert_service::check_domain_tls`]).
+///
+/// [`cert_service::check_domain_tls`]: crate::services::cert_service::check_domain_tls
+async fn check_certificate(
+    ctx: &Ctx,
+    txn: &DatabaseTransaction,
+    data: &Data,
+    record: Option<&service_domain::Model>,
+) -> AppResult<()> {
+    let admin = ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION);
+    let resolver = if data.contains_key("cert_resolver_id") {
+        int(data, "cert_resolver_id")
+    } else {
+        record.and_then(|r| r.cert_resolver_id)
+    };
+    if (resolver.is_some() || record.is_some_and(|r| r.cert_resolver_id.is_some())) && !admin {
+        return Err(ValidationErrors::field(
+            "cert_resolver_id",
+            ctx.t("choosing a certificate resolver needs system.manage"),
+        )
+        .into());
+    }
+    let host = text(data, "host")
+        .map(str::to_owned)
+        .or(record.map(|r| r.host.clone()))
+        .unwrap_or_default();
+    // On create, missing: the column's default (on).
+    let https = if data.contains_key("https") {
+        data.get("https").and_then(Value::as_bool).unwrap_or(false)
+    } else {
+        record.is_none_or(|r| r.https)
+    };
+    match crate::services::cert_service::check_domain_tls(
+        txn,
+        record.map(|r| r.id),
+        &host,
+        https,
+        resolver,
+    )
+    .await?
+    {
+        Some((field, message)) => Err(ValidationErrors::field(field, ctx.t(message)).into()),
+        None => Ok(()),
     }
 }
 
@@ -169,6 +221,9 @@ fn check(ctx: &Ctx, mut data: Data) -> AppResult<Data> {
     {
         errors.add("host", ctx.t("is not a host name like app.example.com"));
     }
+    if text(&data, "host").is_some_and(crate::services::deploy_rules_service::is_panel_host) {
+        errors.add("host", ctx.t("is the panel's own domain"));
+    }
     if let Some(path) = text(&data, "path")
         && !valid_route_path(path)
     {
@@ -210,10 +265,13 @@ impl Policy for DomainPolicy {
         if !base.allows(ctx, ability, record).await {
             return false;
         }
+        // A wildcard, or a domain with its own certificate resolver: changed
+        // or removed by the panel's administrators only.
         matches!(ability, "view" | "view_any")
-            || !record
+            || !(record
                 .and_then(|r| text(r, "host"))
                 .is_some_and(|h| h.starts_with("*."))
+                || record.is_some_and(|r| is_set(r, "cert_resolver_id")))
             || ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
     }
 

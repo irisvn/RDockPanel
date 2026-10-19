@@ -40,6 +40,8 @@ pub struct Traefik {
     pub prune: bool,
     /// Held while routes are read from the database and written.
     writing: Arc<tokio::sync::Mutex<()>>,
+    /// Held while Traefik's Swarm service is changed (networks, resolvers).
+    updating: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Traefik {
@@ -49,6 +51,7 @@ impl Traefik {
             service: service.into(),
             prune,
             writing: Arc::default(),
+            updating: Arc::default(),
         }
     }
 
@@ -94,24 +97,57 @@ impl Traefik {
         if self.service.is_empty() {
             return Ok(false);
         }
-        let api = docker.engine();
-        for _ in 0..5 {
-            let Some(current) = api.inspect_service(&self.service).await? else {
-                return Err(DockerError::NotFound);
-            };
-            let mut spec = current.spec.clone().unwrap_or_default();
+        self.update_service(docker.engine(), |spec| {
             let template = spec.task_template.get_or_insert_with(Default::default);
             let networks = template.networks.get_or_insert_with(Vec::new);
             if networks
                 .iter()
                 .any(|n| matches!(n.target.as_deref(), Some(t) if t == network || t == id))
             {
-                return Ok(false);
+                return false;
             }
             networks.push(NetworkAttachmentConfig {
                 target: Some(network.to_owned()),
                 ..Default::default()
             });
+            true
+        })
+        .await
+    }
+
+    /// Changes Traefik's Swarm service with `change` (which says whether it
+    /// changed anything), one change at a time, again on a newer version.
+    /// Whether it changed anything.
+    pub async fn update_service(
+        &self,
+        api: &dyn crate::services::docker_service::DockerApi,
+        change: impl Fn(&mut crate::services::docker_service::ServiceSpec) -> bool,
+    ) -> DockerResult<bool> {
+        let _updating = self.updating.lock().await;
+        self.update_service_locked(api, change).await
+    }
+
+    /// Held while Traefik's Swarm service changes: a caller doing more than
+    /// one change (secrets, then the service) holds it throughout, then calls
+    /// [`Self::update_service_locked`].
+    pub async fn exclusive(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.updating.lock().await
+    }
+
+    /// [`Self::update_service`], its caller holding [`Self::exclusive`].
+    pub async fn update_service_locked(
+        &self,
+        api: &dyn crate::services::docker_service::DockerApi,
+        change: impl Fn(&mut crate::services::docker_service::ServiceSpec) -> bool,
+    ) -> DockerResult<bool> {
+        for _ in 0..5 {
+            let Some(current) = api.inspect_service(&self.service).await? else {
+                return Err(DockerError::NotFound);
+            };
+            let mut spec = current.spec.clone().unwrap_or_default();
+            if !change(&mut spec) {
+                return Ok(false);
+            }
             let version = current.version.and_then(|v| v.index).unwrap_or(0);
             match api.update_service(&self.service, version, spec, None).await {
                 Err(DockerError::Conflict(_)) => {
@@ -131,28 +167,21 @@ impl Traefik {
         if self.service.is_empty() {
             return Ok(false);
         }
-        let api = docker.engine();
-        for _ in 0..5 {
-            let Some(current) = api.inspect_service(&self.service).await? else {
-                return Ok(false);
-            };
-            let mut spec = current.spec.clone().unwrap_or_default();
-            let template = spec.task_template.get_or_insert_with(Default::default);
-            let networks = template.networks.get_or_insert_with(Vec::new);
-            let before = networks.len();
-            networks.retain(|n| !matches!(n.target.as_deref(), Some(t) if t == network || t == id));
-            if networks.len() == before {
-                return Ok(false);
-            }
-            let version = current.version.and_then(|v| v.index).unwrap_or(0);
-            match api.update_service(&self.service, version, spec, None).await {
-                Err(DockerError::Conflict(_)) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                }
-                other => return other.map(|_| true),
-            }
+        match self
+            .update_service(docker.engine(), |spec| {
+                let template = spec.task_template.get_or_insert_with(Default::default);
+                let networks = template.networks.get_or_insert_with(Vec::new);
+                let before = networks.len();
+                networks
+                    .retain(|n| !matches!(n.target.as_deref(), Some(t) if t == network || t == id));
+                networks.len() != before
+            })
+            .await
+        {
+            // Traefik gone: nothing attached.
+            Err(DockerError::NotFound) => Ok(false),
+            other => other,
         }
-        Err(DockerError::Conflict("Traefik kept changing".into()))
     }
 }
 
@@ -269,8 +298,8 @@ fn write_atomically(dir: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()
 /// it is (its configuration hash, kept when a later deployment failed), when
 /// that one runs it. `None` when it does not route (never deployed, stopped,
 /// destroyed, no domain).
-pub async fn deployed_routes(
-    db: &DatabaseConnection,
+pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
+    db: &C,
     row: &service::Model,
     options: &DeployOptions,
 ) -> AppResult<Option<TraefikFile>> {

@@ -198,12 +198,15 @@ http:
       rule: Host(\`$DOMAIN\`)
       entryPoints: [websecure]
       service: rdockpanel
+      # Above any service's route (theirs: 10000 + the rule's length at most).
+      priority: 1000000
       tls:
         certResolver: $RESOLVER
     rdockpanel-http:
       rule: Host(\`$DOMAIN\`)
       entryPoints: [web]
       service: rdockpanel
+      priority: 1000000
       middlewares: [rdockpanel-https]
   middlewares:
     rdockpanel-https:

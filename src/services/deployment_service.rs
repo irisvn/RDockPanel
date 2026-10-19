@@ -197,7 +197,22 @@ pub async fn snapshot_without_env<C: ConnectionTrait>(
         .filter(crate::models::service_basic_auth::Column::ServiceId.eq(service.id))
         .all(db)
         .await?;
-    Ok(Snapshot::of(&project, service, &domains, &ports, &mounts).with_access(&redirects, &users))
+    // The resolvers the domains chose, by name (Traefik's).
+    let resolvers: std::collections::HashMap<i64, String> =
+        if domains.iter().any(|d| d.cert_resolver_id.is_some()) {
+            crate::models::cert_resolver::Entity::find()
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|r| (r.id, r.name))
+                .collect()
+        } else {
+            Default::default()
+        };
+    Ok(
+        Snapshot::of(&project, service, &domains, &ports, &mounts, &resolvers)
+            .with_access(&redirects, &users),
+    )
 }
 
 /// Whether the configuration changed since the last successful deployment.

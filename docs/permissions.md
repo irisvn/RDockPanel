@@ -39,6 +39,10 @@ The resources use the panel's standard permissions, one set per resource
   `backups.restore` (restore one, replacing the database's data; lists a provider's files);
 
 - notifications: `notification_channels.*` (Settings);
+- certificate resolvers (Settings → Certificates) and their "Apply" (it restarts Traefik): `system.manage`
+  only. Choosing a resolver on a domain, and changing or removing a domain that has one, need
+  `system.manage` too (a resolver asks for a certificate for any name it is given). No domain may use
+  the panel's own host;
 - adding Linux capabilities, sysctls or supplemental groups to a service needs `system.manage`
   (dropping capabilities does not). Such a **privileged** service (like a Compose service) is then
   the panel's administrators' only: editing it and every record of it (domains, ports, mounts,

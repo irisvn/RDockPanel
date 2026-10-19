@@ -103,6 +103,15 @@ Channels are written through the `notification_channels` resource.
 | GET | `/notification-channels` | notification_channels.view_any | the channels (never their secret: `secret_set`) |
 | POST | `/notification-channels/{id}/test` | notification_channels.update | sends a test notification now: `{"ok","error"?}` |
 
+## Certificates (`/apps`)
+
+Resolvers are written through the `cert_resolvers` resource (their token sealed, never shown).
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/traefik/resolvers` | system.manage | the resolvers (`has_token`, `in_use`), the DNS providers, the default resolver, and whether Traefik runs them (`applied`: `null` without a Traefik service) |
+| POST | `/traefik/apply` | system.manage | gives Traefik the resolvers (it restarts); logged as an action |
+
 ## Deployments (`/deploy`)
 
 | Method | Path | Permission | |

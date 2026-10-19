@@ -17,6 +17,9 @@ pub struct Model {
     pub compose_service: Option<String>,
     /// Traefik middlewares of its own, comma-separated (`ratelimit@file`).
     pub middlewares: Option<String>,
+    /// The certificate resolver HTTPS uses (`cert_resolvers`); none: the
+    /// panel's default.
+    pub cert_resolver_id: Option<i64>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

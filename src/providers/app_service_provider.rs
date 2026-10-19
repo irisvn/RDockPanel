@@ -50,6 +50,10 @@ impl ServiceProvider for AppServiceProvider {
             crate::models::service::Column::DeployKey,
             rustcms::crypto::Binding::Column,
         );
+        app.encrypted_column::<crate::models::cert_resolver::Entity>(
+            crate::models::cert_resolver::Column::Token,
+            rustcms::crypto::Binding::Column,
+        );
         // `rustcms db:seed` runs this one (it calls the others).
         app.seeder(crate::database::seeders::DatabaseSeeder);
         // rustcms:seeders
@@ -134,6 +138,32 @@ impl ServiceProvider for AppServiceProvider {
                 if let Some(docker) = state.service::<Docker>() {
                     let traefik = state.service::<Traefik>();
                     remove_orphan_networks(state.db(), &docker, traefik.as_deref()).await?;
+                }
+                Ok(())
+            }),
+        );
+        // Traefik's certificate resolvers, given again when an installer run
+        // replaced its arguments (`cert_service::reconcile`).
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "traefik-resolvers",
+                std::time::Duration::from_secs(120),
+            )
+            .run(|state| async move {
+                use crate::services::cert_service::{plan, plan_key, reconcile, resolvers};
+                use crate::services::docker_service::Docker;
+                use crate::services::traefik_service::Traefik;
+                let (Some(docker), Some(traefik)) =
+                    (state.service::<Docker>(), state.service::<Traefik>())
+                else {
+                    return Ok(());
+                };
+                let resolvers = resolvers(state.db(), state.keyring())
+                    .await
+                    .map_err(rustcms::AppError::internal)?;
+                let plan = plan(&resolvers, &plan_key(state.keyring()));
+                if reconcile(&docker, &traefik, &plan).await? {
+                    tracing::info!("Traefik's certificate resolvers given again");
                 }
                 Ok(())
             }),

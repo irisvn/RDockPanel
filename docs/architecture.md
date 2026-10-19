@@ -401,6 +401,21 @@ removed (one still in use is left for the next time). Only networks this panel m
 they carry its instance id (`rdockpanel.instance`, derived from its `APP_KEY`), so another panel's
 or a test's networks on the same Swarm are left alone.
 
+**Certificates.** A domain's HTTPS certificate comes from its certificate resolver, else the panel's
+default (`[panel] cert_resolver`: the installer's `letsencrypt`, HTTP challenge). The panel's own
+resolvers (`cert_resolvers`, `cert_service.rs`) are Let's Encrypt over HTTP or over DNS with a
+provider's token, the only way to a wildcard's certificate. Traefik reads its static configuration
+from its arguments only, so "Apply" rewrites the arguments the panel owns
+(`--certificatesresolvers.<name>.…`, never the installer's `letsencrypt`), gives each DNS token as
+a Swarm secret read through `<VAR>_FILE`, labels Traefik with the digest of what it applied, and
+keeps everything else (networks, mounts, ports). An installer run replaces the arguments: every two
+minutes the panel gives them again when the label says they were applied but they are missing
+(`traefik-resolvers` schedule); a change not applied yet waits for "Apply". One host has one
+certificate (Traefik picks it by name before any path), so every HTTPS domain of a host chooses the
+same resolver; each resolver keeps its own ACME storage (`/etc/traefik/acme/<name>.json`). A
+resolver in use (by a domain, or a deployed route) cannot be deleted. The panel's own host
+(`APP_URL`) is never a service's domain, and its route outranks theirs.
+
 ## The apps interface
 
 `Dashboard` (`/admin/p/dashboard`, React, RustCMS extension host v2) is the EasyPanel-like

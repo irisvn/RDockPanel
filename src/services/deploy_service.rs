@@ -212,6 +212,31 @@ pub struct Domain {
     /// Traefik middlewares of its own (defined in Traefik's files).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub middlewares: Vec<String>,
+    /// Its HTTPS certificate's resolver (Traefik's name); none: the panel's
+    /// default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert_resolver: Option<String>,
+}
+
+impl Domain {
+    /// Its router's TLS: its resolver (else the panel's default, else
+    /// Traefik's default certificate); a wildcard's certificate asked for by
+    /// name (its resolver needs a DNS challenge).
+    fn tls(&self, options: &DeployOptions) -> Value {
+        let resolver = self
+            .cert_resolver
+            .as_deref()
+            .unwrap_or(&options.cert_resolver);
+        let mut tls = if resolver.is_empty() {
+            json!({})
+        } else {
+            json!({"certResolver": resolver})
+        };
+        if self.host.starts_with("*.") {
+            tls["domains"] = json!([{"main": self.host}]);
+        }
+        tls
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -282,6 +307,7 @@ impl Snapshot {
         domains: &[service_domain::Model],
         ports: &[service_port::Model],
         mounts: &[service_mount::Model],
+        resolvers: &std::collections::HashMap<i64, String>,
     ) -> Self {
         let healthcheck = service
             .healthcheck_cmd
@@ -313,6 +339,9 @@ impl Snapshot {
                         .filter(|m| crate::services::deploy_rules_service::valid_middleware(m))
                         .map(str::to_owned)
                         .collect(),
+                    cert_resolver: d
+                        .cert_resolver_id
+                        .and_then(|id| resolvers.get(&id).cloned()),
                 })
             })
             .collect();
@@ -876,6 +905,29 @@ pub struct LoadBalanced {
 }
 
 impl TraefikFile {
+    /// Whether a router asks the resolver `name` for a wildcard's certificate.
+    pub fn uses_resolver_for_wildcard(&self, name: &str) -> bool {
+        self.http.routers.values().any(|r| {
+            r.tls.as_ref().is_some_and(|t| {
+                t.get("certResolver").and_then(Value::as_str) == Some(name)
+                    && t["domains"][0]["main"]
+                        .as_str()
+                        .is_some_and(|m| m.starts_with("*."))
+            })
+        })
+    }
+
+    /// Whether a router asks the resolver `name` for its certificate.
+    pub fn uses_resolver(&self, name: &str) -> bool {
+        self.http.routers.values().any(|r| {
+            r.tls
+                .as_ref()
+                .and_then(|t| t.get("certResolver"))
+                .and_then(Value::as_str)
+                == Some(name)
+        })
+    }
+
     pub fn to_yaml(&self) -> String {
         serde_yaml_ng::to_string(self).expect("routes serialize")
     }
@@ -1099,17 +1151,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                         entry_points: vec![entry],
                         service: page.clone(),
                         middlewares: vec![path.clone()],
-                        tls: https.then(|| {
-                            let mut tls = if options.cert_resolver.is_empty() {
-                                json!({})
-                            } else {
-                                json!({"certResolver": options.cert_resolver})
-                            };
-                            if domain.host.starts_with("*.") {
-                                tls["domains"] = json!([{"main": domain.host}]);
-                            }
-                            tls
-                        }),
+                        tls: https.then(|| domain.tls(options)),
                         priority: None,
                     },
                 );
@@ -1136,16 +1178,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
         let mut access = access.clone();
         access.extend(domain.middlewares.iter().cloned());
         if domain.https {
-            let mut tls = if options.cert_resolver.is_empty() {
-                json!({})
-            } else {
-                json!({"certResolver": options.cert_resolver})
-            };
-            // A wildcard's certificate is asked for by name (its resolver
-            // needs a DNS challenge).
-            if domain.host.starts_with("*.") {
-                tls["domains"] = json!([{"main": domain.host}]);
-            }
+            let tls = domain.tls(options);
             http.routers.insert(
                 router.clone(),
                 Router {
@@ -1338,6 +1371,7 @@ mod tests {
                     https: true,
                     compose_service: None,
                     middlewares: vec![],
+                    cert_resolver: None,
                 },
                 Domain {
                     host: "shop.example.com".to_owned(),
@@ -1346,6 +1380,7 @@ mod tests {
                     https: true,
                     compose_service: None,
                     middlewares: vec![],
+                    cert_resolver: None,
                 },
                 Domain {
                     host: "shop.localhost".to_owned(),
@@ -1354,6 +1389,7 @@ mod tests {
                     https: false,
                     compose_service: None,
                     middlewares: vec![],
+                    cert_resolver: None,
                 },
             ],
             ports: vec![],

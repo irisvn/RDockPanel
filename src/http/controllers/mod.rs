@@ -8,5 +8,6 @@ pub mod docker_controller;
 pub mod notifications_controller;
 pub mod server_controller;
 pub mod templates_controller;
+pub mod traefik_controller;
 pub mod trigger_controller;
 // rustcms:controller-mods

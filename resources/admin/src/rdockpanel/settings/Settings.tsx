@@ -8,6 +8,7 @@ import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch
 import { ErrorNote, Field, Section } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 import { Notifications } from "./Notifications";
+import { Certificates } from "./Certificates";
 
 type Provider = {
   id: number;
@@ -233,6 +234,7 @@ export function Settings(props: PageProps<unknown>) {
     <div className="rdp2-page">
       {props.can("storage_providers.view_any") && <StorageProviders {...props} />}
       {props.can("notification_channels.view_any") && <Notifications {...props} />}
+      {props.can("system.manage") && <Certificates {...props} />}
     </div>
   );
 }

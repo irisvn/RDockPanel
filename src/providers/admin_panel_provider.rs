@@ -21,6 +21,7 @@ pub fn provider() -> AdminProvider {
         .resource::<crate::admin::resources::deployment_resource::DeploymentResource>()
         .resource::<crate::admin::resources::database_backup_resource::DatabaseBackupResource>()
         .resource::<crate::admin::resources::storage_provider_resource::StorageProviderResource>()
+        .resource::<crate::admin::resources::cert_resolver_resource::CertResolverResource>()
         .resource::<crate::admin::resources::notification_channel_resource::NotificationChannelResource>()
         .resource::<crate::admin::resources::service_redirect_resource::ServiceRedirectResource>()
         .resource::<crate::admin::resources::service_script_resource::ServiceScriptResource>()

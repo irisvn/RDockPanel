@@ -23,6 +23,7 @@ mod m20261019_120000_add_maintenance_to_services;
 mod m20261019_140000_create_service_scripts_table;
 mod m20261019_160000_add_capabilities_to_services;
 mod m20261019_180000_add_middlewares_to_service_domains;
+mod m20261019_200000_create_cert_resolvers;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -52,6 +53,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261019_140000_create_service_scripts_table::Migration),
             Box::new(m20261019_160000_add_capabilities_to_services::Migration),
             Box::new(m20261019_180000_add_middlewares_to_service_domains::Migration),
+            Box::new(m20261019_200000_create_cert_resolvers::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

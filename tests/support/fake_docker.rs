@@ -31,6 +31,8 @@ pub struct FakeDocker {
     pub built: Arc<Mutex<Option<String>>>,
     /// Swarm configs: name → (id, content, labels).
     pub configs: Arc<Mutex<HashMap<String, FakeConfig>>>,
+    /// Swarm secrets: name → (id, content, labels).
+    pub secrets: Arc<Mutex<HashMap<String, FakeConfig>>>,
     /// The state every task reports (default: running).
     pub task_state: Arc<Mutex<Option<TaskState>>>,
     /// The update status an update leaves (default: none, like a create).
@@ -540,6 +542,51 @@ impl DockerApi for FakeDocker {
             .unwrap()
             .retain(|_, (cid, _, _)| cid != id);
         self.record(format!("delete config {id}"));
+        Ok(())
+    }
+    async fn create_secret(
+        &self,
+        name: &str,
+        data: &[u8],
+        labels: HashMap<String, String>,
+    ) -> DockerResult<String> {
+        let mut secrets = self.secrets.lock().unwrap();
+        if secrets.contains_key(name) {
+            return Err(DockerError::Conflict(format!("secret {name} exists")));
+        }
+        let id = format!("sec-{name}");
+        secrets.insert(name.to_owned(), (id.clone(), data.to_vec(), labels));
+        self.record(format!("create secret {name}"));
+        Ok(id)
+    }
+    async fn list_secrets(&self, key: &str, value: &str) -> DockerResult<Vec<(String, String)>> {
+        Ok(self
+            .secrets
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, (_, _, labels))| labels.get(key).map(String::as_str) == Some(value))
+            .map(|(name, (id, _, _))| (id.clone(), name.clone()))
+            .collect())
+    }
+    async fn delete_secret(&self, id: &str) -> DockerResult<()> {
+        // In use by a service: refused, as Swarm does.
+        let used = self.services.lock().unwrap().values().any(|s| {
+            s.spec
+                .as_ref()
+                .and_then(|s| s.task_template.as_ref())
+                .and_then(|t| t.container_spec.as_ref())
+                .and_then(|c| c.secrets.as_ref())
+                .is_some_and(|c| c.iter().any(|c| c.secret_id.as_deref() == Some(id)))
+        });
+        if used {
+            return Err(DockerError::Conflict(format!("secret {id} is in use")));
+        }
+        self.secrets
+            .lock()
+            .unwrap()
+            .retain(|_, (sid, _, _)| sid != id);
+        self.record(format!("delete secret {id}"));
         Ok(())
     }
     async fn delete_service(&self, name: &str) -> DockerResult<()> {

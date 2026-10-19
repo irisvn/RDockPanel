@@ -1,5 +1,6 @@
 //! Admin resources, one per model (`rustcms make:resource <Model>`).
 
+pub mod cert_resolver_resource;
 pub mod database_backup_resource;
 pub mod deployment_resource;
 pub mod guard;

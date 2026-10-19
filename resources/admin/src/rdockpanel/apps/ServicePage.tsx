@@ -513,8 +513,10 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
   const [middlewares, setMiddlewares] = useState("");
   const isCompose = d.service.kind === "compose";
   const [https, setHttps] = useState(true);
+  const [resolver, setResolver] = useState("");
   const [error, setError] = useState<unknown>(null);
   const fields = error instanceof ResourceError ? error.fieldErrors : {};
+  const resolverName = (id: number | null) => d.cert_resolvers.find((r) => r.id === id)?.name;
   return (
     <Section
       title={t("Domains")}
@@ -552,6 +554,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
               <span className="rdp2-muted">
                 → {domain.compose_service ? `${domain.compose_service}:` : ":"}
                 {domain.port}
+                {domain.https && domain.cert_resolver_id !== null && ` · 🔒 ${resolverName(domain.cert_resolver_id) ?? t("own resolver")}`}
               </span>
             </span>
             {d.can.domains.delete && (
@@ -590,6 +593,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                   https,
                   ...(isCompose ? { compose_service: container.trim() } : {}),
                   ...(middlewares.trim() ? { middlewares: middlewares.trim() } : {}),
+                  ...(https && resolver ? { cert_resolver_id: resolver } : {}),
                 });
                 setAdding(false);
                 setHost("");
@@ -621,6 +625,25 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
             <label className="rdp2-row">
               <Switch checked={https} onCheckedChange={setHttps} /> {t("HTTPS")}
             </label>
+            {https && d.cert_resolvers.length > 0 && (
+              <Field
+                label={t("Certificate")}
+                help={t("The certificate resolver (Settings → Certificates). A wildcard needs a DNS one.")}
+                error={fields.cert_resolver_id}
+              >
+                <NativeSelect value={resolver} onChange={(e) => setResolver(e.target.value)}>
+                  <option value="">{t("The panel's default")}</option>
+                  {d.cert_resolvers.map((r) => (
+                    <option key={r.id} value={String(r.id)}>
+                      {r.name} ({r.kind === "dns" ? "DNS" : "HTTP"})
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
+            {fields.cert_resolver_id && d.cert_resolvers.length === 0 && (
+              <Alert variant="destructive">{fields.cert_resolver_id.join(" ")}</Alert>
+            )}
             {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
             <div className="rdp2-row rdp2-end">
               <Button type="button" variant="ghost" onClick={() => setAdding(false)}>

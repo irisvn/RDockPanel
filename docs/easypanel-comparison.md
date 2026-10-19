@@ -22,7 +22,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Environment (`.env` text) | Done | encrypted; values shown only with `services.secrets` (audited) |
 | Domains: host, path, port, HTTPS, primary, generated domains | Done | Let's Encrypt in the installer |
 | Domains: wildcard, custom middlewares | Done | `*.example.com` (one level); middlewares defined in Traefik's files (`ratelimit@file`) |
-| Domains: certificate resolver per domain | Missing | one resolver for the panel (a wildcard's certificate needs a DNS-challenge resolver) |
+| Domains: certificate resolver per domain | Done | Settings → Certificates: Let's Encrypt over HTTP, or DNS (Cloudflare, DigitalOcean, Hetzner, Vultr, Linode; the token a Docker secret); "Apply" without SSH; one resolver per host; a wildcard needs a DNS one |
 | Redirects | Done | Go regular expressions, permanent or not, on or off |
 | Security: basic authentication | Done | bcrypt; applies at the next deployment |
 | Scripts | Partly | run non-interactively, at most 25 s, output shown (EasyPanel runs them in a shell) |

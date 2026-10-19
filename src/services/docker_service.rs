@@ -351,6 +351,18 @@ pub trait DockerApi: Send + Sync {
     async fn list_configs(&self, key: &str, value: &str) -> DockerResult<Vec<(String, String)>>;
     /// Removes a config (refused while a service uses it: `Conflict`).
     async fn delete_config(&self, id: &str) -> DockerResult<()>;
+    /// Creates the Swarm secret `name` holding `data`; its id (a name taken:
+    /// `Conflict`). Secrets are never read back.
+    async fn create_secret(
+        &self,
+        name: &str,
+        data: &[u8],
+        labels: HashMap<String, String>,
+    ) -> DockerResult<String>;
+    /// The secrets labelled `key=value`: (id, name).
+    async fn list_secrets(&self, key: &str, value: &str) -> DockerResult<Vec<(String, String)>>;
+    /// Removes a secret (refused while a service uses it: `Conflict`).
+    async fn delete_secret(&self, id: &str) -> DockerResult<()>;
     /// The service's tasks (every slot, current and past).
     async fn list_tasks(&self, service: &str) -> DockerResult<Vec<SwarmTask>>;
     fn service_logs(
@@ -901,6 +913,20 @@ impl DockerApi for Unavailable {
         Err(self.err())
     }
     async fn delete_config(&self, _: &str) -> DockerResult<()> {
+        Err(self.err())
+    }
+    async fn create_secret(
+        &self,
+        _: &str,
+        _: &[u8],
+        _: HashMap<String, String>,
+    ) -> DockerResult<String> {
+        Err(self.err())
+    }
+    async fn list_secrets(&self, _: &str, _: &str) -> DockerResult<Vec<(String, String)>> {
+        Err(self.err())
+    }
+    async fn delete_secret(&self, _: &str) -> DockerResult<()> {
         Err(self.err())
     }
     fn service_logs(&self, _: &str, _: LogQuery) -> BoxStream<'static, DockerResult<LogLine>> {

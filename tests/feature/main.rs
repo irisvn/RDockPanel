@@ -6,6 +6,7 @@ mod support;
 
 mod apps;
 mod backups;
+mod certificates;
 mod compose;
 mod databases;
 mod deployments;

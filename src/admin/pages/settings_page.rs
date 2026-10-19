@@ -19,6 +19,7 @@ impl PanelPage for SettingsPage {
             .permission_any([
                 "storage_providers.view_any",
                 "notification_channels.view_any",
+                "system.manage",
             ])
     }
 

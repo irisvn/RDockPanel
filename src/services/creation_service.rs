@@ -352,11 +352,28 @@ pub async fn create(
         if !crate::services::deploy_rules_service::valid_domain_host(&domain.host) {
             errors.add("domains", format!("{} is not a hostname", domain.host));
         }
+        if crate::services::deploy_rules_service::is_panel_host(&domain.host) {
+            errors.add(
+                "domains",
+                format!("{} is the panel's own domain", domain.host),
+            );
+        }
         if !valid_route_path(&domain.path) {
             errors.add("domains", format!("{} is not a path", domain.path));
         }
         if !valid_port(i64::from(domain.port)) {
             errors.add("domains", "a port is 1-65535");
+        }
+        if domain.https
+            && domain.host.starts_with("*.")
+            && !crate::services::deploy_rules_service::config()
+                .cert_resolver
+                .is_empty()
+        {
+            errors.add(
+                "domains",
+                format!("{}: a wildcard's certificate needs a DNS resolver (choose one on the domain after)", domain.host),
+            );
         }
     }
     let mut targets = std::collections::BTreeSet::new();
@@ -499,6 +516,22 @@ pub async fn create(
     .await
     .map_err(|e| taken(e, "name", "is already taken in this project".to_owned()))?;
     for domain in &new.domains {
+        // One certificate per host: the host's other HTTPS domains use the default too.
+        if let Some((_, message)) = crate::services::cert_service::check_domain_tls(
+            txn,
+            None,
+            &domain.host.to_lowercase(),
+            domain.https,
+            None,
+        )
+        .await?
+        {
+            return Err(rustcms::ValidationErrors::field(
+                "domains",
+                format!("{}: {message}", domain.host),
+            )
+            .into());
+        }
         service_domain::ActiveModel {
             service_id: Set(row.id),
             host: Set(domain.host.to_lowercase()),
