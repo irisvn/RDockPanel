@@ -34,6 +34,10 @@ impl ServiceProvider for AppServiceProvider {
             crate::models::deployment::Column::Files,
             rustcms::crypto::Binding::Column,
         );
+        app.encrypted_column::<crate::models::service::Entity>(
+            crate::models::service::Column::DeployKey,
+            rustcms::crypto::Binding::Column,
+        );
         // `rustcms db:seed` runs this one (it calls the others).
         app.seeder(crate::database::seeders::DatabaseSeeder);
         // rustcms:seeders

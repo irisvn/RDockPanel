@@ -20,7 +20,8 @@ Republish, rewritten at boot, Traefik on each project's network), checked end to
 image changes, HTTPS, isolated projects; environment variables and private registry credentials,
 encrypted (RustCMS W8), kept with each deployment for rollback; the EasyPanel-like interface
 (dashboard, service pages and tabs, React); environment placeholders, generated domains, file
-mounts.
+mounts; builds from Git (https or ssh with a deploy key) or an inline Dockerfile, with Dockerfile or
+Nixpacks, and deployment trigger URLs.
 
 The installer (`install/install.sh`, the image `ghcr.io/irisvn/rdockpanel`, built for amd64 and
 arm64): Swarm, MySQL, Traefik with Let's Encrypt, the panel, secrets kept across installs; tried on
@@ -40,7 +41,8 @@ Deleting a project will also detach Traefik from its network and remove it.
 
 ## Phase 3
 
-- Builds from GitHub/Git/uploads (Dockerfile, Nixpacks/Railpack, buildpacks), webhooks.
+- Builds from uploads, Railpack and buildpacks; GitHub webhooks with signatures, a GitHub token
+  (builds from Git with Dockerfile or Nixpacks, an inline Dockerfile and trigger URLs are done).
 - Databases (PostgreSQL, MySQL, MariaDB, MongoDB, Redis) with scheduled backups to S3 and restore.
 - Docker Compose, one-click templates.
 - Notifications (Discord, Slack, Telegram, email).

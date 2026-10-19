@@ -7,8 +7,9 @@ feature is free: no project limits, no paid tiers.
 [Tiếng Việt](README.vi.md) · [Docs](docs/) · [Roadmap](docs/roadmap.md)
 
 > **Status: early development.** Server monitoring, Docker management, apps and databases on
-> Docker Swarm with domains and HTTPS, EasyPanel templates, and a one-command installer work. Still
-> to come: builds from Git, backups, notifications, Compose. Try it on a test server first.
+> Docker Swarm with domains and HTTPS, builds from Git or a Dockerfile, EasyPanel templates, and a
+> one-command installer work. Still
+> to come: backups, notifications, Compose. Try it on a test server first.
 
 ![Server dashboard](docs/images/server.png)
 
@@ -51,15 +52,18 @@ feature is free: no project limits, no paid tiers.
 - **EasyPanel templates**: the 800+ templates of easypanel.io in one click (searched, filled in by
   their own form, deployed with their databases), fetched from their repository when you open the
   catalog; or paste a template's output ("Create from Schema").
+- **Builds**: an app from a Git repository (https, or ssh with a generated deploy key; a branch, tag
+  or commit; a sub-directory), built with its Dockerfile or Nixpacks, or from a Dockerfile written in
+  the panel; the build's log is the deployment's. A deployment trigger URL deploys from a CI or a
+  Git host's webhook.
 - **Secrets**: environment variables and private registry credentials, encrypted with the app key;
   edited as `.env` text; values are shown only with the `services.secrets` permission (each read is
   audited). A rollback brings back the environment of then.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Builds from Git and GitHub (Dockerfile, Nixpacks), database and volume backups, notifications,
-  Compose services, per-service monitoring.
-- Phase 3: builds from Git, databases with backups, Compose, templates, notifications, multiple
+- Database and volume backups, notifications, Compose services, per-service monitoring.
+- Phase 3: databases with backups, Compose, templates, notifications, multiple
   nodes, two-factor authentication, an API and a CLI.
 
 | Containers | Live logs | Terminal |

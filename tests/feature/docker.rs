@@ -688,6 +688,7 @@ async fn desired_specs_run_on_a_real_swarm() {
         env_digest: None,
         registry_username: None,
         primary_domain: None,
+        build: None,
     };
     // An environment, as a deployment opens it.
     let env = std::collections::BTreeMap::from([("GREETING".to_owned(), "hello".to_owned())]);
@@ -802,4 +803,62 @@ async fn desired_specs_run_on_a_real_swarm() {
     if let Err(panic) = outcome {
         std::panic::resume_unwind(panic);
     }
+}
+
+/// A build on the real engine goes through BuildKit (`RUN --mount`, as
+/// Nixpacks writes).
+#[tokio::test]
+async fn a_real_build_uses_buildkit() {
+    if std::env::var_os("PANEL_TEST_DOCKER").is_none() {
+        return;
+    }
+    use rdockpanel::services::docker_service::BuildLine;
+    let docker = Docker::new(BollardDocker::connect().expect("docker client"));
+    let dockerfile = "FROM busybox:1.37\nRUN --mount=type=cache,target=/cache echo built > /built\nCOPY hello.txt /hello.txt\n";
+    let mut tar = tar::Builder::new(Vec::new());
+    for (name, body) in [("Dockerfile", dockerfile), ("hello.txt", "hi\n")] {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(body.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar.append_data(&mut header, name, body.as_bytes()).unwrap();
+    }
+    let tag = "rdp/test_build:d1";
+    let mut lines = docker
+        .engine()
+        .build_image(tar.into_inner().unwrap(), "Dockerfile", tag);
+    let (mut image, mut log) = (None, vec![]);
+    while let Some(line) = lines.next().await {
+        match line.expect("the build") {
+            BuildLine::Image(id) => image = Some(id),
+            BuildLine::Log(text) => log.push(text),
+        }
+    }
+    let log = log.join("\n");
+    let id = image.unwrap_or_else(|| panic!("no image: {log}"));
+    assert!(id.starts_with("sha256:"), "{id}");
+    assert!(log.contains("RUN --mount"), "{log}");
+    docker.engine().remove_image(tag, true).await.unwrap();
+
+    // A failing step fails the build, with its message.
+    let mut tar = tar::Builder::new(Vec::new());
+    let body = "FROM busybox:1.37\nRUN exit 3\n";
+    let mut header = tar::Header::new_gnu();
+    header.set_size(body.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    tar.append_data(&mut header, "Dockerfile", body.as_bytes())
+        .unwrap();
+    let mut lines =
+        docker
+            .engine()
+            .build_image(tar.into_inner().unwrap(), "Dockerfile", "rdp/test_build:d2");
+    let mut failed = None;
+    while let Some(line) = lines.next().await {
+        if let Err(e) = line {
+            failed = Some(e.to_string());
+            break;
+        }
+    }
+    assert!(failed.is_some_and(|e| e.contains("exit 3") || e.contains("exit code")));
 }

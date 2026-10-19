@@ -421,7 +421,7 @@ impl Default for Timings {
 /// Lines of a run, kept on the deployment row (its tail), written at most
 /// every second.
 /// It also holds the service's lock ([`RunLog::hold`]).
-struct RunLog<'a> {
+pub(crate) struct RunLog<'a> {
     db: &'a DatabaseConnection,
     id: i64,
     service_id: i64,
@@ -443,7 +443,7 @@ impl<'a> RunLog<'a> {
     }
 
     /// Renews the lease: the run goes on only while the lock is its own.
-    async fn hold(&mut self) -> Result<(), Outcome> {
+    pub(crate) async fn hold(&mut self) -> Result<(), Outcome> {
         self.held = std::time::Instant::now();
         match hold(self.db, self.service_id, self.id).await {
             Ok(true) => Ok(()),
@@ -457,14 +457,14 @@ impl<'a> RunLog<'a> {
     }
 
     /// [`Self::hold`], at most every few seconds (while pulling).
-    async fn hold_now_and_then(&mut self) -> Result<(), Outcome> {
+    pub(crate) async fn hold_now_and_then(&mut self) -> Result<(), Outcome> {
         if self.held.elapsed() >= Duration::from_secs(5) {
             self.hold().await?;
         }
         Ok(())
     }
 
-    async fn line(&mut self, message: impl AsRef<str>) {
+    pub(crate) async fn line(&mut self, message: impl AsRef<str>) {
         self.text.push_str(&format!(
             "{} {}\n",
             Utc::now().format("%H:%M:%S"),
@@ -514,7 +514,7 @@ async fn hold(db: &DatabaseConnection, service_id: i64, deployment: i64) -> AppR
 
 /// How a run ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Outcome {
+pub(crate) enum Outcome {
     Succeeded,
     /// Swarm rolled back: why, and whether the restored spec runs tasks.
     RolledBack(String, bool),
@@ -641,6 +641,8 @@ pub fn deploy_options(force_update: u64) -> DeployOptions {
 /// What a run applies besides its snapshot, opened: never logged.
 struct Secrets {
     env: BTreeMap<String, String>,
+    /// The service's deploy key (a private repository's).
+    deploy_key: Option<String>,
     /// Its file mounts' contents by path.
     files: BTreeMap<String, String>,
     /// Keys the digest of the environment as resolved (the task template's).
@@ -662,6 +664,7 @@ impl Secrets {
         if Trigger::parse(&row.trigger) == Some(Trigger::Destroy) {
             return Ok(Self {
                 env: BTreeMap::new(),
+                deploy_key: None,
                 files: BTreeMap::new(),
                 digest_key,
                 registry: None,
@@ -704,8 +707,21 @@ impl Secrets {
                 })?,
             None => BTreeMap::new(),
         };
+        let deploy_key = match &service.deploy_key {
+            Some(sealed) => Some(
+                sealed
+                    .open(keyring, &service::deploy_key_context())
+                    .map_err(|_| {
+                        Outcome::Failed(
+                            "the deploy key cannot be read (sealed with another APP_KEY)".into(),
+                        )
+                    })?,
+            ),
+            None => None,
+        };
         Ok(Self {
             env,
+            deploy_key,
             files,
             digest_key,
             registry,
@@ -949,16 +965,45 @@ async fn apply(
     }
 
     let auth = secrets.auth(&snapshot);
-    let image = image_for(
-        docker,
-        trigger,
-        &snapshot,
-        row,
-        existing.as_ref(),
-        auth.clone(),
-        log,
-    )
-    .await?;
+    let image = match &snapshot.build {
+        // Built here: Deploy builds; Start, Stop and Restart reuse the image
+        // running (when there is one); Rollback its recorded one.
+        Some(build)
+            if trigger == Trigger::Deploy
+                || (trigger != Trigger::Rollback
+                    && existing.as_ref().and_then(running_image).is_none()) =>
+        {
+            let tag = format!("rdp/{name}:d{}", row.id);
+            let built = crate::services::build_service::build(
+                docker,
+                build,
+                &tag,
+                secrets.deploy_key.as_deref(),
+                log,
+            )
+            .await?;
+            PinnedImage::Local(built)
+        }
+        // Start, Stop, Restart of a built image: the one running.
+        Some(_) if trigger != Trigger::Rollback => pinned_as(
+            &existing
+                .as_ref()
+                .and_then(running_image)
+                .unwrap_or_default(),
+        ),
+        _ => {
+            image_for(
+                docker,
+                trigger,
+                &snapshot,
+                row,
+                existing.as_ref(),
+                auth.clone(),
+                log,
+            )
+            .await?
+        }
+    };
     log.hold().await?;
     if let Some(warning) = image.warning() {
         log.line(format!("warning: {warning}")).await;
@@ -1060,6 +1105,19 @@ async fn image_for(
         .map_err(|e| Outcome::Failed(e.to_string()))?;
     let digest = pulled_digest(lines.iter().map(String::as_str));
     Ok(pin_image(&snapshot.image, digest.as_deref(), &details))
+}
+
+/// The image a service's spec runs.
+fn running_image(service: &SwarmService) -> Option<String> {
+    service
+        .spec
+        .as_ref()?
+        .task_template
+        .as_ref()?
+        .container_spec
+        .as_ref()?
+        .image
+        .clone()
 }
 
 fn pinned_as(reference: &str) -> PinnedImage {

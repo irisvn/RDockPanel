@@ -25,7 +25,7 @@ use ::bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use ::bollard::query_parameters::ResizeExecOptionsBuilder;
 
 use super::{
-    ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
+    BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
     DockerResult, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream, NetworkItem,
     NetworkRequest, PruneReport, RegistryAuth, SESSION_ENV, ServiceSpec, SwarmRole, SwarmService,
     SwarmTask, TermSize, VolumeItem,
@@ -614,6 +614,29 @@ impl DockerApi for BollardDocker {
         self.client.delete_service(name).await.map_err(map_err)
     }
 
+    fn build_image(
+        &self,
+        context: Vec<u8>,
+        dockerfile: &str,
+        tag: &str,
+    ) -> BoxStream<'static, DockerResult<BuildLine>> {
+        let options = ::bollard::query_parameters::BuildImageOptionsBuilder::new()
+            .dockerfile(dockerfile)
+            .t(tag)
+            .rm(true)
+            .forcerm(true)
+            .pull("true")
+            // BuildKit (what `docker build` uses): `RUN --mount`, as
+            // Nixpacks writes, needs it; its session sends the context.
+            .version(::bollard::query_parameters::BuilderVersion::BuilderBuildKit)
+            .session(&format!(
+                "rdp-{}",
+                crate::services::database_service::random_string(20)
+            ))
+            .build();
+        build_stream(self.client.clone(), options, context)
+    }
+
     async fn create_config(
         &self,
         name: &str,
@@ -778,6 +801,80 @@ fn credentials(auth: RegistryAuth) -> ::bollard::auth::DockerCredentials {
         serveraddress: Some(auth.server),
         ..Default::default()
     }
+}
+
+/// The build's lines, from a task owning its client (the stream outlives
+/// the request); dropping the stream stops the task at its next line.
+fn build_stream(
+    client: Client,
+    options: ::bollard::query_parameters::BuildImageOptions,
+    context: Vec<u8>,
+) -> BoxStream<'static, DockerResult<BuildLine>> {
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    tokio::spawn(async move {
+        use ::bollard::models::BuildInfoAux;
+        let mut build =
+            client.build_image(options, None, Some(::bollard::body_full(context.into())));
+        // BuildKit repeats a step while it runs: its name once.
+        let mut named = std::collections::HashSet::new();
+        loop {
+            // A dropped stream (a lost lock, a timeout) stops the build now,
+            // not at its next line.
+            let item = tokio::select! {
+                item = build.next() => item,
+                () = tx.closed() => return,
+            };
+            let Some(item) = item else { break };
+            let lines = item.map_err(map_err).and_then(|info| {
+                if let Some(detail) = info.error_detail {
+                    return Err(DockerError::Other(detail.message.unwrap_or_default()));
+                }
+                match info.aux {
+                    Some(BuildInfoAux::Default(image)) if image.id.is_some() => {
+                        return Ok(vec![BuildLine::Image(image.id.unwrap_or_default())]);
+                    }
+                    Some(BuildInfoAux::BuildKit(status)) => {
+                        let mut lines = vec![];
+                        for vertex in status.vertexes {
+                            if !vertex.error.is_empty() {
+                                return Err(DockerError::Other(format!(
+                                    "{}: {}",
+                                    vertex.name, vertex.error
+                                )));
+                            }
+                            if vertex.started.is_some() && named.insert(vertex.digest) {
+                                let cached = if vertex.cached { " (cached)" } else { "" };
+                                lines.push(BuildLine::Log(format!("{}{cached}", vertex.name)));
+                            }
+                        }
+                        for log in status.logs {
+                            lines.push(BuildLine::Log(
+                                String::from_utf8_lossy(&log.msg).into_owned(),
+                            ));
+                        }
+                        return Ok(lines);
+                    }
+                    _ => {}
+                }
+                Ok(vec![BuildLine::Log(
+                    info.stream.or(info.status).unwrap_or_default(),
+                )])
+            });
+            let lines = match lines {
+                Ok(lines) => lines.into_iter().map(Ok).collect(),
+                Err(e) => vec![Err(e)],
+            };
+            for line in lines {
+                if tx.send(line).await.is_err() {
+                    return;
+                }
+            }
+        }
+    });
+    futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|line| (line, rx))
+    })
+    .boxed()
 }
 
 #[cfg(test)]

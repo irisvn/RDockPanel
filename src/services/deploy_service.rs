@@ -72,6 +72,31 @@ pub struct Snapshot {
     /// The host of its primary domain (the first added): `$(PRIMARY_DOMAIN)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primary_domain: Option<String>,
+    /// How its image is built (`None`: pulled, `image`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<Build>,
+}
+
+/// A service's image built by the panel: from a Git repository, or from a
+/// Dockerfile written in the panel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Build {
+    /// `git` or `dockerfile`.
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// The context in the repository (`/`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_path: Option<String>,
+    /// `dockerfile` or `nixpacks`.
+    pub builder: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dockerfile_path: Option<String>,
+    /// The Dockerfile written in the panel (`source = dockerfile`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dockerfile: Option<String>,
 }
 
 /// The environment's digest, keyed (`key`: derived from `APP_KEY`): HMAC-SHA256
@@ -267,6 +292,32 @@ impl Snapshot {
             env_names: vec![],
             env_digest: None,
             primary_domain,
+            build: match service.source.as_str() {
+                "git" | "dockerfile" => Some(Build {
+                    source: service.source.clone(),
+                    git_url: (service.source == "git")
+                        .then(|| service.git_url.clone())
+                        .flatten(),
+                    git_branch: (service.source == "git")
+                        .then(|| service.git_branch.clone())
+                        .flatten(),
+                    git_path: (service.source == "git")
+                        .then(|| service.git_path.clone())
+                        .flatten(),
+                    builder: if service.source == "git" {
+                        service.builder.clone()
+                    } else {
+                        "dockerfile".to_owned()
+                    },
+                    dockerfile_path: (service.source == "git")
+                        .then(|| service.dockerfile_path.clone())
+                        .flatten(),
+                    dockerfile: (service.source == "dockerfile")
+                        .then(|| service.dockerfile.clone())
+                        .flatten(),
+                }),
+                _ => None,
+            },
             registry_username: service
                 .registry_username
                 .as_deref()
@@ -831,6 +882,7 @@ mod tests {
             env_digest: None,
             registry_username: None,
             primary_domain: None,
+            build: None,
         }
     }
 

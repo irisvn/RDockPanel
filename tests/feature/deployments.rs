@@ -1296,3 +1296,133 @@ db_test!(
         assert_eq!(service_row(&app, id).await.status, "new");
     }
 );
+
+db_test!(
+    a_dockerfile_is_built_then_deployed,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, _) = shop(&app).await;
+        let project = service_row(&app, 1).await.project_id.to_string();
+        // A Git source needs an https or ssh URL (never a local path).
+        let local = admin
+            .post_json(
+                &records(&app, "services"),
+                &json!({"project_id": project, "name": "api", "replicas": 1, "source": "git", "git_url": "/srv/repo"}),
+            )
+            .await;
+        local.assert_validation_error("git_url");
+        let id: i64 = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "site", "replicas": 1, "source": "dockerfile", "dockerfile": "FROM nginx:1.27\nCOPY . /usr/share/nginx/html\n"}),
+        )
+        .await
+        .parse()
+        .unwrap();
+
+        let first = run(&app, &admin, "deploy", id).await;
+        assert_eq!(first.status, "succeeded", "{:?}", first.error);
+        let tag = format!("rdp/shop_site:d{}", first.id);
+        let calls = fake.calls();
+        assert!(
+            calls.contains(&format!("build {tag} from Dockerfile")),
+            "{calls:?}"
+        );
+        let image = |fake: &FakeDocker| {
+            fake.services.lock().unwrap()["shop_site"]
+                .spec
+                .clone()
+                .unwrap()
+                .task_template
+                .unwrap()
+                .container_spec
+                .unwrap()
+                .image
+                .unwrap()
+        };
+        assert_eq!(image(&fake), tag);
+        // A restart keeps the image built (no new build).
+        let restarted = run(&app, &admin, "restart", id).await;
+        assert_eq!(restarted.status, "succeeded", "{:?}", restarted.error);
+        assert_eq!(image(&fake), tag);
+        let builds = fake
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("build "))
+            .count();
+        assert_eq!(builds, 1);
+
+        // The trigger URL deploys without a session; only its token does.
+        let made = admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{id}/trigger")),
+                &json!({}),
+            )
+            .await;
+        made.assert_status(StatusCode::OK);
+        let url = made.json()["url"].as_str().unwrap().to_owned();
+        let path = &url[url.find("/api/v1/deploy/").unwrap()..];
+        let token = path.rsplit_once("?token=").unwrap().1.to_owned();
+        assert!(
+            !service_row(&app, id)
+                .await
+                .trigger_hash
+                .unwrap()
+                .contains(&token)
+        );
+        for wrong in [
+            format!("/api/v1/deploy/{id}?token=nope"),
+            format!("/api/v1/deploy/{}?token={token}", id + 1),
+            format!("/api/v1/deploy/{id}"),
+            format!("/api/v1/deploy/x?token={token}"),
+        ] {
+            app.post_json(&wrong, &json!({}))
+                .await
+                .assert_status(StatusCode::NOT_FOUND);
+        }
+        let fired = app.post_json(path, &json!({})).await;
+        fired.assert_status(StatusCode::ACCEPTED);
+        let queued = last_deployment(&app, id).await;
+        assert_eq!(queued.status, "queued");
+        assert_eq!(fired.json()["deployment"], queued.id);
+        // One at a time: busy while one waits.
+        app.post_json(path, &json!({}))
+            .await
+            .assert_status(StatusCode::CONFLICT);
+        // A new URL: the old one stops working.
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{id}/trigger")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        deployment_service::run(app.state(), queued.id, FAST)
+            .await
+            .unwrap();
+        app.post_json(path, &json!({}))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+
+        // A deploy key: its public half shown, its private half sealed.
+        let key = admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{id}/deploy-key")),
+                &json!({}),
+            )
+            .await;
+        key.assert_status(StatusCode::OK);
+        let public = key.json()["public_key"].as_str().unwrap().to_owned();
+        assert!(public.starts_with("ssh-ed25519 "), "{public}");
+        let row = service_row(&app, id).await;
+        assert_eq!(row.deploy_key_public.as_deref(), Some(public.as_str()));
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .text();
+        assert!(!page.contains("PRIVATE KEY") && page.contains(&public));
+    }
+);

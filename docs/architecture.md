@@ -127,7 +127,8 @@ volumes, files, ports, command, replicas, zero downtime) and databases (their op
 first. What cannot be done is said, never dropped silently: host directories, redirects, resources
 and registry credentials are left out with a warning; what a service needs to be safe or to run
 (basic authentication, Linux capabilities, sysctls) is created but refused for "Deploy now"; Git, GitHub and
-Dockerfile sources, and Compose services, refuse the template (for now). The same output pasted
+Dockerfile sources become builds (Dockerfile or Nixpacks; other builders refuse the template), and
+Compose services refuse the template (for now). The same output pasted
 is "Create from Schema". Of the 843 templates of October 2026, 829 run; the others build from
 source or use Compose (`PANEL_TEST_TEMPLATES=1` counts again).
 
@@ -166,6 +167,26 @@ database's own.
   digests. They become Swarm configs named `rdp_<hash of project, service, path, digest>`, labelled
   `rdockpanel.config-of=<project>_<service>` and mounted read-only. A new content is a new config; a
   successful deployment removes the service's configs it no longer uses, Destroy all of them.
+
+### Builds
+
+An app's `source` is `image` (pulled), `git` or `dockerfile` (built by `build_service`). A Git
+source is an https or ssh URL (never a local path or another transport), a branch, tag or commit
+(a commit: the whole history, then that commit), a path in the repository and a builder: the
+repository's Dockerfile (`dockerfile_path`), or Nixpacks writing one (`nixpacks build --out`). A
+private repository uses the service's deploy key (ed25519, made by `ssh-keygen`, its private half
+sealed like the environment, its public half shown to add to the repository). The repository is
+cloned (`--depth 1`) into a temporary directory removed afterwards, packed as a tar (no `.git`,
+nothing its `.dockerignore` lists, at most 1 GB) and built by Docker with BuildKit (`build_image`,
+as `docker build`: `RUN --mount` works) as `rdp/<project>_<service>:d<deployment>`, on
+this node (one node: nothing is pushed). Every step goes to the deployment's log, and the deployment's lock is renewed every 30 s
+while a step runs (a lost lock stops the build). Deploy builds;
+Start, Stop, Restart and Scale keep the image running (a first Start builds); Rollback runs the
+image of then.
+
+A service's trigger URL (`/api/v1/deploy/{id}?token={token}`) deploys it without a session: the token
+(40 characters) is shown once, only its SHA-256 is stored and compared in constant time; a new
+one replaces it. Unknown, wrong or malformed answers 404 the same; a deployment under way, 409.
 
 ### Secrets
 

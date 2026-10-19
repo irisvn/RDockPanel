@@ -111,7 +111,7 @@ export function ServicePage(props: Props) {
         {tab === "environment" && <EnvironmentTab {...props} d={d} onSaved={saved} />}
         {tab === "domains" && !d.can.domains.view && <p className="rdp2-muted">{t("You may not see domains.")}</p>}
         {tab === "domains" && d.can.domains.view && <DomainsTab t={t} d={d} onSaved={saved} onError={setError} />}
-        {tab === "source" && <SourceTab t={t} d={d} onSaved={saved} />}
+        {tab === "source" && <SourceTab t={t} d={d} api={props.api} onSaved={saved} />}
         {tab === "storage" && !d.can.mounts.view && <p className="rdp2-muted">{t("You may not see mounts.")}</p>}
         {tab === "storage" && d.can.mounts.view && <StorageTab t={t} d={d} onSaved={saved} onError={setError} />}
         {tab === "advanced" && (
@@ -525,57 +525,181 @@ function useServiceSave(id: number, onSaved: () => void) {
   return { save, error, busy, fields };
 }
 
-function SourceTab(props: { t: T; d: ServiceDetail; onSaved: () => void }) {
+function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: () => void }) {
   const { d, t } = props;
   const s = d.service;
+  const [source, setSource] = useState(s.source);
   const [image, setImage] = useState(s.image);
   const [user, setUser] = useState(s.registry_username ?? "");
   const [password, setPassword] = useState("");
+  const [gitUrl, setGitUrl] = useState(s.git_url ?? "");
+  const [branch, setBranch] = useState(s.git_branch ?? "main");
+  const [path, setPath] = useState(s.git_path ?? "/");
+  const [builder, setBuilder] = useState(s.builder);
+  const [dockerfilePath, setDockerfilePath] = useState(s.dockerfile_path ?? "Dockerfile");
+  const [dockerfile, setDockerfile] = useState(s.dockerfile ?? "FROM nginx:1.27-alpine\n");
+  const [trigger, setTrigger] = useState<string | null>(null);
+  const [extra, setExtra] = useState<unknown>(null);
   const { save, error, busy, fields } = useServiceSave(s.id, () => {
     setPassword("");
     props.onSaved();
   });
+  const disabled = !d.can.update;
   return (
-    <Section title={t("Docker image")} description={t("Pulled and pinned to its digest at each deploy.")}>
-      <form
-        className="rdp2-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const data: Record<string, unknown> = { image: image.trim(), registry_username: user.trim() || null };
-          if (password) data.registry_password = { replace: password };
-          save(data);
-        }}
-      >
-        <Field label={t("Image")} error={fields.image}>
-          <Input value={image} onChange={(e) => setImage(e.target.value)} disabled={!d.can.update} />
-        </Field>
-        <div className="rdp2-grid2">
-          <Field label={t("Registry user")} help={t("For a private image")} error={fields.registry_username}>
-            <Input value={user} onChange={(e) => setUser(e.target.value)} disabled={!d.can.update} />
-          </Field>
-          <Field
-            label={t("Registry password or token")}
-            help={s.registry_password_set ? t("Set: leave empty to keep it") : t("Not set")}
-            error={fields.registry_password}
-          >
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={!d.can.update} autoComplete="new-password" />
-          </Field>
-        </div>
-        {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
-        {d.can.update && (
-          <div className="rdp2-row rdp2-end">
-            {s.registry_password_set && (
-              <Button type="button" variant="ghost" onClick={() => save({ registry_password: { clear: true } })}>
-                {t("Remove password")}
-              </Button>
-            )}
-            <Button type="submit" disabled={busy}>
-              {t("Save")}
-            </Button>
+    <div className="rdp2-stack">
+      <Section title={t("Source")} description={t("Where the image comes from: a registry, a Git repository built here, or a Dockerfile written here.")}>
+        <form
+          className="rdp2-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const data: Record<string, unknown> = { source };
+            if (source === "image") {
+              Object.assign(data, { image: image.trim(), registry_username: user.trim() || null });
+              if (password) data.registry_password = { replace: password };
+            } else if (source === "git") {
+              Object.assign(data, {
+                git_url: gitUrl.trim(),
+                git_branch: branch.trim() || null,
+                git_path: path.trim() || "/",
+                builder,
+                dockerfile_path: dockerfilePath.trim() || "Dockerfile",
+              });
+            } else {
+              Object.assign(data, { dockerfile });
+            }
+            save(data);
+          }}
+        >
+          <div className="rdp2-kinds">
+            {(props.d.service.kind === "app" ? (["image", "git", "dockerfile"] as const) : (["image"] as const)).map((id) => (
+              <button key={id} type="button" disabled={disabled} className={id === source ? "rdp2-kind rdp2-kind-active" : "rdp2-kind"} onClick={() => setSource(id)}>
+                {t(id === "image" ? "Docker image" : id === "git" ? "Git repository" : "Dockerfile")}
+              </button>
+            ))}
           </div>
-        )}
-      </form>
-    </Section>
+          {source === "image" && (
+            <>
+              <Field label={t("Image")} help={t("Pulled and pinned to its digest at each deploy.")} error={fields.image}>
+                <Input value={image} onChange={(e) => setImage(e.target.value)} disabled={disabled} />
+              </Field>
+              <div className="rdp2-grid2">
+                <Field label={t("Registry user")} help={t("For a private image")} error={fields.registry_username}>
+                  <Input value={user} onChange={(e) => setUser(e.target.value)} disabled={disabled} />
+                </Field>
+                <Field label={t("Registry password or token")} help={s.registry_password_set ? t("Set: leave empty to keep it") : t("Not set")} error={fields.registry_password}>
+                  <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={disabled} autoComplete="new-password" />
+                </Field>
+              </div>
+            </>
+          )}
+          {source === "git" && (
+            <>
+              <Field label={t("Repository URL")} help={t("https://github.com/org/app.git, or git@github.com:org/app.git with a deploy key")} error={fields.git_url}>
+                <Input value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} disabled={disabled} placeholder="https://github.com/org/app.git" />
+              </Field>
+              <div className="rdp2-grid2">
+                <Field label={t("Branch, tag or commit")} error={fields.git_branch}>
+                  <Input value={branch} onChange={(e) => setBranch(e.target.value)} disabled={disabled} />
+                </Field>
+                <Field label={t("Build path")} help={t("The folder of the repository to build")} error={fields.git_path}>
+                  <Input value={path} onChange={(e) => setPath(e.target.value)} disabled={disabled} />
+                </Field>
+                <Field label={t("Builder")}>
+                  <NativeSelect value={builder} onChange={(e) => setBuilder(e.target.value as "dockerfile" | "nixpacks")} disabled={disabled}>
+                    <option value="dockerfile">Dockerfile</option>
+                    <option value="nixpacks">Nixpacks</option>
+                  </NativeSelect>
+                </Field>
+                {builder === "dockerfile" && (
+                  <Field label={t("Dockerfile path")} error={fields.dockerfile_path}>
+                    <Input value={dockerfilePath} onChange={(e) => setDockerfilePath(e.target.value)} disabled={disabled} />
+                  </Field>
+                )}
+              </div>
+            </>
+          )}
+          {source === "dockerfile" && (
+            <Field label={t("Dockerfile")} error={fields.dockerfile}>
+              <Textarea className="rdp2-env" rows={12} value={dockerfile} onChange={(e) => setDockerfile(e.target.value)} disabled={disabled} />
+            </Field>
+          )}
+          {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+          {d.can.update && (
+            <div className="rdp2-row rdp2-end">
+              {source === "image" && s.registry_password_set && (
+                <Button type="button" variant="ghost" onClick={() => save({ registry_password: { clear: true } })}>
+                  {t("Remove password")}
+                </Button>
+              )}
+              <Button type="submit" disabled={busy}>
+                {t("Save")}
+              </Button>
+            </div>
+          )}
+        </form>
+      </Section>
+      {s.source === "git" && d.can.update && (
+        <Section
+          title={t("Deploy key")}
+          description={t("For a private repository: add this public key to it (read-only), and use its ssh URL.")}
+          actions={
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (s.deploy_key_public && !window.confirm(t("Replace the deploy key? The old one stops working."))) return;
+                try {
+                  await props.api.post(`/apps/services/${s.id}/deploy-key`);
+                  props.onSaved();
+                } catch (err) {
+                  setExtra(err);
+                }
+              }}
+            >
+              {s.deploy_key_public ? t("New key") : t("Generate a key")}
+            </Button>
+          }
+        >
+          {s.deploy_key_public && (
+            <span className="rdp2-row">
+              <code className="rdp2-ellipsis">{s.deploy_key_public}</code>
+              <CopyButton text={s.deploy_key_public} label={t("Copy")} copied={t("Copied")} />
+            </span>
+          )}
+        </Section>
+      )}
+      {s.source !== "image" && d.can.deploy && (
+        <Section
+          title={t("Deployment trigger")}
+          description={t("POST to this URL deploys the service: a GitHub webhook (push) or a CI step. Shown once.")}
+          actions={
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (s.trigger_set && !window.confirm(t("Make a new URL? The old one stops working."))) return;
+                try {
+                  const r = await props.api.post<{ url: string }>(`/apps/services/${s.id}/trigger`);
+                  setTrigger(r.url);
+                  props.onSaved();
+                } catch (err) {
+                  setExtra(err);
+                }
+              }}
+            >
+              {s.trigger_set ? t("New URL") : t("Make a URL")}
+            </Button>
+          }
+        >
+          {trigger && (
+            <span className="rdp2-row">
+              <code className="rdp2-ellipsis">{trigger}</code>
+              <CopyButton text={trigger} label={t("Copy")} copied={t("Copied")} />
+            </span>
+          )}
+          {!trigger && s.trigger_set && <p className="rdp2-muted rdp2-small">{t("A URL is set (shown when it was made).")}</p>}
+        </Section>
+      )}
+      <ErrorNote error={extra} />
+    </div>
   );
 }
 

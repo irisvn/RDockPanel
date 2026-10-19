@@ -199,6 +199,15 @@ pub async fn service(
             "healthcheck_interval_s": row.healthcheck_interval_s,
             "healthcheck_retries": row.healthcheck_retries,
             "registry_username": row.registry_username,
+            "source": row.source,
+            "git_url": row.git_url,
+            "git_branch": row.git_branch,
+            "git_path": row.git_path,
+            "builder": row.builder,
+            "dockerfile_path": row.dockerfile_path,
+            "dockerfile": row.dockerfile,
+            "deploy_key_public": row.deploy_key_public,
+            "trigger_set": row.trigger_hash.is_some(),
             "registry_password_set": row.registry_password.is_some(),
             "status": row.status,
             "desired_state": row.desired_state,
@@ -481,5 +490,90 @@ pub async fn create_service(
     txn.commit().await?;
     Ok(Json(
         json!({ "id": row.id, "name": row.name, "kind": row.kind }),
+    ))
+}
+
+/// A new SSH deploy key for the service's repository (ed25519): its private
+/// half sealed, its public half shown (add it to the repository, read-only).
+pub async fn deploy_key(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    let row = service_of(&app, id).await?;
+    let dir = std::env::temp_dir().join(format!(
+        "rdp-key-{}",
+        crate::services::database_service::random_string(16).to_lowercase()
+    ));
+    std::fs::create_dir_all(&dir).map_err(AppError::internal)?;
+    let path = dir.join("key");
+    let made = tokio::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-C"])
+        .arg(format!("rdockpanel-{id}"))
+        .arg("-f")
+        .arg(&path)
+        .output()
+        .await;
+    let keys = made.ok().filter(|o| o.status.success()).and_then(|_| {
+        Some((
+            std::fs::read_to_string(&path).ok()?,
+            std::fs::read_to_string(dir.join("key.pub")).ok()?,
+        ))
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+    let (private, public) =
+        keys.ok_or_else(|| AppError::internal("ssh-keygen could not make a key"))?;
+    let public = public.trim().to_owned();
+    let sealed = Encrypted::seal(
+        app.keyring(),
+        &service::deploy_key_context(),
+        &private.trim().to_owned(),
+    )?;
+    let txn = app.db().begin().await?;
+    service::Entity::update_many()
+        .col_expr(
+            service::Column::DeployKey,
+            sea_orm::sea_query::Expr::value(Some(sealed)),
+        )
+        .col_expr(
+            service::Column::DeployKeyPublic,
+            sea_orm::sea_query::Expr::value(Some(public.clone())),
+        )
+        .filter(service::Column::Id.eq(row.id))
+        .exec(&txn)
+        .await?;
+    let entry = AuditEntry::new("services.deploy_key", "services").key(id.to_string());
+    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    txn.commit().await?;
+    Ok(Json(json!({ "public_key": public })))
+}
+
+/// A new deployment trigger URL (the old one stops working); shown once.
+pub async fn trigger(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    let row = service_of(&app, id).await?;
+    let token = crate::services::database_service::random_string(40);
+    let txn = app.db().begin().await?;
+    service::Entity::update_many()
+        .col_expr(
+            service::Column::TriggerHash,
+            sea_orm::sea_query::Expr::value(Some(
+                crate::http::controllers::trigger_controller::token_hash(&token),
+            )),
+        )
+        .filter(service::Column::Id.eq(row.id))
+        .exec(&txn)
+        .await?;
+    let entry = AuditEntry::new("services.trigger", "services").key(id.to_string());
+    audit::record(&txn, &audit_context(&auth, request), entry).await?;
+    txn.commit().await?;
+    let base = app.config().app.url.trim_end_matches('/').to_owned();
+    Ok(Json(
+        json!({ "url": format!("{base}/api/v1/deploy/{id}?token={token}") }),
     ))
 }

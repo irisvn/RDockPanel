@@ -195,6 +195,13 @@ pub use ::bollard::models::{
 /// service without it.
 pub const MANAGED_LABEL: &str = "rdockpanel.managed";
 
+/// A line of an image's build, or its end: the image's id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuildLine {
+    Log(String),
+    Image(String),
+}
+
 /// Registry credentials for pulling a private image (sent with service
 /// create/update so every node can pull it).
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -315,6 +322,14 @@ pub trait DockerApi: Send + Sync {
         auth: Option<RegistryAuth>,
     ) -> DockerResult<Vec<String>>;
     async fn delete_service(&self, name: &str) -> DockerResult<()>;
+    /// Builds `context` (a tar) with its Dockerfile at `dockerfile`, tagged
+    /// `tag`: the build's lines, then the image's id.
+    fn build_image(
+        &self,
+        context: Vec<u8>,
+        dockerfile: &str,
+        tag: &str,
+    ) -> BoxStream<'static, DockerResult<BuildLine>>;
     /// Creates the Swarm config `name` holding `data`; its id (a name taken:
     /// `Conflict`).
     async fn create_config(
@@ -832,6 +847,14 @@ impl DockerApi for Unavailable {
     }
     async fn list_tasks(&self, _: &str) -> DockerResult<Vec<SwarmTask>> {
         Err(self.err())
+    }
+    fn build_image(
+        &self,
+        _: Vec<u8>,
+        _: &str,
+        _: &str,
+    ) -> BoxStream<'static, DockerResult<BuildLine>> {
+        futures_util::stream::iter([Err(self.err())]).boxed()
     }
     async fn create_config(
         &self,

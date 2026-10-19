@@ -9,7 +9,14 @@ use crate::http::controllers;
 
 /// Every API route, with the access it requires.
 pub fn routes() -> ApiRoutes {
-    ApiRoutes::new("/api/v1").get("/ping", Access::public(), ping)
+    ApiRoutes::new("/api/v1")
+        .get("/ping", Access::public(), ping)
+        // A service's deployment trigger: its token is the secret.
+        .post(
+            "/deploy/{id}",
+            Access::public(),
+            controllers::trigger_controller::deploy,
+        )
     // rustcms:api-routes
 }
 

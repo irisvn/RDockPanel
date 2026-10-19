@@ -9,7 +9,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 > **Trạng thái: đang phát triển.**
 > - Phase 1 (giám sát server, quản lý Docker) đã chạy được.
 > - Phase 2 (deploy app) đã chạy được từ mã nguồn: project, service, deploy, domain, biến môi trường mã hoá, registry riêng.
-> - Đã có installer cài bằng một lệnh. Còn lại: build từ Git, backup, thông báo, Compose.
+> - Đã có installer cài bằng một lệnh và build từ Git hoặc Dockerfile. Còn lại: backup, thông báo, Compose.
 > - Chưa dùng được cho production.
 
 ![Bảng điều khiển server](docs/images/server.png)
@@ -51,12 +51,13 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS.
 - **Database:** PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ với một cú bấm (chỉ cần đặt tên: mật khẩu tự sinh, dữ liệu trên volume, có healthcheck), kèm URL kết nối để copy.
 - **Template EasyPanel:** hơn 800 template của easypanel.io, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải từ repo của họ khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
+- **Build:** app từ repo Git (https, hoặc ssh với deploy key sinh sẵn; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo hoặc Nixpacks, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI hoặc webhook của Git host.
 - **Bí mật:** biến môi trường (sửa như file `.env`) và tài khoản registry riêng được mã hoá bằng app key; chỉ người có quyền `services.secrets` mới xem được giá trị, mỗi lần xem đều ghi audit. Rollback trả lại đúng biến môi trường của lần deploy đó.
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- Build từ Git và GitHub (Dockerfile, Nixpacks), backup database và volume, thông báo, Compose, giám sát từng service.
-- **Phase 3:** build từ Git, database kèm backup, Compose, template, thông báo, nhiều node, xác thực 2 lớp, API và CLI.
+- Backup database và volume, thông báo, Compose, giám sát từng service.
+- **Phase 3:** database kèm backup, Compose, template, thông báo, nhiều node, xác thực 2 lớp, API và CLI.
 
 | Container | Log trực tiếp | Terminal |
 |---|---|---|

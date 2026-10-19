@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
 use rdockpanel::services::docker_service::{
-    ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
+    BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
     DockerResult, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream, NetworkItem,
     NetworkRequest, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec, ServiceUpdateStatus,
     ServiceUpdateStatusStateEnum, SwarmRole, SwarmService, SwarmTask, TaskState, TermSize,
@@ -27,6 +27,8 @@ pub struct FakeDocker {
     pub images: Arc<Mutex<Vec<ImageItem>>>,
     /// Swarm services by name.
     pub services: Arc<Mutex<HashMap<String, SwarmService>>>,
+    /// The last Dockerfile built.
+    pub built: Arc<Mutex<Option<String>>>,
     /// Swarm configs: name → (id, content, labels).
     pub configs: Arc<Mutex<HashMap<String, FakeConfig>>>,
     /// The state every task reports (default: running).
@@ -375,6 +377,45 @@ impl DockerApi for FakeDocker {
         }
         Ok(vec![])
     }
+    /// Reads the context (a tar) for its Dockerfile, then "builds" it.
+    fn build_image(
+        &self,
+        context: Vec<u8>,
+        dockerfile: &str,
+        tag: &str,
+    ) -> BoxStream<'static, DockerResult<BuildLine>> {
+        let mut archive = tar::Archive::new(context.as_slice());
+        let mut found = None;
+        for entry in archive.entries().into_iter().flatten().flatten() {
+            if entry
+                .path()
+                .ok()
+                .is_some_and(|p| p.to_string_lossy() == dockerfile)
+            {
+                let mut text = String::new();
+                let mut entry = entry;
+                let _ = std::io::Read::read_to_string(&mut entry, &mut text);
+                found = Some(text);
+            }
+        }
+        let Some(text) = found else {
+            return stream::iter([Err(DockerError::Other(format!(
+                "no {dockerfile} in the context"
+            )))])
+            .boxed();
+        };
+        self.record(format!("build {tag} from {dockerfile}"));
+        *self.built.lock().unwrap() = Some(text.clone());
+        let id = format!("sha256:built{}", text.len());
+        stream::iter([
+            Ok(BuildLine::Log(format!(
+                "Step 1/1 : {}",
+                text.lines().next().unwrap_or_default()
+            ))),
+            Ok(BuildLine::Image(id)),
+        ])
+        .boxed()
+    }
     async fn create_config(
         &self,
         name: &str,
@@ -475,7 +516,7 @@ impl DockerApi for FakeDocker {
                 desired_state: Some(TaskState::RUNNING),
                 status: Some(rdockpanel::services::docker_service::TaskStatus {
                     state: Some(state),
-                    timestamp: now.clone(),
+                    timestamp: now,
                     err: (state == TaskState::FAILED).then(|| "exit code 1".to_owned()),
                     ..Default::default()
                 }),

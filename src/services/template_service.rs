@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::services::creation_service::{
-    DatabaseOptions, NewDomain, NewMount, NewPort, NewService,
+    DatabaseOptions, NewBuild, NewDomain, NewMount, NewPort, NewService,
 };
 use crate::services::database_service::Engine;
 use crate::services::placeholders::{self, Vars};
@@ -256,6 +256,69 @@ fn number(v: &Value, key: &str) -> Option<i64> {
     v.get(key)?.as_i64()
 }
 
+/// An EasyPanel source and build as a panel build.
+fn template_build(
+    name: &str,
+    kind: &str,
+    source: &Value,
+    build: Option<&Value>,
+) -> Result<NewBuild, String> {
+    let builder = match build.and_then(|b| text(b, "type")).as_deref() {
+        None | Some("dockerfile") => "dockerfile",
+        Some("nixpacks") => "nixpacks",
+        Some(other) => {
+            return Err(format!(
+                "{name}: builds with {other}, not supported (Dockerfile and Nixpacks are)"
+            ));
+        }
+    };
+    let dockerfile_path = build.and_then(|b| text(b, "file"));
+    let path = text(source, "path").filter(|p| !p.is_empty() && p != "/");
+    Ok(match kind {
+        "github"
+            if [text(source, "owner"), text(source, "repo")]
+                .iter()
+                .any(|p| p.as_deref().unwrap_or_default().is_empty()) =>
+        {
+            return Err(format!(
+                "{name}: its GitHub source has no owner or repository"
+            ));
+        }
+        "github" => NewBuild {
+            source: "git".to_owned(),
+            git_url: Some(format!(
+                "https://github.com/{}/{}.git",
+                text(source, "owner").unwrap_or_default(),
+                text(source, "repo").unwrap_or_default()
+            )),
+            git_branch: text(source, "ref"),
+            git_path: path,
+            builder: builder.to_owned(),
+            dockerfile_path,
+            dockerfile: None,
+        },
+        "git" => NewBuild {
+            source: "git".to_owned(),
+            git_url: text(source, "repo"),
+            git_branch: text(source, "ref"),
+            git_path: path,
+            builder: builder.to_owned(),
+            dockerfile_path,
+            dockerfile: None,
+        },
+        "dockerfile" => NewBuild {
+            source: "dockerfile".to_owned(),
+            git_url: None,
+            git_branch: None,
+            git_path: None,
+            builder: "dockerfile".to_owned(),
+            dockerfile_path: None,
+            dockerfile: text(source, "dockerfile"),
+        },
+        other => return Err(format!("{name}: its source {other} is not supported")),
+    })
+}
+
 /// The services of a generator's `output` for `project` (`host`: the
 /// generated domains' parent, `[panel] service_domain`).
 pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, String> {
@@ -292,13 +355,16 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
             ));
         }
         let source = data.get("source").cloned().unwrap_or(json!({}));
-        if text(&source, "type").as_deref() != Some("image") {
-            return Err(format!(
-                "{name}: this template builds from source ({}), not supported yet",
-                text(&source, "type").unwrap_or_default()
-            ));
-        }
+        let source_type = text(&source, "type").unwrap_or_default();
         let mut new = NewService::app(name.clone(), text(&source, "image").unwrap_or_default());
+        if source_type != "image" {
+            new.build = Some(template_build(
+                &name,
+                &source_type,
+                &source,
+                data.get("build"),
+            )?);
+        }
         if text(&source, "username").is_some() {
             warn(
                 &mut plan,
@@ -383,7 +449,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 protocol: text(port, "protocol").unwrap_or_else(|| "tcp".to_owned()),
             });
         }
-        for unsupported in ["redirects", "resources", "maintenance", "scripts", "build"] {
+        for unsupported in ["redirects", "resources", "maintenance", "scripts"] {
             if data.get(unsupported).is_some_and(|v| !v.is_null()) {
                 warn(&mut plan, &format!("{unsupported} left out"));
             }
@@ -473,11 +539,22 @@ mod tests {
 
     #[test]
     fn what_cannot_be_done_is_said() {
-        let git = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "github"}}}]});
+        let git = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "github", "owner": "org", "repo": "app", "ref": "main", "path": "/web"}, "build": {"type": "nixpacks"}}}]});
+        let built = plan(&git, "p", None).unwrap();
+        let build = built.services[0].build.as_ref().unwrap();
+        assert_eq!(
+            build.git_url.as_deref(),
+            Some("https://github.com/org/app.git")
+        );
+        assert_eq!(
+            (build.builder.as_str(), build.git_path.as_deref()),
+            ("nixpacks", Some("/web"))
+        );
+        let packs = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "git", "repo": "https://x/y.git"}, "build": {"type": "heroku-buildpacks"}}}]});
         assert!(
-            plan(&git, "p", None)
+            plan(&packs, "p", None)
                 .unwrap_err()
-                .contains("builds from source")
+                .contains("heroku-buildpacks")
         );
         let compose = json!({"services": [{"type": "compose", "data": {"serviceName": "x"}}]});
         assert!(

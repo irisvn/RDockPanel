@@ -22,6 +22,28 @@ pub struct Model {
     /// `app`, or a database: `postgres`, `mysql`, `mariadb`, `mongo`, `redis`.
     pub kind: String,
     pub image: String,
+    /// Where the image comes from: `image`, `git` (built), `dockerfile`
+    /// (written here, built).
+    pub source: String,
+    pub git_url: Option<String>,
+    /// The branch, tag or commit built (`main` by default).
+    pub git_branch: Option<String>,
+    /// The build context in the repository (`/` by default).
+    pub git_path: Option<String>,
+    /// `dockerfile` (the repository's) or `nixpacks`.
+    pub builder: String,
+    /// The Dockerfile's path in the context (`Dockerfile` by default).
+    pub dockerfile_path: Option<String>,
+    /// A Dockerfile written in the panel (`source = dockerfile`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub dockerfile: Option<String>,
+    /// The SSH deploy key's private half, sealed (context `services.deploy_key`).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub deploy_key: Option<Encrypted<String>>,
+    /// Its public half, to add to the repository.
+    pub deploy_key_public: Option<String>,
+    /// SHA-256 of the deployment trigger's token (`/api/deploy/…`).
+    pub trigger_hash: Option<String>,
     pub command: Option<String>,
     pub replicas: i32,
     pub cpu_limit_millis: Option<i32>,
@@ -62,6 +84,11 @@ impl ActiveModelBehavior for ActiveModel {}
 /// Where `env` is sealed.
 pub fn env_context() -> Context {
     Context::column("services", "env")
+}
+
+/// Where `deploy_key` is sealed.
+pub fn deploy_key_context() -> Context {
+    Context::column("services", "deploy_key")
 }
 
 /// Where `registry_password` is sealed.

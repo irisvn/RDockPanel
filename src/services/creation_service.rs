@@ -15,6 +15,7 @@ use sea_orm::{
 };
 
 use crate::models::{project, service, service_domain, service_mount, service_port};
+use crate::services::build_service::{inside, valid_git_url, valid_ref};
 use crate::services::database_service::{Credentials, Engine, random_password};
 use crate::services::deploy_rules_service::{
     config, valid_container_path, valid_hostname, valid_image_reference, valid_name, valid_port,
@@ -52,6 +53,20 @@ pub struct NewPort {
     pub protocol: String,
 }
 
+/// How a new app's image is built (instead of pulled).
+#[derive(Debug, Clone)]
+pub struct NewBuild {
+    /// `git` or `dockerfile`.
+    pub source: String,
+    pub git_url: Option<String>,
+    pub git_branch: Option<String>,
+    pub git_path: Option<String>,
+    /// `dockerfile` or `nixpacks`.
+    pub builder: String,
+    pub dockerfile_path: Option<String>,
+    pub dockerfile: Option<String>,
+}
+
 /// A service to create.
 #[derive(Debug, Clone)]
 pub struct NewService {
@@ -68,6 +83,8 @@ pub struct NewService {
     pub mounts: Vec<NewMount>,
     pub ports: Vec<NewPort>,
     pub database: DatabaseOptions,
+    /// An app built by the panel (its `image` then empty).
+    pub build: Option<NewBuild>,
 }
 
 impl NewService {
@@ -85,6 +102,7 @@ impl NewService {
             mounts: vec![],
             ports: vec![],
             database: DatabaseOptions::default(),
+            build: None,
         }
     }
 
@@ -186,8 +204,49 @@ pub async fn create(
         }
         None => new.image.clone().unwrap_or_default().trim().to_owned(),
     };
-    if !valid_image_reference(&image) {
-        errors.add("image", "is not an image reference (e.g. nginx:1.27)");
+    match &new.build {
+        None if !valid_image_reference(&image) => {
+            errors.add("image", "is not an image reference (e.g. nginx:1.27)");
+        }
+        Some(_) if engine.is_some() => {
+            errors.add("source", "a database runs its engine's image");
+        }
+        Some(build) => match build.source.as_str() {
+            "git" => {
+                if !build.git_url.as_deref().is_some_and(valid_git_url) {
+                    errors.add("git_url", "must be an https or ssh repository URL");
+                }
+                if build
+                    .git_branch
+                    .as_deref()
+                    .is_some_and(|b| !b.is_empty() && !valid_ref(b))
+                {
+                    errors.add("git_branch", "is not a branch, tag or commit");
+                }
+                for path in [&build.git_path, &build.dockerfile_path]
+                    .into_iter()
+                    .flatten()
+                {
+                    if inside(path).is_none() {
+                        errors.add("git_path", "must stay inside the repository");
+                    }
+                }
+                if !matches!(build.builder.as_str(), "dockerfile" | "nixpacks") {
+                    errors.add("builder", "must be dockerfile or nixpacks");
+                }
+            }
+            "dockerfile" => {
+                if !build
+                    .dockerfile
+                    .as_deref()
+                    .is_some_and(|d| !d.trim().is_empty() && d.len() <= 65_535)
+                {
+                    errors.add("dockerfile", "is required (at most 64 KB)");
+                }
+            }
+            _ => errors.add("source", "must be image, git or dockerfile"),
+        },
+        None => {}
     }
     if let Some(command) = &command
         && command_args(command).is_none()
@@ -258,7 +317,24 @@ pub async fn create(
         project_id: Set(project.id),
         name: Set(new.name.clone()),
         kind: Set(new.kind.clone()),
-        image: Set(image),
+        image: Set(if new.build.is_some() {
+            String::new()
+        } else {
+            image
+        }),
+        source: Set(new
+            .build
+            .as_ref()
+            .map_or_else(|| "image".to_owned(), |b| b.source.clone())),
+        git_url: Set(new.build.as_ref().and_then(|b| b.git_url.clone())),
+        git_branch: Set(new.build.as_ref().and_then(|b| b.git_branch.clone())),
+        git_path: Set(new.build.as_ref().and_then(|b| b.git_path.clone())),
+        builder: Set(new
+            .build
+            .as_ref()
+            .map_or_else(|| "dockerfile".to_owned(), |b| b.builder.clone())),
+        dockerfile_path: Set(new.build.as_ref().and_then(|b| b.dockerfile_path.clone())),
+        dockerfile: Set(new.build.as_ref().and_then(|b| b.dockerfile.clone())),
         command: Set(command),
         replicas: Set(replicas),
         zero_downtime: Set(new.zero_downtime && engine.is_none()),

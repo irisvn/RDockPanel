@@ -13,6 +13,7 @@ use crate::admin::{int, is_set, text};
 use crate::jobs::publish_routes::PublishRoutes;
 use crate::jobs::run_deployment::RunDeployment;
 use crate::models::service::{self, NEW};
+use crate::services::build_service::{inside, valid_git_url, valid_ref};
 use crate::services::deploy_rules_service::{valid_image_reference, valid_name};
 use crate::services::deploy_service::{command_args, valid_env_name};
 use crate::services::deployment_service::{self, Trigger};
@@ -54,10 +55,17 @@ impl Resource for ServiceResource {
                 .searchable()
                 .sortable()
                 .max_length(40),
+            // An image's; empty when the panel builds it (`source`).
             Field::column(service::Column::Image)
-                .required()
                 .searchable()
                 .max_length(255),
+            Field::column(service::Column::Source),
+            Field::column(service::Column::GitUrl).max_length(512),
+            Field::column(service::Column::GitBranch).max_length(255),
+            Field::column(service::Column::GitPath).max_length(255),
+            Field::column(service::Column::Builder),
+            Field::column(service::Column::DockerfilePath).max_length(255),
+            Field::column(service::Column::Dockerfile).max_length(65_535),
             Field::column(service::Column::Command).max_length(1000),
             Field::column(service::Column::Replicas).required(),
             Field::column(service::Column::CpuLimitMillis),
@@ -188,8 +196,12 @@ impl Resource for ServiceResource {
         _txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        let data = normalize(data);
+        let mut data = normalize(data);
         check(ctx, &data, None)?;
+        // Built by the panel: no image to name (the column holds one).
+        if !data.contains_key("image") {
+            data.insert("image".to_owned(), serde_json::Value::String(String::new()));
+        }
         Ok(data)
     }
 
@@ -249,10 +261,61 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
     {
         errors.add("command", ctx.t("has an unclosed quote"));
     }
-    if let Some(image) = text(data, "image")
-        && !valid_image_reference(image)
+    // Where the image comes from, as it will be after this write.
+    let after = |field: &str, old: Option<&str>| -> Option<String> {
+        if data.contains_key(field) {
+            text(data, field).map(str::to_owned)
+        } else {
+            old.map(str::to_owned)
+        }
+    };
+    let source =
+        after("source", record.map(|r| r.source.as_str())).unwrap_or_else(|| "image".to_owned());
+    match source.as_str() {
+        "image" => {
+            if !after("image", record.map(|r| r.image.as_str()))
+                .is_some_and(|i| valid_image_reference(i.trim()))
+            {
+                errors.add("image", ctx.t("is not an image reference"));
+            }
+        }
+        "git" => {
+            if !after("git_url", record.and_then(|r| r.git_url.as_deref()))
+                .is_some_and(|u| valid_git_url(&u))
+            {
+                errors.add("git_url", ctx.t("must be an https or ssh repository URL"));
+            }
+            if after("git_branch", record.and_then(|r| r.git_branch.as_deref()))
+                .is_some_and(|b| !b.trim().is_empty() && !valid_ref(b.trim()))
+            {
+                errors.add("git_branch", ctx.t("is not a branch, tag or commit"));
+            }
+            for field in ["git_path", "dockerfile_path"] {
+                if text(data, field).is_some_and(|p| inside(p).is_none()) {
+                    errors.add(field, ctx.t("must stay inside the repository"));
+                }
+            }
+        }
+        "dockerfile" => {
+            if !after("dockerfile", record.and_then(|r| r.dockerfile.as_deref()))
+                .is_some_and(|d| !d.trim().is_empty())
+            {
+                errors.add("dockerfile", ctx.t("is required"));
+            }
+        }
+        _ => errors.add("source", ctx.t("must be image, git or dockerfile")),
+    }
+    // A database runs its engine's image (its volume and check are the engine's).
+    if record.is_some_and(|r| r.kind != "app") && source != "image" {
+        errors.add("source", ctx.t("a database runs its engine's image"));
+    }
+    if text(data, "dockerfile").is_some_and(|d| d.len() > 65_535) {
+        errors.add("dockerfile", ctx.t("is at most 64 KB"));
+    }
+    if let Some(builder) = text(data, "builder")
+        && !matches!(builder, "dockerfile" | "nixpacks")
     {
-        errors.add("image", ctx.t("is not an image reference"));
+        errors.add("builder", ctx.t("must be dockerfile or nixpacks"));
     }
     let range =
         |field: &str, bounds: std::ops::RangeInclusive<i64>, errors: &mut ValidationErrors| {

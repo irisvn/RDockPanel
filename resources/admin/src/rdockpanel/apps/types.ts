@@ -49,6 +49,15 @@ export type ServiceDetail = {
     healthcheck_interval_s: number | null;
     healthcheck_retries: number | null;
     registry_username: string | null;
+    source: "image" | "git" | "dockerfile";
+    git_url: string | null;
+    git_branch: string | null;
+    git_path: string | null;
+    builder: "dockerfile" | "nixpacks";
+    dockerfile_path: string | null;
+    dockerfile: string | null;
+    deploy_key_public: string | null;
+    trigger_set: boolean;
     registry_password_set: boolean;
     status: string;
     desired_state: string;

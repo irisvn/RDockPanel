@@ -68,6 +68,18 @@ template needing authentication or capabilities the panel cannot give yet is nev
 once. Their images and what they configure are as trusted as
 the template: read a template's page before using it.
 
+## Builds
+
+A build runs the repository's Dockerfile (or Nixpacks') on this node's Docker: it is as trusted as
+the repository. Clone URLs are https or ssh only (no local paths, `file://` or `ext::`), branches
+and paths are checked (no options, nothing outside the repository, links resolved: a link in the
+repository cannot point the build elsewhere), Git never prompts, and the deploy key is written `0600`
+beside the checkout (never in a build context), in a temporary directory removed after the build.
+The repository's `.dockerignore` applies (a tracked `.env` it lists stays out of the image). Each clone and
+Nixpacks run is limited to 10 minutes, the context to 1 GB. A trigger URL's token is in its query (the
+request log records paths only) and stored as its SHA-256 only; anyone with the URL can deploy the service (not change it): make a new one when it
+leaks.
+
 ## The terminal
 
 - Needs `docker.exec` (and `system.manage` for the panel's own containers).

@@ -115,6 +115,16 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("deployments.view"),
                     apps::deployment,
                 )
+                .post(
+                    "/services/{id}/deploy-key",
+                    AdminAccess::can("services.update"),
+                    apps::deploy_key,
+                )
+                .post(
+                    "/services/{id}/trigger",
+                    AdminAccess::can("services.deploy"),
+                    apps::trigger,
+                )
                 .get(
                     "/services/{id}/credentials",
                     AdminAccess::can(apps::SECRETS_PERMISSION),

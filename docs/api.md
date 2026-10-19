@@ -44,6 +44,8 @@ their actions), so the resources' policies, validation and audit apply.
 | GET | `/services/{id}` | services.view | a service's page: configuration (names of its environment variables, never values), domains, ports, mounts, pending changes, recent deployments (with deployments.view) |
 | GET | `/deployments/{id}` | deployments.view | one deployment with its log |
 | POST | `/projects/{id}/services` | services.create | `{"name","kind","image"?,"database"?:{database,user,password,root_password}}`: an app (`kind` `app`, `image` required) or a database (`postgres`, `mysql`, `mariadb`, `mongo`, `redis`: credentials generated when left out); 422 on bad names, images, taken names; audited (`services.create`) |
+| POST | `/services/{id}/deploy-key` | services.update | a new SSH deploy key (ed25519): `{"public_key"}`, the private half sealed; audited |
+| POST | `/services/{id}/trigger` | services.deploy | a new deployment trigger URL, shown once: `{"url"}`; the old one stops working; audited |
 | GET | `/services/{id}/credentials` | services.secrets | a database's passwords and internal URL; audited first |
 | GET | `/services/{id}/env` | services.secrets | `{"text","revision"}`: the environment as `.env` text, in clear; audited first (`services.env.read`, names only: no audit, no values) |
 | PUT | `/services/{id}/env` | services.update | `{"text","revision"?}` replaces the environment (sealed); with the revision read, 409 `env_stale` when it changed meanwhile; 422 names the bad line; audited (`services.env.update`, names only) |
@@ -76,6 +78,12 @@ Deploy, Start, Stop, Restart, Destroy, Republish routes (`republish`) and Rollba
 actions (`POST /admin/api/resources/services/actions/{name}`, `…/deployments/actions/rollback`). The actions
 that run a deployment (all but Republish) answer 409 `deployment_in_progress` while another one of the
 service is under way.
+
+## Deployment trigger (public)
+
+`POST /api/v1/deploy/{id}?token={token}` (no session, no CSRF: the token is the secret) queues a Deploy of
+the service: 202 `{"deployment"}`; 404 for an unknown service or a wrong token; 409 while another
+deployment of the service is under way. Audited as `services.deploy.trigger` (system actor).
 
 ## Server (`/server`)
 
