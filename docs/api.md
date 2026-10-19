@@ -111,6 +111,10 @@ Resolvers are written through the `cert_resolvers` resource (their token sealed,
 |---|---|---|---|
 | GET | `/traefik/resolvers` | system.manage | the resolvers (`has_token`, `in_use`), the DNS providers, the default resolver, and whether Traefik runs them (`applied`: `null` without a Traefik service) |
 | POST | `/traefik/apply` | system.manage | gives Traefik the resolvers (it restarts); logged as an action |
+| GET | `/certificates` | system.manage | the uploaded certificates (never their keys): names, expiry, `days_left`, `in_use` |
+| POST | `/certificates` | system.manage | `{"name"?, "chain", "key"}` (PEM): checked, the key sealed, served by Traefik at once: `{"id","self_signed"}` |
+| PUT | `/certificates/{id}` | system.manage | the same, replacing it (a renewed one: it must cover its domains' hosts; no deployment needed) |
+| DELETE | `/certificates/{id}` | system.manage | removes one no domain and no deployed route uses |
 
 ## Deployments (`/deploy`)
 

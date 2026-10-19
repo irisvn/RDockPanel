@@ -79,6 +79,18 @@ db_test!(
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/certificates")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/certificates")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::PUT, "/apps/certificates/1")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::DELETE, "/apps/certificates/1")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
                 Case::new(Method::POST, "/apps/traefik/apply")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN),

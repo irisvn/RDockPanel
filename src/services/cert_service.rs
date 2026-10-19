@@ -404,7 +404,14 @@ pub async fn check_domain_tls<C: sea_orm::ConnectionTrait>(
     host: &str,
     https: bool,
     resolver_id: Option<i64>,
+    certificate_id: Option<i64>,
 ) -> rustcms::AppResult<Option<(&'static str, &'static str)>> {
+    if resolver_id.is_some() && certificate_id.is_some() {
+        return Ok(Some((
+            "certificate_id",
+            "a domain uses a certificate resolver or an uploaded certificate, not both",
+        )));
+    }
     let resolver = match resolver_id {
         Some(id) => match cert_resolver::Entity::find_by_id(id).one(db).await? {
             Some(r) => Some(r),
@@ -412,10 +419,25 @@ pub async fn check_domain_tls<C: sea_orm::ConnectionTrait>(
         },
         None => None,
     };
+    let certificate = match certificate_id {
+        // Locked: not deleted nor replaced before this write commits.
+        Some(id) => match crate::services::certificate_service::locked(db, id).await? {
+            Some(c) => Some(c),
+            None => return Ok(Some(("certificate_id", "is not an uploaded certificate"))),
+        },
+        None => None,
+    };
     if !https {
         return Ok(None);
     }
-    if host.starts_with("*.") {
+    if let Some(c) = &certificate {
+        if !crate::services::certificate_service::covers(&c.name_list(), host) {
+            return Ok(Some((
+                "certificate_id",
+                "this certificate does not cover the host",
+            )));
+        }
+    } else if host.starts_with("*.") {
         let dns = match &resolver {
             Some(r) => r.kind == "dns",
             // The default: the installer's (HTTP) one, or none (development).
@@ -426,7 +448,7 @@ pub async fn check_domain_tls<C: sea_orm::ConnectionTrait>(
         if !dns {
             return Ok(Some((
                 "cert_resolver_id",
-                "a wildcard's certificate needs a DNS resolver: add one in Settings and choose it",
+                "a wildcard's certificate needs a DNS resolver or an uploaded certificate covering it",
             )));
         }
     }
@@ -440,11 +462,11 @@ pub async fn check_domain_tls<C: sea_orm::ConnectionTrait>(
         .all(db)
         .await?
         .iter()
-        .any(|d| d.cert_resolver_id != resolver_id)
+        .any(|d| d.cert_resolver_id != resolver_id || d.certificate_id != certificate_id)
     {
         return Ok(Some((
             "cert_resolver_id",
-            "this host's other domains use another certificate resolver (one per host)",
+            "this host's other domains use another certificate (one per host)",
         )));
     }
     Ok(None)

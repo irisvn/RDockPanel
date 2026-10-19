@@ -45,9 +45,13 @@ oxc = { version = "0.154", features = ["transformer", "codegen", "semantic"] }
 bcrypt = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 shell-words = "1.1"
+x509-parser = { version = "0.18.1", features = ["verify"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+rustls-pki-types = { version = "1.15.1", features = ["std"] }
 
 [dev-dependencies]
 insta = "1"
+rcgen = "0.14.10"
 rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.6.1" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 [workspace]

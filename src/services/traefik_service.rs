@@ -294,15 +294,12 @@ fn write_atomically(dir: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()
     written
 }
 
-/// The routes a service has now: those of the deployment that made it what
-/// it is (its configuration hash, kept when a later deployment failed), when
-/// that one runs it. `None` when it does not route (never deployed, stopped,
-/// destroyed, no domain).
-pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
+/// The configuration the service runs: its deployment with the deployed
+/// spec hash (the latest that succeeded). `None` when it never deployed.
+pub async fn deployed_snapshot<C: sea_orm::ConnectionTrait>(
     db: &C,
     row: &service::Model,
-    options: &DeployOptions,
-) -> AppResult<Option<TraefikFile>> {
+) -> AppResult<Option<Snapshot>> {
     let Some(hash) = row.deployed_spec_hash.as_deref() else {
         return Ok(None);
     };
@@ -316,8 +313,23 @@ pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
     else {
         return Ok(None);
     };
-    let mut snapshot: Snapshot =
-        serde_json::from_value(deployed.spec).map_err(AppError::internal)?;
+    serde_json::from_value(deployed.spec)
+        .map(Some)
+        .map_err(AppError::internal)
+}
+
+/// The routes a service has now: those of the deployment that made it what
+/// it is (its configuration hash, kept when a later deployment failed), when
+/// that one runs it. `None` when it does not route (never deployed, stopped,
+/// destroyed, no domain).
+pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    row: &service::Model,
+    options: &DeployOptions,
+) -> AppResult<Option<TraefikFile>> {
+    let Some(mut snapshot) = deployed_snapshot(db, row).await? else {
+        return Ok(None);
+    };
     // Its basic authentication's users, with their hashes now (never kept
     // in a deployment).
     if !snapshot.basic_auth.is_empty() {

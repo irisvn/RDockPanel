@@ -485,3 +485,211 @@ db_test!(
         assert!(yaml.contains("certResolver: cf"), "{yaml}");
     }
 );
+
+/// A certificate for `names` signed by a new authority: (chain, key).
+fn issued(names: &[&str]) -> (String, String) {
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
+    let ca_key = KeyPair::generate().unwrap();
+    let mut ca = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca_cert = ca.self_signed(&ca_key).unwrap();
+    let issuer = Issuer::new(ca, ca_key);
+    let key = KeyPair::generate().unwrap();
+    let params =
+        CertificateParams::new(names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>()).unwrap();
+    let cert = params.signed_by(&key, &issuer).unwrap();
+    (
+        format!("{}{}", cert.pem(), ca_cert.pem()),
+        key.serialize_pem(),
+    )
+}
+
+db_test!(
+    uploaded_certificates_are_checked_served_and_chosen,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let admin = admin(&app).await;
+        let url = app.admin_api("x/apps/certificates");
+        let (chain, key) = issued(&["shop.example.com", "*.shop.example.com"]);
+        let (_, other_key) = issued(&["shop.example.com"]);
+        // Another key: refused, on the key.
+        let refused = admin
+            .post_json(&url, &json!({"chain": chain, "key": other_key}))
+            .await;
+        refused.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(errors(&refused).contains("key"), "{}", errors(&refused));
+        let made = admin
+            .post_json(&url, &json!({"name": "shop", "chain": chain, "key": key}))
+            .await;
+        made.assert_status(StatusCode::OK);
+        let id = made.json()["id"].as_i64().unwrap();
+        // The same one again: refused.
+        admin
+            .post_json(&url, &json!({"chain": chain, "key": key}))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        // Listed without its key; written for Traefik, the key private.
+        let listed = admin.get(&url).await;
+        assert!(!listed.text().contains("PRIVATE KEY"), "{}", listed.text());
+        assert_eq!(
+            listed.json()["certificates"][0]["names"][1],
+            "*.shop.example.com"
+        );
+        let dir = support::traefik_dir(&app);
+        let store = std::fs::read_to_string(dir.join("rdp-certificates.yml")).unwrap();
+        assert!(
+            store.contains(&format!("/etc/traefik/dynamic/certs/{id}-")),
+            "{store}"
+        );
+        let key_file = std::fs::read_dir(dir.join("certs"))
+            .unwrap()
+            .flatten()
+            .find(|e| e.file_name().to_string_lossy().ends_with(".key"))
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                key_file.metadata().unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        // Chosen by a domain it covers: a wildcard too, with no DNS resolver.
+        let project = create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let service = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await;
+        let domains = records(&app, "service_domains");
+        let domain = |host: &str| json!({"service_id": service, "host": host, "path": "/", "port": 80, "https": true, "certificate_id": id.to_string()});
+        let uncovered = admin
+            .post_json(&domains, &domain("other.example.com"))
+            .await;
+        uncovered.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(
+            errors(&uncovered).contains("cover"),
+            "{}",
+            errors(&uncovered)
+        );
+        create(
+            &app,
+            &admin,
+            "service_domains",
+            domain("*.shop.example.com"),
+        )
+        .await;
+        create(&app, &admin, "service_domains", domain("shop.example.com")).await;
+        // Not with a resolver too.
+        let resolver = create(
+            &app,
+            &admin,
+            "cert_resolvers",
+            json!({"name": "le", "kind": "http", "email": "ops@example.com"}),
+        )
+        .await;
+        let both = json!({"service_id": service, "host": "a.shop.example.com", "path": "/", "port": 80, "https": true, "certificate_id": id.to_string(), "cert_resolver_id": resolver});
+        admin
+            .post_json(&domains, &both)
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Its routes: TLS with no resolver (Traefik picks it by name).
+        let service_id: i64 = service.parse().unwrap();
+        let row = {
+            use sea_orm::EntityTrait;
+            rdockpanel::models::service::Entity::find_by_id(service_id)
+                .one(app.state().db())
+                .await
+                .unwrap()
+                .unwrap()
+        };
+        let snapshot =
+            rdockpanel::services::deployment_service::snapshot_without_env(app.state().db(), &row)
+                .await
+                .unwrap();
+        let options = rdockpanel::services::deploy_service::DeployOptions {
+            cert_resolver: "letsencrypt".to_owned(),
+            ..Default::default()
+        };
+        let yaml = rdockpanel::services::deploy_service::routes(&snapshot, &options)
+            .unwrap()
+            .to_yaml();
+        assert!(!yaml.contains("certResolver"), "{yaml}");
+
+        // An HTTP-only domain with it: no part of what it must cover.
+        create(
+            &app,
+            &admin,
+            "service_domains",
+            json!({"service_id": service, "host": "plain.example.org", "path": "/", "port": 80, "https": false, "certificate_id": id.to_string()}),
+        )
+        .await;
+        // In use: not deleted; replaced only by one covering its domains.
+        admin
+            .send(Method::DELETE, &format!("{url}/{id}"), None)
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        let (narrow, narrow_key) = issued(&["shop.example.com"]);
+        admin
+            .send(
+                Method::PUT,
+                &format!("{url}/{id}"),
+                Some(&json!({"chain": narrow, "key": narrow_key})),
+            )
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        let (renewed, renewed_key) = issued(&["shop.example.com", "*.shop.example.com"]);
+        admin
+            .send(
+                Method::PUT,
+                &format!("{url}/{id}"),
+                Some(&json!({"chain": renewed, "key": renewed_key})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let renewed_store = std::fs::read_to_string(dir.join("rdp-certificates.yml")).unwrap();
+        assert_ne!(store, renewed_store);
+
+        // A deployment asked with it, the certificate gone since: it fails.
+        let spec = serde_json::to_value(&snapshot).unwrap();
+        assert!(
+            rdockpanel::services::certificate_service::check_snapshot(app.state().db(), &spec)
+                .await
+                .is_ok()
+        );
+        let mut gone = spec.clone();
+        for domain in gone["domains"].as_array_mut().unwrap() {
+            if domain.get("certificate").is_some() {
+                domain["certificate"] = json!("999999");
+            }
+        }
+        let why =
+            rdockpanel::services::certificate_service::check_snapshot(app.state().db(), &gone)
+                .await
+                .unwrap_err();
+        assert!(why.contains("deleted"), "{why}");
+
+        // Not for a user managing domains.
+        let operator = support::user_with(
+            &app,
+            "operator",
+            &["services.view_any", "service_domains.create"],
+        )
+        .await;
+        let operator = app.acting_as(&operator).await;
+        operator
+            .get(&url)
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        operator
+            .post_json(&domains, &domain("b.shop.example.com"))
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+);

@@ -88,6 +88,26 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get(
+                    "/certificates",
+                    AdminAccess::can("system.manage"),
+                    traefik::certificates,
+                )
+                .post(
+                    "/certificates",
+                    AdminAccess::can("system.manage"),
+                    traefik::upload_certificate,
+                )
+                .put(
+                    "/certificates/{id}",
+                    AdminAccess::can("system.manage"),
+                    traefik::replace_certificate,
+                )
+                .delete(
+                    "/certificates/{id}",
+                    AdminAccess::can("system.manage"),
+                    traefik::delete_certificate,
+                )
+                .get(
                     "/services/{id}",
                     AdminAccess::can("services.view"),
                     apps::service,

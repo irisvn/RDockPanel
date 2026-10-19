@@ -416,6 +416,16 @@ same resolver; each resolver keeps its own ACME storage (`/etc/traefik/acme/<nam
 resolver in use (by a domain, or a deployed route) cannot be deleted. The panel's own host
 (`APP_URL`) is never a service's domain, and its route outranks theirs.
 
+Uploaded certificates (`certificates`, `certificate_service.rs`) are read before they are kept: the
+key must be the certificate's, each certificate of the chain signed by the next, valid now, for
+servers, naming DNS names; the key is sealed. The panel writes them for Traefik under
+`<traefik_dir>/certs/` (files `0600`, directory `0700`, names of its own) and lists them in
+`rdp-certificates.yml` with Traefik's own paths (`[panel] traefik_mount`); Traefik serves the one
+covering a name by SNI, with no restart. A domain choosing one gets a router without a resolver; it
+must cover the host (a wildcard host only by a wildcard certificate). A renewed one replaces it in
+place (domains refer to its id: nothing to deploy). The panel rewrites the files at boot, and warns
+the notification channels 14, 7 and 1 days before one expires, and once expired (each once).
+
 ## The apps interface
 
 `Dashboard` (`/admin/p/dashboard`, React, RustCMS extension host v2) is the EasyPanel-like

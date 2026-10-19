@@ -20,6 +20,8 @@ pub struct Model {
     /// The certificate resolver HTTPS uses (`cert_resolvers`); none: the
     /// panel's default.
     pub cert_resolver_id: Option<i64>,
+    /// The uploaded certificate HTTPS uses (`certificates`; no resolver then).
+    pub certificate_id: Option<i64>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

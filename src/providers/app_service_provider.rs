@@ -50,6 +50,10 @@ impl ServiceProvider for AppServiceProvider {
             crate::models::service::Column::DeployKey,
             rustcms::crypto::Binding::Column,
         );
+        app.encrypted_column::<crate::models::certificate::Entity>(
+            crate::models::certificate::Column::Key,
+            rustcms::crypto::Binding::Column,
+        );
         app.encrypted_column::<crate::models::cert_resolver::Entity>(
             crate::models::cert_resolver::Column::Token,
             rustcms::crypto::Binding::Column,
@@ -168,6 +172,16 @@ impl ServiceProvider for AppServiceProvider {
                 Ok(())
             }),
         );
+        // Uploaded certificates expiring: said to the channels (each warning once).
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "certificate-expiry",
+                std::time::Duration::from_secs(6 * 60 * 60),
+            )
+            .run(|state| async move {
+                crate::services::certificate_service::check_expiry(&state).await
+            }),
+        );
         // A full disk, said to the channels that asked (each at most every 6 h).
         app.schedule(
             rustcms::schedule::Schedule::every("disk-check", std::time::Duration::from_secs(300))
@@ -211,6 +225,13 @@ impl ServiceProvider for AppServiceProvider {
             match crate::services::traefik_service::sync_all(state.db(), &traefik, &options).await {
                 Ok(n) => tracing::info!(n, dir = %traefik.dir.display(), "routes written"),
                 Err(err) => tracing::debug!(%err, "routes not written"),
+            }
+            // The uploaded certificates too.
+            if let Err(err) =
+                crate::services::certificate_service::sync(state.db(), state.keyring(), &traefik)
+                    .await
+            {
+                tracing::warn!(%err, "certificates not written");
             }
         }
         use crate::http::controllers::docker_controller::TERMINAL_SESSION;

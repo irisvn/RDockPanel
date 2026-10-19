@@ -517,6 +517,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
   const [error, setError] = useState<unknown>(null);
   const fields = error instanceof ResourceError ? error.fieldErrors : {};
   const resolverName = (id: number | null) => d.cert_resolvers.find((r) => r.id === id)?.name;
+  const certificateName = (id: number | null) => d.certificates.find((c) => c.id === id)?.name;
   return (
     <Section
       title={t("Domains")}
@@ -555,6 +556,7 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                 → {domain.compose_service ? `${domain.compose_service}:` : ":"}
                 {domain.port}
                 {domain.https && domain.cert_resolver_id !== null && ` · 🔒 ${resolverName(domain.cert_resolver_id) ?? t("own resolver")}`}
+                {domain.https && domain.certificate_id !== null && ` · 🔒 ${certificateName(domain.certificate_id) ?? t("uploaded certificate")}`}
               </span>
             </span>
             {d.can.domains.delete && (
@@ -593,7 +595,8 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                   https,
                   ...(isCompose ? { compose_service: container.trim() } : {}),
                   ...(middlewares.trim() ? { middlewares: middlewares.trim() } : {}),
-                  ...(https && resolver ? { cert_resolver_id: resolver } : {}),
+                  ...(https && resolver.startsWith("r:") ? { cert_resolver_id: resolver.slice(2) } : {}),
+                  ...(https && resolver.startsWith("c:") ? { certificate_id: resolver.slice(2) } : {}),
                 });
                 setAdding(false);
                 setHost("");
@@ -625,24 +628,29 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
             <label className="rdp2-row">
               <Switch checked={https} onCheckedChange={setHttps} /> {t("HTTPS")}
             </label>
-            {https && d.cert_resolvers.length > 0 && (
+            {https && (d.cert_resolvers.length > 0 || d.certificates.length > 0) && (
               <Field
                 label={t("Certificate")}
-                help={t("The certificate resolver (Settings → Certificates). A wildcard needs a DNS one.")}
-                error={fields.cert_resolver_id}
+                help={t("A resolver, or an uploaded certificate covering the host (Settings). A wildcard needs a DNS resolver or a wildcard certificate.")}
+                error={fields.cert_resolver_id ?? fields.certificate_id}
               >
                 <NativeSelect value={resolver} onChange={(e) => setResolver(e.target.value)}>
                   <option value="">{t("The panel's default")}</option>
                   {d.cert_resolvers.map((r) => (
-                    <option key={r.id} value={String(r.id)}>
+                    <option key={`r${r.id}`} value={`r:${r.id}`}>
                       {r.name} ({r.kind === "dns" ? "DNS" : "HTTP"})
+                    </option>
+                  ))}
+                  {d.certificates.map((c) => (
+                    <option key={`c${c.id}`} value={`c:${c.id}`}>
+                      {c.name} ({t("uploaded")}: {c.names.join(", ")})
                     </option>
                   ))}
                 </NativeSelect>
               </Field>
             )}
-            {fields.cert_resolver_id && d.cert_resolvers.length === 0 && (
-              <Alert variant="destructive">{fields.cert_resolver_id.join(" ")}</Alert>
+            {(fields.cert_resolver_id || fields.certificate_id) && d.cert_resolvers.length === 0 && d.certificates.length === 0 && (
+              <Alert variant="destructive">{(fields.cert_resolver_id ?? fields.certificate_id ?? []).join(" ")}</Alert>
             )}
             {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
             <div className="rdp2-row rdp2-end">

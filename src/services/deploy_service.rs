@@ -216,6 +216,10 @@ pub struct Domain {
     /// default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cert_resolver: Option<String>,
+    /// The uploaded certificate it serves (its id): Traefik picks it
+    /// by name, no resolver asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<String>,
 }
 
 impl Domain {
@@ -223,6 +227,9 @@ impl Domain {
     /// Traefik's default certificate); a wildcard's certificate asked for by
     /// name (its resolver needs a DNS challenge).
     fn tls(&self, options: &DeployOptions) -> Value {
+        if self.certificate.is_some() {
+            return json!({});
+        }
         let resolver = self
             .cert_resolver
             .as_deref()
@@ -308,6 +315,7 @@ impl Snapshot {
         ports: &[service_port::Model],
         mounts: &[service_mount::Model],
         resolvers: &std::collections::HashMap<i64, String>,
+        certificates: &std::collections::HashMap<i64, String>,
     ) -> Self {
         let healthcheck = service
             .healthcheck_cmd
@@ -342,6 +350,9 @@ impl Snapshot {
                     cert_resolver: d
                         .cert_resolver_id
                         .and_then(|id| resolvers.get(&id).cloned()),
+                    certificate: d
+                        .certificate_id
+                        .and_then(|id| certificates.get(&id).cloned()),
                 })
             })
             .collect();
@@ -1372,6 +1383,7 @@ mod tests {
                     compose_service: None,
                     middlewares: vec![],
                     cert_resolver: None,
+                    certificate: None,
                 },
                 Domain {
                     host: "shop.example.com".to_owned(),
@@ -1381,6 +1393,7 @@ mod tests {
                     compose_service: None,
                     middlewares: vec![],
                     cert_resolver: None,
+                    certificate: None,
                 },
                 Domain {
                     host: "shop.localhost".to_owned(),
@@ -1390,6 +1403,7 @@ mod tests {
                     compose_service: None,
                     middlewares: vec![],
                     cert_resolver: None,
+                    certificate: None,
                 },
             ],
             ports: vec![],

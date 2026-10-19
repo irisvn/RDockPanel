@@ -14,7 +14,7 @@ export type ServiceCard = {
 export type Project = { id: number; name: string; description: string | null; services: ServiceCard[] };
 export type Overview = { projects: Project[]; services_visible: boolean };
 
-export type Domain = { id: number; service_id: number; host: string; path: string; port: number; https: boolean; compose_service: string | null; middlewares: string | null; cert_resolver_id: number | null };
+export type Domain = { id: number; service_id: number; host: string; path: string; port: number; https: boolean; compose_service: string | null; middlewares: string | null; cert_resolver_id: number | null; certificate_id: number | null };
 export type Port = { id: number; published: number; target: number; protocol: string; mode: string };
 export type Mount = { id: number; kind: string; name: string | null; source: string | null; target: string; read_only: boolean };
 
@@ -81,6 +81,8 @@ export type ServiceDetail = {
   auto_domain: string | null;
   /** The certificate resolvers a domain may choose (the panel's administrators only; else none). */
   cert_resolvers: Array<{ id: number; name: string; kind: string }>;
+  /** The uploaded certificates a domain may choose (the panel's administrators only). */
+  certificates: Array<{ id: number; name: string; names: string[] }>;
   /** A database's connection facts (password and URL with services.secrets). */
   database: {
     engine: string;

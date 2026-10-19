@@ -209,10 +209,28 @@ pub async fn snapshot_without_env<C: ConnectionTrait>(
         } else {
             Default::default()
         };
-    Ok(
-        Snapshot::of(&project, service, &domains, &ports, &mounts, &resolvers)
-            .with_access(&redirects, &users),
+    // The certificates they chose (by id: a renewed one needs no deployment).
+    let certificates: std::collections::HashMap<i64, String> =
+        if domains.iter().any(|d| d.certificate_id.is_some()) {
+            crate::models::certificate::Entity::find()
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|c| (c.id, c.id.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+    Ok(Snapshot::of(
+        &project,
+        service,
+        &domains,
+        &ports,
+        &mounts,
+        &resolvers,
+        &certificates,
     )
+    .with_access(&redirects, &users))
 }
 
 /// Whether the configuration changed since the last successful deployment.
@@ -590,8 +608,12 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
             {
                 log.line(note).await;
             }
-            match secrets {
-                Ok(secrets) => {
+            // Its certificates still there (they may have gone since it was asked).
+            let certificates =
+                crate::services::certificate_service::check_snapshot(state.db(), &row.spec).await;
+            match (secrets, certificates) {
+                (_, Err(why)) => Err(Outcome::Failed(why)),
+                (Ok(secrets), Ok(())) => {
                     apply(
                         &docker,
                         traefik.as_deref(),
@@ -602,7 +624,7 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
                     )
                     .await
                 }
-                Err(outcome) => Err(outcome),
+                (Err(outcome), _) => Err(outcome),
             }
         }
         None => Err(Outcome::Failed("Docker is not available".into())),

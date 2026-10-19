@@ -312,6 +312,19 @@ pub async fn service(
         } else {
             vec![]
         },
+        // The uploaded certificates a domain may choose (the panel's administrators').
+        "certificates": if principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION) {
+            use sea_orm::QueryOrder;
+            crate::models::certificate::Entity::find()
+                .order_by_asc(crate::models::certificate::Column::Name)
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|c| json!({ "id": c.id, "name": c.name, "names": c.name_list() }))
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        },
         "can": {
             "update": principal.can("services.update"),
             "delete": principal.can("services.delete"),

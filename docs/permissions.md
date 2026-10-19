@@ -43,6 +43,8 @@ The resources use the panel's standard permissions, one set per resource
   only. Choosing a resolver on a domain, and changing or removing a domain that has one, need
   `system.manage` too (a resolver asks for a certificate for any name it is given). No domain may use
   the panel's own host;
+- uploaded certificates (Settings → Uploaded certificates: upload, replace, delete): `system.manage`
+  only; choosing one on a domain too;
 - adding Linux capabilities, sysctls or supplemental groups to a service needs `system.manage`
   (dropping capabilities does not). Such a **privileged** service (like a Compose service) is then
   the panel's administrators' only: editing it and every record of it (domains, ports, mounts,

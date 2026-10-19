@@ -45,6 +45,13 @@ pub enum Event {
         used: u64,
         total: u64,
     },
+    /// An uploaded certificate expires soon (or has): every channel hears it
+    /// (Traefik would serve it expired).
+    Certificate {
+        name: String,
+        names: String,
+        days_left: i64,
+    },
     /// The "Send test notification" button.
     Test,
 }
@@ -55,6 +62,7 @@ impl Event {
             Self::Deploy { .. } => "deploy",
             Self::Backup { .. } => "backup",
             Self::Disk { .. } => "disk",
+            Self::Certificate { .. } => "certificate",
             Self::Test => "test",
         }
     }
@@ -66,7 +74,7 @@ impl Event {
             Self::Disk { percent, .. } => {
                 channel.on_disk && i32::from(*percent) >= channel.disk_threshold
             }
-            Self::Test => true,
+            Self::Certificate { .. } | Self::Test => true,
         }
     }
 
@@ -103,6 +111,16 @@ impl Event {
                 format!("{kind} of {project}/{service} ({database}) {what}")
             }
             Self::Disk { percent, .. } => format!("the server's disk is {percent}% full"),
+            Self::Certificate {
+                name, days_left, ..
+            } if *days_left <= 0 => {
+                format!("the certificate {name} has expired")
+            }
+            Self::Certificate {
+                name, days_left, ..
+            } => {
+                format!("the certificate {name} expires in {days_left} days")
+            }
             Self::Test => "a test notification from RDockPanel".to_owned(),
         }
     }
@@ -120,6 +138,9 @@ impl Event {
                 used / 1_000_000_000,
                 total / 1_000_000_000
             ),
+            Self::Certificate { names, .. } => {
+                format!("{names}: upload a renewed one (Settings → Certificates)")
+            }
             Self::Test => "This channel works.".to_owned(),
         }
     }
@@ -127,7 +148,7 @@ impl Event {
     fn ok(&self) -> bool {
         match self {
             Self::Deploy { status, .. } | Self::Backup { status, .. } => status == "succeeded",
-            Self::Disk { .. } => false,
+            Self::Disk { .. } | Self::Certificate { .. } => false,
             Self::Test => true,
         }
     }
@@ -159,6 +180,11 @@ impl Event {
                 used,
                 total,
             } => json!({"percent": percent, "used": used, "total": total}),
+            Self::Certificate {
+                name,
+                names,
+                days_left,
+            } => json!({"name": name, "names": names, "days_left": days_left}),
             Self::Test => json!({}),
         }
     }

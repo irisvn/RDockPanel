@@ -26,6 +26,9 @@ pub struct PanelConfig {
     pub https_port: u16,
     /// Traefik's file provider directory: the panel writes the routes there.
     pub traefik_dir: PathBuf,
+    /// The same directory as Traefik sees it (uploaded certificates' files
+    /// are named so in its configuration).
+    pub traefik_mount: String,
     /// Traefik's Swarm service, attached to each project's network (empty:
     /// Traefik is not a Swarm service the panel manages).
     pub traefik_service: String,
@@ -58,6 +61,7 @@ impl Default for PanelConfig {
             cert_resolver: String::new(),
             https_port: 443,
             traefik_dir: PathBuf::from("storage/traefik/dynamic"),
+            traefik_mount: "/etc/traefik/dynamic".to_owned(),
             traefik_service: "rdp-traefik".to_owned(),
             service_domain: String::new(),
             public_ip: String::new(),

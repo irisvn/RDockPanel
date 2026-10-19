@@ -55,7 +55,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
   - rolling update: task mới chạy trước khi bật zero downtime, có healthcheck và không publish port kiểu host (nếu không thì task cũ dừng trước); Swarm tự rollback khi update lỗi;
   - mỗi lần deploy lưu lại cấu hình để xem lịch sử và rollback;
   - trang service báo khi có thay đổi chưa deploy.
-- **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS; domain wildcard (`*.example.com`, chỉ quản trị panel) và middleware Traefik tuỳ chỉnh; chuyển hướng (biểu thức chính quy), xác thực cơ bản (basic auth) và trang bảo trì. Mỗi domain chọn được certificate resolver riêng (Settings → Chứng chỉ: Let's Encrypt qua HTTP, hoặc qua DNS bằng token Cloudflare, DigitalOcean, Hetzner, Vultr, Linode), áp dụng vào Traefik ngay trong panel, không cần SSH.
+- **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS; domain wildcard (`*.example.com`, chỉ quản trị panel) và middleware Traefik tuỳ chỉnh; chuyển hướng (biểu thức chính quy), xác thực cơ bản (basic auth) và trang bảo trì. Mỗi domain chọn được certificate resolver riêng (Settings → Chứng chỉ: Let's Encrypt qua HTTP, hoặc qua DNS bằng token Cloudflare, DigitalOcean, Hetzner, Vultr, Linode), áp dụng vào Traefik ngay trong panel, không cần SSH; hoặc tải chứng chỉ của riêng bạn lên (được kiểm tra, khoá được mã hoá, báo trước khi hết hạn).
 - **Database:** PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ với một cú bấm (chỉ cần đặt tên: mật khẩu tự sinh, dữ liệu trên volume, có healthcheck), kèm URL kết nối để copy.
 - **Template EasyPanel:** hơn 800 template của easypanel.io, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải từ repo của họ khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
 - **Build:** app từ repo Git (https, hoặc ssh với deploy key sinh sẵn; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo hoặc Nixpacks, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI, và webhook GitHub có chữ ký để tự deploy mỗi lần push.
@@ -67,7 +67,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- Nguồn Upload, build bằng Railpack và Buildpacks; cert tải lên và trang Traefik; đổi domain panel và email Let's Encrypt trong Settings; web client cho database.
+- Nguồn Upload, build bằng Railpack và Buildpacks; trang Traefik (restart, log, middleware tuỳ chỉnh); đổi domain panel và email Let's Encrypt trong Settings; web client cho database.
 - **Sau đó:** nhiều node, Cloudflare Tunnel, xác thực 2 lớp, API và CLI.
 
 | Trang service | Template | Tạo service |

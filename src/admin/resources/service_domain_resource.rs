@@ -54,6 +54,7 @@ impl Resource for ServiceDomainResource {
             Field::column(service_domain::Column::ComposeService).max_length(64),
             Field::column(service_domain::Column::Middlewares).max_length(1000),
             Field::column(service_domain::Column::CertResolverId),
+            Field::column(service_domain::Column::CertificateId),
         ]
     }
 
@@ -134,10 +135,19 @@ async fn check_certificate(
     } else {
         record.and_then(|r| r.cert_resolver_id)
     };
-    if (resolver.is_some() || record.is_some_and(|r| r.cert_resolver_id.is_some())) && !admin {
+    let certificate = if data.contains_key("certificate_id") {
+        int(data, "certificate_id")
+    } else {
+        record.and_then(|r| r.certificate_id)
+    };
+    // A certificate of the domain's own: chosen, or kept, by administrators.
+    let chosen = resolver.is_some()
+        || certificate.is_some()
+        || record.is_some_and(|r| r.cert_resolver_id.is_some() || r.certificate_id.is_some());
+    if chosen && !admin {
         return Err(ValidationErrors::field(
             "cert_resolver_id",
-            ctx.t("choosing a certificate resolver needs system.manage"),
+            ctx.t("choosing a certificate needs system.manage"),
         )
         .into());
     }
@@ -157,6 +167,7 @@ async fn check_certificate(
         &host,
         https,
         resolver,
+        certificate,
     )
     .await?
     {
@@ -271,7 +282,8 @@ impl Policy for DomainPolicy {
             || !(record
                 .and_then(|r| text(r, "host"))
                 .is_some_and(|h| h.starts_with("*."))
-                || record.is_some_and(|r| is_set(r, "cert_resolver_id")))
+                || record
+                    .is_some_and(|r| is_set(r, "cert_resolver_id") || is_set(r, "certificate_id")))
             || ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
     }
 

@@ -9,6 +9,7 @@ import { ErrorNote, Field, Section } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 import { Notifications } from "./Notifications";
 import { Certificates } from "./Certificates";
+import { UploadedCertificates } from "./Uploaded";
 
 type Provider = {
   id: number;
@@ -235,6 +236,7 @@ export function Settings(props: PageProps<unknown>) {
       {props.can("storage_providers.view_any") && <StorageProviders {...props} />}
       {props.can("notification_channels.view_any") && <Notifications {...props} />}
       {props.can("system.manage") && <Certificates {...props} />}
+      {props.can("system.manage") && <UploadedCertificates {...props} />}
     </div>
   );
 }

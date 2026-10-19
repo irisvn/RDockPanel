@@ -61,7 +61,8 @@ feature is free: no project limits, no paid tiers.
   redirects its HTTP to HTTPS; wildcard domains (`*.example.com`, for administrators) and custom
   Traefik middlewares; redirects (regular expressions), HTTP basic authentication, and a maintenance page.
   A certificate resolver per domain (Settings → Certificates: Let's Encrypt over HTTP or over DNS with
-  a Cloudflare, DigitalOcean, Hetzner, Vultr or Linode token), applied to Traefik without SSH.
+  a Cloudflare, DigitalOcean, Hetzner, Vultr or Linode token), applied to Traefik without SSH; or a
+  certificate of your own, uploaded (checked, its key sealed, warned of before it expires).
 - **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:
   credentials generated, data on a volume, health-checked), with their connection URL to copy.
 - **EasyPanel templates**: the 800+ templates of easypanel.io in one click (searched, filled in by
@@ -87,7 +88,7 @@ feature is free: no project limits, no paid tiers.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Uploads as a source, Railpack and buildpacks; uploaded certificates and a Traefik page; the panel's
+- Uploads as a source, Railpack and buildpacks; a Traefik page (restart, logs, custom middlewares); the panel's
   domain and Let's Encrypt email in Settings; a web database client.
 - Later: multiple nodes, Cloudflare Tunnel, two-factor authentication, an API and a CLI.
 

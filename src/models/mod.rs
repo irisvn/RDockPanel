@@ -3,6 +3,7 @@
 pub mod action;
 pub mod backup_run;
 pub mod cert_resolver;
+pub mod certificate;
 pub mod database_backup;
 pub mod deployment;
 pub mod notification_channel;

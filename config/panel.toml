@@ -24,6 +24,10 @@ https_port = 443
 # paths are from the panel's working directory.
 traefik_dir = "storage/traefik/dynamic"
 
+# The same directory as Traefik sees it (scripts/dev-swarm.sh and the
+# installer mount it there): uploaded certificates' files are named so.
+traefik_mount = "/etc/traefik/dynamic"
+
 # Traefik's Swarm service: attached to each project's network so it reaches
 # the services there (scripts/dev-swarm.sh and the installer name it so).
 traefik_service = "rdp-traefik"
