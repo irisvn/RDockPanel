@@ -19,7 +19,7 @@ src/
   admin/pages/      Server, Containers, Images, Volumes, Networks (script pages)
   admin/resources/  Projects, Services, Domains, Ports, Mounts, Deployments (schema-driven resources)
   admin/slots/      the service page's aside (state, actions, live deployment log)
-resources/admin/    src/: the React apps interface (built to js/, css/); js/: the Docker and Server pages'
+resources/admin/    src/: the React apps interface (built to js/, css/); js/: the Docker and Monitor pages'
                     plain JavaScript (+ vendored xterm.js), css/
 scripts/            dev-swarm.sh (a development Swarm with Traefik)
 tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER and
@@ -72,7 +72,7 @@ ended at the next boot (its token is kept in its action row). Each session is an
 The RustCMS queue (database-backed). Workers in `serve` take jobs from `default`, `docker` (image
 pulls) and `deploy` (Phase 2), configured in `config/queue.toml`.
 
-## Projects and services (Phase 2, in progress)
+## Projects and services (Phase 2)
 
 Projects and services are RustCMS resources (forms, lists, relations, validation, audit come with the
 framework). Their rules (names, hostnames, paths, ports, images, bind mounts) are pure functions in
@@ -411,6 +411,11 @@ Source, Storage, Advanced), by sub-path `<project>/<service>/<tab>`. It reads
 the resources' policies, validation, audit and encrypted fields apply unchanged. The environment is
 edited as `.env` text (`services/dotenv.rs`): `PUT /apps/services/{id}/env` seals it; reading it in
 clear needs `services.secrets` and is audited.
+
+The sidebar is EasyPanel's: Dashboard (the panel's home, `AdminProvider::home`, RustCMS 0.5.1), Actions,
+Monitor, Settings, then the Docker pages, then RustCMS's System. The resources (projects, services,
+domains, …) have no sidebar entry (`navigation(false)`): their routes and API stay, as the React pages
+write through them, and an administrator can still open `/admin/r/<slug>`.
 
 ## Data
 

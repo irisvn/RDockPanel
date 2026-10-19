@@ -5,7 +5,7 @@ Permissions live in the `admin` guard and are granted through roles (System → 
 
 | Permission | Allows |
 |---|---|
-| `server.view` | the Server page: host facts and live CPU, memory, network and disk |
+| `server.view` | the Monitor page: host facts and live CPU, memory, network and disk |
 | `docker.view` | the Containers, Images, Volumes and Networks pages; container inspect and live stats; an action's progress (own actions only) |
 | `docker.logs` | container logs (snapshot and live follow) |
 | `docker.manage` | start, stop, restart, pause, unpause, kill and remove containers; pull and remove images; prune; create and remove volumes and networks |
@@ -14,7 +14,13 @@ Permissions live in the `admin` guard and are granted through roles (System → 
 
 ## Projects and services (Phase 2)
 
-The Deploy group's resources use the panel's standard permissions, one set per resource
+The pages of the sidebar need: the Dashboard (projects, services and their tabs) `projects.view_any`;
+Actions `projects.view_any`; Monitor `server.view`; Settings `storage_providers.view_any`. The
+resources behind them have no sidebar entry, so give a role that manages services, or notification
+channels, those permissions as well (their routes, `/admin/r/<slug>`, still answer to the resource's
+own permissions).
+
+The resources use the panel's standard permissions, one set per resource
 (`view_any`, `view`, `create`, `update`, `delete`): `projects.*`, `services.*`,
 `service_domains.*`, `service_ports.*`, `service_mounts.*`, and `deployments.view_any` /
 `deployments.view` (deployments are written by the panel only). Besides:

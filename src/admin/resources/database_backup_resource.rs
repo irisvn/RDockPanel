@@ -28,6 +28,7 @@ impl Resource for DatabaseBackupResource {
             .title("database_name")
             .icon("history")
             .group("Deploy")
+            .navigation(false)
             .lock_parent("service_id", "services")
     }
 

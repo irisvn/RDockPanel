@@ -37,6 +37,7 @@ impl Resource for ServiceResource {
             .title("name")
             .icon("box")
             .group("Deploy")
+            .navigation(false)
             .unique(
                 "services_project_name_unique",
                 &["project_id", "name"],

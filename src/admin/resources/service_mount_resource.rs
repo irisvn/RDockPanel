@@ -29,6 +29,7 @@ impl Resource for ServiceMountResource {
             .title("target")
             .icon("folder")
             .group("Deploy")
+            .navigation(false)
             .lock_parent("service_id", "services")
             .unique(
                 "service_mounts_service_target_unique",

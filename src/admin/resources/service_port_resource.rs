@@ -23,6 +23,7 @@ impl Resource for ServicePortResource {
             .title("published")
             .icon("layers")
             .group("Deploy")
+            .navigation(false)
             .lock_parent("service_id", "services")
             .unique(
                 "service_ports_published_protocol_unique",

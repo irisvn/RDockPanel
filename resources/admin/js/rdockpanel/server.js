@@ -6,7 +6,7 @@ window.rustcms.registerPage("rdockpanel/server", {
   mount(element, ctx) {
     const { api, h, bytes, percent, duration, page, showState } = window.rdockPanel;
     const t = ctx.t;
-    const { body, note } = page(element, t, "Server");
+    const { body, note } = page(element, t, "Monitor");
 
     const info = h("dl", { className: "rdp-facts" });
     const cards = h("div", { className: "rdp-cards" });

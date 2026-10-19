@@ -16,9 +16,16 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 ## Tính năng
 
-**Đã có (Phase 1)**
+**Giao diện giống EasyPanel**
 
-- **Server:**
+- Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Actions, Monitor, Settings và các trang Docker.
+- **Trang service** có header (trạng thái, Deploy, Start/Stop, Restart, Open, Logs, Shell) và các tab: Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts, Storage, Backups (với database), Advanced.
+- **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** chứa nơi lưu backup và kênh thông báo; **⌘K** tìm nhanh project hoặc service. Có tiếng Anh và tiếng Việt.
+
+**Server và Docker**
+
+
+- **Monitor:**
   - biểu đồ CPU, RAM (kèm số liệu swap), network vào/ra, ổ đĩa, cập nhật trực tiếp (lấy mẫu mỗi 2 giây, giữ 5 phút gần nhất);
   - thông tin máy: OS, kernel, số nhân, uptime.
 - **Container:**
@@ -35,7 +42,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Truy vết:** mọi thao tác quản lý Docker (container, image, volume, network, terminal) được ghi vào nhật ký thao tác (Actions) và audit log, kèm người thực hiện; các lần deploy có lịch sử riêng (ai bấm, lúc nào, log).
 - **Người dùng và vai trò:** phân quyền chi tiết (`docker.view`, `docker.manage`, `docker.logs`, `docker.exec`, `server.view`, `system.manage`, và mỗi resource một bộ quyền như `services.deploy`), dựa trên hệ thống role của RustCMS.
 
-**Đã có (Phase 2, chạy từ mã nguồn)**
+**App trên Docker Swarm**
 
 - **Project và service:**
   - service chạy một Docker image trên **Docker Swarm**;
@@ -48,18 +55,20 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
   - rolling update: task mới chạy trước khi bật zero downtime, có healthcheck và không publish port kiểu host (nếu không thì task cũ dừng trước); Swarm tự rollback khi update lỗi;
   - mỗi lần deploy lưu lại cấu hình để xem lịch sử và rollback;
   - trang service báo khi có thay đổi chưa deploy.
-- **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS; có chuyển hướng (biểu thức chính quy) xác thực cơ bản (basic auth) và trang bảo trì.
+- **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS; domain wildcard (`*.example.com`, chỉ quản trị panel) và middleware Traefik tuỳ chỉnh; chuyển hướng (biểu thức chính quy), xác thực cơ bản (basic auth) và trang bảo trì.
 - **Database:** PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ với một cú bấm (chỉ cần đặt tên: mật khẩu tự sinh, dữ liệu trên volume, có healthcheck), kèm URL kết nối để copy.
 - **Template EasyPanel:** hơn 800 template của easypanel.io, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải từ repo của họ khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
 - **Build:** app từ repo Git (https, hoặc ssh với deploy key sinh sẵn; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo hoặc Nixpacks, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI, và webhook GitHub có chữ ký để tự deploy mỗi lần push.
 - **Compose:** file Compose (viết trong panel hoặc lấy từ Git) chạy bằng `docker compose` trong network của project, domain trỏ tới một service trong file.
 - **Backup:** dump PostgreSQL, MySQL, MariaDB và MongoDB, và nén volume, theo lịch (cron) vào thư mục trên server hoặc bucket tương thích S3, giữ lại N bản, có log từng lần chạy, nút "Run now" và Khôi phục.
 - **Thông báo:** Discord, Slack, Telegram, email (SMTP) và webhook, cho deploy, backup và ổ đĩa sắp đầy, có nút "Gửi thử".
+- **Từng service:** biểu đồ CPU và RAM, ghi chú cho nhóm, script (lệnh chạy một lần trong container đang chạy, hiện output); quản trị panel còn đặt được capability, sysctl và group bổ sung.
 - **Bí mật:** biến môi trường (sửa như file `.env`) và tài khoản registry riêng được mã hoá bằng app key; chỉ người có quyền `services.secrets` mới xem được giá trị, mỗi lần xem đều ghi audit. Rollback trả lại đúng biến môi trường của lần deploy đó.
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- **Sau đó:** nhiều node, xác thực 2 lớp, API và CLI.
+- Nguồn Upload, build bằng Railpack và Buildpacks; chọn cert resolver cho từng domain; đổi domain panel và email Let's Encrypt trong Settings; web client cho database.
+- **Sau đó:** nhiều node, Cloudflare Tunnel, xác thực 2 lớp, API và CLI.
 
 | Container | Log trực tiếp | Terminal |
 |---|---|---|

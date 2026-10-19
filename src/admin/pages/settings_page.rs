@@ -15,6 +15,7 @@ impl PanelPage for SettingsPage {
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Settings")
             .icon("settings")
+            .sort(3)
             .permission("storage_providers.view_any")
     }
 

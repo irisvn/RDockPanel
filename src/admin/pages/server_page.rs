@@ -1,4 +1,4 @@
-//! The `Server` page (`/admin/p/server`): the host: CPU, memory, network and disk, live. Drawn by
+//! The `Monitor` page (`/admin/p/server`, EasyPanel's Monitor): the host: CPU, memory, network and disk, live. Drawn by
 //! `resources/admin/js/rdockpanel/server.js`, which calls the routes of
 //! `routes/admin.rs`.
 
@@ -13,9 +13,9 @@ impl PanelPage for ServerPage {
     const SLUG: &'static str = "server";
 
     fn meta() -> PanelPageMeta {
-        PanelPageMeta::new("Server")
-            .icon("box")
-            .group("Server")
+        PanelPageMeta::new("Monitor")
+            .icon("file-text")
+            .sort(2)
             .permission("server.view")
     }
 

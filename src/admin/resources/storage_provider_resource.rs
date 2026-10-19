@@ -26,6 +26,7 @@ impl Resource for StorageProviderResource {
             .title("name")
             .icon("settings")
             .group("Settings")
+            .navigation(false)
             .unique(
                 "storage_providers_name_unique",
                 &["name"],

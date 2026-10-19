@@ -14,8 +14,9 @@ impl PanelPage for ContainersPage {
 
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Containers")
-            .icon("layers")
+            .icon("box")
             .group("Docker")
+            .sort(10)
             .permission("docker.view")
     }
 

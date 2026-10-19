@@ -26,6 +26,7 @@ impl Resource for ServiceDomainResource {
             .title("host")
             .icon("tag")
             .group("Deploy")
+            .navigation(false)
             .lock_parent("service_id", "services")
             .unique(
                 "service_domains_host_path_unique",

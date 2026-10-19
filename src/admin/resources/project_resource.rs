@@ -26,6 +26,7 @@ impl Resource for ProjectResource {
             .title("name")
             .icon("folder")
             .group("Deploy")
+            .navigation(false)
             .unique("projects_name_unique", &["name"], "is already taken")
     }
 

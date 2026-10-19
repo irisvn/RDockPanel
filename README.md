@@ -15,9 +15,20 @@ feature is free: no project limits, no paid tiers.
 
 ## Features
 
-**Available now (Phase 1)**
+**The interface, like EasyPanel's**
 
-- **Server**: live CPU, memory (with swap), network in/out and disk charts (2-second samples, the last
+- `/admin` opens the **Dashboard**: server tiles, projects with their service cards, **+ Service**
+  and **Templates**. The sidebar has Dashboard, Actions, Monitor, Settings and the Docker pages.
+- A **service page** has its header (status, Deploy, Start/Stop, Restart, Open, Logs, Shell) and tabs:
+  Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts,
+  Storage, Backups (databases), Advanced.
+- **Actions** lists deployments, backups and Docker actions; **Settings** holds storage providers and
+  notification channels; **⌘K** finds a project or a service. In English and Vietnamese.
+
+**Server and Docker**
+
+
+- **Monitor**: live CPU, memory (with swap), network in/out and disk charts (2-second samples, the last
   5 minutes), plus host facts (OS, kernel, cores, uptime).
 - **Containers**: list, search, start/stop/restart/pause/kill/remove; live logs (follow, stderr
   highlighted), live stats, inspect (secret-looking env values hidden), and a **terminal** in the
@@ -33,7 +44,7 @@ feature is free: no project limits, no paid tiers.
   `docker.exec`, `server.view`, `system.manage`, plus one set per resource such as `services.deploy`),
   built on RustCMS's roles.
 
-**Available now (Phase 2, from source)**
+**Apps on Docker Swarm**
 
 - **Projects and services**: a service runs a Docker image on **Docker Swarm** with replicas, CPU and
   memory limits, a health check, named volumes, published ports and a command. Each project has its
@@ -46,7 +57,8 @@ feature is free: no project limits, no paid tiers.
   port; stop-first otherwise) and Swarm rolls back a failed one. Every deployment keeps its
   configuration, for history and rollback, and the page shows changes not deployed yet.
 - **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
-  redirects its HTTP to HTTPS; redirects (regular expressions), HTTP basic authentication, and a maintenance page.
+  redirects its HTTP to HTTPS; wildcard domains (`*.example.com`, for administrators) and custom
+  Traefik middlewares; redirects (regular expressions), HTTP basic authentication, and a maintenance page.
 - **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:
   credentials generated, data on a volume, health-checked), with their connection URL to copy.
 - **EasyPanel templates**: the 800+ templates of easypanel.io in one click (searched, filled in by
@@ -63,13 +75,18 @@ feature is free: no project limits, no paid tiers.
   and Restore.
 - **Notifications**: Discord, Slack, Telegram, email (SMTP) and webhooks, for deployments, backups
   and a full disk, with "Send test notification".
+- **Per service**: CPU and memory charts, notes for the team, scripts (one-off commands in the running
+  container, their output shown), and, for administrators, capabilities, sysctls and supplemental
+  groups.
 - **Secrets**: environment variables and private registry credentials, encrypted with the app key;
   edited as `.env` text; values are shown only with the `services.secrets` permission (each read is
   audited). A rollback brings back the environment of then.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Later: multiple nodes, two-factor authentication, an API and a CLI.
+- Uploads as a source, Railpack and buildpacks; a certificate resolver per domain; the panel's
+  domain and Let's Encrypt email in Settings; a web database client.
+- Later: multiple nodes, Cloudflare Tunnel, two-factor authentication, an API and a CLI.
 
 | Containers | Live logs | Terminal |
 |---|---|---|
@@ -134,7 +151,8 @@ rolling updates under load, and checks HTTPS and project isolation.
   tasks, networks), **sysinfo** and `/proc` for host metrics, **MySQL 8.4** for the panel's data.
 - **Docker Swarm** runs the apps; **[Traefik](https://traefik.io)** v3 routes their domains, from
   files the panel writes.
-- The admin pages are scripts loaded by the RustCMS panel; the terminal uses
+- The apps interface is React pages on RustCMS's extension host (the built files are committed:
+  Node is needed only to change them); the Docker and Monitor pages are scripts; the terminal uses
   [xterm.js](https://xtermjs.org) (vendored, MIT).
 
 More in [docs/architecture.md](docs/architecture.md).

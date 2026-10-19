@@ -23,6 +23,7 @@ impl Resource for DeploymentResource {
             // A rollback's checks hold the service until it is asked for.
             .lock_parent("service_id", "services")
             .group("Deploy")
+            .navigation(false)
             .audit(false)
     }
 

@@ -24,6 +24,7 @@ impl Resource for NotificationChannelResource {
             .title("name")
             .icon("settings")
             .group("Settings")
+            .navigation(false)
             .unique(
                 "notification_channels_name_unique",
                 &["name"],

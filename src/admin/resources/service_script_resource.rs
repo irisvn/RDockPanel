@@ -21,6 +21,7 @@ impl Resource for ServiceScriptResource {
             .title("name")
             .icon("box")
             .group("Deploy")
+            .navigation(false)
             .lock_parent("service_id", "services")
     }
 

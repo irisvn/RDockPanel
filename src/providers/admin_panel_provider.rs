@@ -6,6 +6,9 @@ use rustcms::prelude::*;
 pub fn provider() -> AdminProvider {
     AdminProvider::new()
         .brand("RDockPanel")
+        // `/admin` opens the Dashboard; the resources stay reachable (their routes
+        // serve the React pages) but have no sidebar entry (`navigation(false)`).
+        .home("dashboard")
         // Labels in Vietnamese (`rustcms lang:missing vi` lists what is missing).
         .translations("vi", include_str!("../../lang/vi.toml"))
         .resource::<crate::admin::resources::project_resource::ProjectResource>()

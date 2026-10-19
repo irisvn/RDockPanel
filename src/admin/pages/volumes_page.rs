@@ -16,6 +16,7 @@ impl PanelPage for VolumesPage {
         PanelPageMeta::new("Volumes")
             .icon("folder")
             .group("Docker")
+            .sort(12)
             .permission("docker.view")
     }
 

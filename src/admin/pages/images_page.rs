@@ -16,6 +16,7 @@ impl PanelPage for ImagesPage {
         PanelPageMeta::new("Images")
             .icon("image")
             .group("Docker")
+            .sort(11)
             .permission("docker.view")
     }
 

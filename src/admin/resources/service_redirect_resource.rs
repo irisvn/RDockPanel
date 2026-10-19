@@ -24,6 +24,7 @@ impl Resource for ServiceRedirectResource {
             .title("regex")
             .icon("tag")
             .group("Deploy")
+            .navigation(false)
             .lock_parent("service_id", "services")
     }
 
