@@ -22,6 +22,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Environment (`.env` text) | Done | encrypted; values shown only with `services.secrets` (audited) |
 | Domains: host, path, port, HTTPS, primary, generated domains | Done | Let's Encrypt in the installer |
 | Domains: wildcard, custom middlewares | Done | `*.example.com` (one level); middlewares defined in Traefik's files (`ratelimit@file`) |
+| Domains page: every service's domains | Done | `https://host → http://<project>_<service>:<port>/`; open, edit, remove, add; whether each is served as configured or waits for Deploy |
 | Domains: certificate resolver per domain | Done | Settings → Certificates: Let's Encrypt over HTTP, or DNS (Cloudflare, DigitalOcean, Hetzner, Vultr, Linode; the token a Docker secret); "Apply" without SSH; one resolver per host; a wildcard needs a DNS one |
 | Custom SSL certificates | Done | uploaded in Settings (no SSH, no restart; the key sealed), checked (key, chain, dates, names), chosen per domain, "Replace" when renewed; expiry warnings 14, 7 and 1 days before |
 | Redirects | Done | Go regular expressions, permanent or not, on or off |

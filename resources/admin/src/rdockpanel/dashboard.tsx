@@ -11,6 +11,7 @@ import { ServicePage } from "./apps/ServicePage";
 import { Templates } from "./apps/Templates";
 import { Settings } from "./settings/Settings";
 import { Actions } from "./actions/Actions";
+import { Domains } from "./domains/Domains";
 import { Palette } from "./lib/Palette";
 import type { Overview } from "./apps/types";
 import { StatusDot } from "./lib/ui";
@@ -154,3 +155,15 @@ function ActionsRoute(props: PageProps<{ user?: string | number }>) {
 }
 
 registerPage("rdockpanel/actions", ActionsRoute as (p: PageProps<unknown>) => ReturnType<typeof ActionsRoute>);
+
+function DomainsRoute(props: PageProps<{ user?: string | number }>) {
+  bindResources(props.resources);
+  return (
+    <>
+      <Domains {...props} />
+      <Palette {...props} />
+    </>
+  );
+}
+
+registerPage("rdockpanel/domains", DomainsRoute as (p: PageProps<unknown>) => ReturnType<typeof DomainsRoute>);

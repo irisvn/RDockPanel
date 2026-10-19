@@ -15,7 +15,7 @@ impl PanelPage for ActionsPage {
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Actions")
             .icon("history")
-            .sort(1)
+            .sort(2)
             .permission("projects.view_any")
     }
 

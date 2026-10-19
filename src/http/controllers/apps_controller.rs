@@ -237,6 +237,8 @@ pub async fn service(
     if let Some(latest) = latest.as_mut() {
         latest["log"] = Value::Null;
     }
+    let cfg = crate::services::deploy_rules_service::config();
+    let default_resolver = (!cfg.cert_resolver.is_empty()).then(|| cfg.cert_resolver.clone());
     Ok(Json(json!({
         "service": {
             "id": row.id,
@@ -325,6 +327,9 @@ pub async fn service(
         } else {
             vec![]
         },
+        // HTTPS without a certificate of its own: the installer's resolver
+        // (none: Traefik's own certificate, as in development).
+        "default_resolver": default_resolver,
         "can": {
             "update": principal.can("services.update"),
             "delete": principal.can("services.delete"),
@@ -332,9 +337,11 @@ pub async fn service(
             "destroy": principal.can("services.destroy"),
             "secrets": principal.can(SECRETS_PERMISSION),
             "deployments": can_deployments,
+            "system": principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION),
             "domains": {
                 "view": principal.can("service_domains.view_any"),
                 "create": principal.can("service_domains.create"),
+                "update": principal.can("service_domains.update"),
                 "delete": principal.can("service_domains.delete"),
             },
             "ports": {

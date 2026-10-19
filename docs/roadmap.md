@@ -44,7 +44,6 @@ Next:
 - Certificate status of the resolvers; drift checks (RustCMS W4).
 - A web database client; the panel's domain applied from Settings (today: checked there, applied by the installer).
 - Notifications of Docker prunes and panel updates.
-- RustCMS 0.6 for the React pages (its tabs, toasts and resource API).
 
 ## Later
 

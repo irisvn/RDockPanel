@@ -466,6 +466,23 @@ window.rustcms?.registerTranslations?.("vi", {
   "Traefik middlewares": "Middleware Traefik",
   "Optional, comma-separated, defined in Traefik's files, e.g. ratelimit@file":
     "Không bắt buộc, cách nhau bằng dấu phẩy, định nghĩa trong file của Traefik, ví dụ ratelimit@file",
+  // Domains page
+  "Edit domain": "Sửa domain",
+  "Choose a service": "Chọn service",
+  "Applied by the service's next deployment.": "Áp dụng ở lần deploy tiếp theo của service.",
+  "Every service's domains and where Traefik sends them. A change is applied by the service's next deployment.":
+    "Domain của mọi service và nơi Traefik chuyển tới. Thay đổi được áp dụng ở lần deploy tiếp theo của service.",
+  "All projects": "Tất cả project",
+  Live: "Đang chạy",
+  "Waiting for Deploy": "Chờ Deploy",
+  "Removed, served until Deploy": "Đã xoá, vẫn chạy tới lần Deploy tới",
+  "Service not running": "Service không chạy",
+  "RDockPanel (Settings → Panel)": "RDockPanel (Settings → Panel)",
+  "Traefik's own certificate": "certificate mặc định của Traefik",
+  "No resolver or uploaded certificate yet: add one in Settings → Certificates. A wildcard needs a DNS resolver or a wildcard certificate.":
+    "Chưa có resolver hay certificate tải lên: thêm ở Settings → Certificates. Wildcard cần DNS resolver hoặc certificate wildcard.",
+  "Maintenance page": "Trang bảo trì",
+  "No domain yet: add one to a service.": "Chưa có domain: thêm domain cho một service.",
 });
 
 export {};

@@ -12,6 +12,7 @@ mod databases;
 mod deployments;
 mod docker;
 mod docker_routes;
+mod domains;
 mod health;
 mod live;
 mod notifications;

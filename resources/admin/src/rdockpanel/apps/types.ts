@@ -83,6 +83,8 @@ export type ServiceDetail = {
   cert_resolvers: Array<{ id: number; name: string; kind: string }>;
   /** The uploaded certificates a domain may choose (the panel's administrators only). */
   certificates: Array<{ id: number; name: string; names: string[] }>;
+  /** The installer's resolver for HTTPS (none: Traefik's own certificate). */
+  default_resolver: string | null;
   /** A database's connection facts (password and URL with services.secrets). */
   database: {
     engine: string;
@@ -110,7 +112,9 @@ export type ServiceDetail = {
     destroy: boolean;
     secrets: boolean;
     deployments: boolean;
-    domains: Abilities;
+    /** `system.manage`: wildcards, a domain's own certificate. */
+    system: boolean;
+    domains: Abilities & { update: boolean };
     ports: Abilities;
     mounts: Abilities;
   };

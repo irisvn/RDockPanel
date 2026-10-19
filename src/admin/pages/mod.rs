@@ -3,6 +3,7 @@
 pub mod actions_page;
 pub mod containers_page;
 pub mod dashboard_page;
+pub mod domains_page;
 pub mod images_page;
 pub mod networks_page;
 pub mod settings_page;

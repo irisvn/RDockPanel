@@ -8,7 +8,8 @@ import { CopyButton, ErrorNote, Facts, Field, Section, Sparkline, StatusBadge, T
 import { ResourceError, resources } from "../lib/resources";
 import { BackupsTab } from "./Backups";
 import { MaintenanceTab, RedirectsTab, ScriptsTab, SecurityTab } from "./Access";
-import type { Deployment, ServiceDetail } from "./types";
+import type { Deployment, Domain, ServiceDetail } from "./types";
+import { DomainForm, plainDomain } from "./DomainForm";
 
 type Props = PageProps<unknown> & { project: string; serviceId: number; tab: string };
 type T = (s: string) => string;
@@ -505,19 +506,12 @@ function EnvironmentTab(props: Props & { d: ServiceDetail; onSaved: () => void }
 
 function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onError: (e: unknown) => void }) {
   const { d, t } = props;
-  const [adding, setAdding] = useState(false);
-  const [host, setHost] = useState("");
-  const [path, setPath] = useState("/");
-  const [port, setPort] = useState("80");
-  const [container, setContainer] = useState("");
-  const [middlewares, setMiddlewares] = useState("");
-  const isCompose = d.service.kind === "compose";
-  const [https, setHttps] = useState(true);
-  const [resolver, setResolver] = useState("");
-  const [error, setError] = useState<unknown>(null);
-  const fields = error instanceof ResourceError ? error.fieldErrors : {};
+  // Adding (with a host to start with), or changing one.
+  const [adding, setAdding] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Domain | null>(null);
   const resolverName = (id: number | null) => d.cert_resolvers.find((r) => r.id === id)?.name;
   const certificateName = (id: number | null) => d.certificates.find((c) => c.id === id)?.name;
+  const mayChange = (domain: Domain) => d.can.system || plainDomain(domain);
   return (
     <Section
       title={t("Domains")}
@@ -526,18 +520,11 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
         d.can.domains.create && (
           <>
             {d.auto_domain && !d.domains.some((x) => x.host === d.auto_domain) && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setHost(d.auto_domain ?? "");
-                  setHttps(!(d.auto_domain ?? "").endsWith(".localhost"));
-                  setAdding(true);
-                }}
-              >
+              <Button variant="outline" onClick={() => setAdding(d.auto_domain ?? "")}>
                 + {t("Generated domain")}
               </Button>
             )}
-            <Button onClick={() => setAdding(true)}>+ {t("Add domain")}</Button>
+            <Button onClick={() => setAdding("")}>+ {t("Add domain")}</Button>
           </>
         )
       }
@@ -559,110 +546,53 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                 {domain.https && domain.certificate_id !== null && ` · 🔒 ${certificateName(domain.certificate_id) ?? t("uploaded certificate")}`}
               </span>
             </span>
-            {d.can.domains.delete && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={async () => {
-                  if (!window.confirm(t("Remove this domain?"))) return;
-                  try {
-                    await resources.remove("service_domains", domain.id);
-                    props.onSaved();
-                  } catch (err) {
-                    props.onError(err);
-                  }
-                }}
-              >
-                {t("Remove")}
-              </Button>
-            )}
+            <span className="rdp2-row">
+              {d.can.domains.update && mayChange(domain) && (
+                <Button size="sm" variant="ghost" onClick={() => setEditing(domain)}>
+                  {t("Edit")}
+                </Button>
+              )}
+              {d.can.domains.delete && mayChange(domain) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={async () => {
+                    if (!window.confirm(t("Remove this domain?"))) return;
+                    try {
+                      await resources.remove("service_domains", domain.id);
+                      props.onSaved();
+                    } catch (err) {
+                      props.onError(err);
+                    }
+                  }}
+                >
+                  {t("Remove")}
+                </Button>
+              )}
+            </span>
           </li>
         ))}
       </ul>
-      {adding && (
-        <Dialog open onClose={() => setAdding(false)} title={t("Add domain")}>
-          <form
-            className="rdp2-form"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setError(null);
-              try {
-                await resources.create("service_domains", {
-                  service_id: String(d.service.id),
-                  host: host.trim().toLowerCase(),
-                  path: path.trim() || "/",
-                  port: Number(port),
-                  https,
-                  ...(isCompose ? { compose_service: container.trim() } : {}),
-                  ...(middlewares.trim() ? { middlewares: middlewares.trim() } : {}),
-                  ...(https && resolver.startsWith("r:") ? { cert_resolver_id: resolver.slice(2) } : {}),
-                  ...(https && resolver.startsWith("c:") ? { certificate_id: resolver.slice(2) } : {}),
-                });
-                setAdding(false);
-                setHost("");
-                props.onSaved();
-              } catch (err) {
-                setError(err);
-              }
-            }}
-          >
-            <Field label={t("Host")} help={t("e.g. app.example.com, or *.example.com for every name under it (DNS pointing to this server)")} error={fields.host}>
-              <Input autoFocus value={host} onChange={(e) => setHost(e.target.value)} placeholder="app.example.com" />
-            </Field>
-            <div className="rdp2-grid2">
-              <Field label={t("Path")} error={fields.path}>
-                <Input value={path} onChange={(e) => setPath(e.target.value)} />
-              </Field>
-              <Field label={t("Container port")} error={fields.port}>
-                <Input type="number" value={port} onChange={(e) => setPort(e.target.value)} />
-              </Field>
-            </div>
-            <Field label={t("Traefik middlewares")} help={t("Optional, comma-separated, defined in Traefik's files, e.g. ratelimit@file")} error={fields.middlewares}>
-              <Input className="rdp2-mono" value={middlewares} onChange={(e) => setMiddlewares(e.target.value)} />
-            </Field>
-            {isCompose && (
-              <Field label={t("Compose service")} help={t("The service of the Compose file it leads to")} error={fields.compose_service}>
-                <Input value={container} onChange={(e) => setContainer(e.target.value)} placeholder="web" />
-              </Field>
-            )}
-            <label className="rdp2-row">
-              <Switch checked={https} onCheckedChange={setHttps} /> {t("HTTPS")}
-            </label>
-            {https && (d.cert_resolvers.length > 0 || d.certificates.length > 0) && (
-              <Field
-                label={t("Certificate")}
-                help={t("A resolver, or an uploaded certificate covering the host (Settings). A wildcard needs a DNS resolver or a wildcard certificate.")}
-                error={fields.cert_resolver_id ?? fields.certificate_id}
-              >
-                <NativeSelect value={resolver} onChange={(e) => setResolver(e.target.value)}>
-                  <option value="">{t("The panel's default")}</option>
-                  {d.cert_resolvers.map((r) => (
-                    <option key={`r${r.id}`} value={`r:${r.id}`}>
-                      {r.name} ({r.kind === "dns" ? "DNS" : "HTTP"})
-                    </option>
-                  ))}
-                  {d.certificates.map((c) => (
-                    <option key={`c${c.id}`} value={`c:${c.id}`}>
-                      {c.name} ({t("uploaded")}: {c.names.join(", ")})
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
-            )}
-            {(fields.cert_resolver_id || fields.certificate_id) && d.cert_resolvers.length === 0 && d.certificates.length === 0 && (
-              <Alert variant="destructive">{(fields.cert_resolver_id ?? fields.certificate_id ?? []).join(" ")}</Alert>
-            )}
-            {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
-            <div className="rdp2-row rdp2-end">
-              <Button type="button" variant="ghost" onClick={() => setAdding(false)}>
-                {t("Cancel")}
-              </Button>
-              <Button type="submit" disabled={!host.trim()}>
-                {t("Add")}
-              </Button>
-            </div>
-          </form>
-        </Dialog>
+      {(adding !== null || editing) && (
+        <DomainForm
+          t={t}
+          domain={editing ?? undefined}
+          service={{ id: d.service.id, kind: d.service.kind }}
+          host={adding ?? undefined}
+          cert_resolvers={d.cert_resolvers}
+          certificates={d.certificates}
+          defaultResolver={d.default_resolver}
+          system={d.can.system}
+          onClose={() => {
+            setAdding(null);
+            setEditing(null);
+          }}
+          onSaved={() => {
+            setAdding(null);
+            setEditing(null);
+            props.onSaved();
+          }}
+        />
       )}
     </Section>
   );

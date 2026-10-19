@@ -86,7 +86,12 @@ pub(crate) async fn last_deployment(app: &TestApp, service: i64) -> deployment::
 }
 
 /// Asks for `name` on the service, then runs the deployment it queued.
-async fn run(app: &TestApp, admin: &TestClient<'_>, name: &str, service: i64) -> deployment::Model {
+pub(crate) async fn run(
+    app: &TestApp,
+    admin: &TestClient<'_>,
+    name: &str,
+    service: i64,
+) -> deployment::Model {
     action(app, admin, "services", name, &service.to_string())
         .await
         .assert_status(StatusCode::OK);

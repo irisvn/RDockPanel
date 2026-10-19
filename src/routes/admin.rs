@@ -7,7 +7,7 @@ use rustcms::prelude::*;
 
 use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
-    deploy_controller as deploy, docker_controller as docker,
+    deploy_controller as deploy, docker_controller as docker, domains_controller as domains,
     notifications_controller as notifications, server_controller as server,
     templates_controller as templates, traefik_controller as traefik,
 };
@@ -76,6 +76,11 @@ pub fn routes() -> AdminRoutes {
                     "/overview",
                     AdminAccess::can("projects.view_any"),
                     apps::overview,
+                )
+                .get(
+                    "/domains",
+                    AdminAccess::can("service_domains.view_any"),
+                    domains::index,
                 )
                 .get(
                     "/traefik/resolvers",
