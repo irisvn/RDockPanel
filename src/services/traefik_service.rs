@@ -178,8 +178,20 @@ pub async fn remove_orphan_networks(
             return Ok(0);
         }
     };
+    // Only this panel's networks (another panel's, or a test's, are left).
+    let Some(instance) = crate::services::deploy_service::instance() else {
+        return Ok(0);
+    };
     let mut removed = 0;
     for network in networks {
+        if network
+            .labels
+            .get("rdockpanel.instance")
+            .map(String::as_str)
+            != Some(instance)
+        {
+            continue;
+        }
         let ours = network
             .labels
             .get(crate::services::docker_service::MANAGED_LABEL)

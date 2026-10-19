@@ -729,6 +729,13 @@ pub(crate) async fn project_network(
         labels: [
             (MANAGED_LABEL.to_owned(), "true".to_owned()),
             ("rdockpanel.project".to_owned(), snapshot.project.clone()),
+            // This panel's: only its own networks are ever removed.
+            (
+                "rdockpanel.instance".to_owned(),
+                crate::services::deploy_service::instance()
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
         ]
         .into(),
         attachable: true,

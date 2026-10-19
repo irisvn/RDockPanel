@@ -25,6 +25,21 @@ const MONITOR_SECS: u64 = 30;
 const NANOS: u64 = 1_000_000_000;
 
 /// The Swarm service of `service` in `project`.
+static INSTANCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Sets this panel's instance id (at boot, from its `APP_KEY`: stable across
+/// restarts, another panel's or a test's differs). The first call wins.
+pub fn set_instance(keyring: &rustcms::crypto::Keyring) {
+    let key = keyring.current().derive("rdockpanel.instance");
+    let _ = INSTANCE.set(key[..8].iter().map(|b| format!("{b:02x}")).collect());
+}
+
+/// This panel's instance id (the `rdockpanel.instance` label of the networks
+/// it makes), once set.
+pub fn instance() -> Option<&'static str> {
+    INSTANCE.get().map(String::as_str)
+}
+
 pub fn service_name(project: &str, service: &str) -> String {
     format!("{project}_{service}")
 }

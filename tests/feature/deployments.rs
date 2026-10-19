@@ -1460,6 +1460,21 @@ db_test!(
                 .unwrap(),
             0
         );
+        // Another panel's (or a test's) network of a project unknown here: left.
+        fake.networks
+            .lock()
+            .unwrap()
+            .push(rdockpanel::services::docker_service::NetworkItem {
+                id: "netid-rdp_ghost".to_owned(),
+                name: "rdp_ghost".to_owned(),
+                driver: "overlay".to_owned(),
+                scope: "swarm".to_owned(),
+                labels: std::collections::HashMap::from([
+                    ("rdockpanel.managed".to_owned(), "true".to_owned()),
+                    ("rdockpanel.project".to_owned(), "ghost".to_owned()),
+                    ("rdockpanel.instance".to_owned(), "another".to_owned()),
+                ]),
+            });
         // Destroyed, deleted with its project: Traefik detached, network removed.
         assert_eq!(run(&app, &admin, "destroy", id).await.status, "succeeded");
         let project = service_row(&app, id).await.project_id;
@@ -1486,6 +1501,13 @@ db_test!(
             1
         );
         assert!(!traefik_networks(&fake).contains(&"rdp_shop".to_owned()));
+        assert!(
+            fake.networks
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|n| n.name == "rdp_ghost")
+        );
         assert!(
             !fake
                 .networks

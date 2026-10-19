@@ -156,6 +156,7 @@ impl ServiceProvider for AppServiceProvider {
         // RUST_LOG says, `log` records stop at info (the panel's own logs are
         // `tracing`'s).
         log::set_max_level(log::LevelFilter::Info.min(log::max_level()));
+        crate::services::deploy_service::set_instance(state.keyring());
         // Deployments whose run died: interrupted, their services released.
         match crate::services::deployment_service::recover_interrupted(state.db()).await {
             Ok(0) => {}

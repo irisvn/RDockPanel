@@ -397,7 +397,9 @@ the panel's process, workers included), each reading the database at that moment
 written is always the latest state. Projects share no network, so a project's services cannot call
 another's directly (domains and published ports remain public). Once a project is deleted, its
 network goes within 5 minutes (the `orphan-networks` schedule): Traefik detached, then the network
-removed (one still in use is left for the next time).
+removed (one still in use is left for the next time). Only networks this panel made are removed:
+they carry its instance id (`rdockpanel.instance`, derived from its `APP_KEY`), so another panel's
+or a test's networks on the same Swarm are left alone.
 
 ## The apps interface
 
