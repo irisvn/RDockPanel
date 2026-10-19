@@ -17,7 +17,10 @@ fn stats(app: &AppState) -> AppResult<std::sync::Arc<SystemStats>> {
 }
 
 pub async fn info(State(app): State<AppState>) -> AppResult<Json<Value>> {
-    Ok(Json(json!(stats(&app)?.info())))
+    let mut info = json!(stats(&app)?.info());
+    // Docker's name for the host (a container's `/proc` names the container).
+    info["hostname"] = json!(crate::services::system_service::hostname(&app).await);
+    Ok(Json(info))
 }
 
 /// The samples kept (about five minutes), oldest first.

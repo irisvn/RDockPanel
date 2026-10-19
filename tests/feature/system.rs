@@ -200,7 +200,7 @@ db_test!(
         assert_eq!(rows(&app, "panel.restart").await[0].status, action::OK);
 
         // Reboot: the hostname typed, then a host command of the panel's image.
-        let host = system_service::hostname(state);
+        let host = system_service::hostname(state).await;
         assert!(!host.is_empty());
         let wrong = system_service::reboot(state, &docker, &by, "not-it", true).await;
         assert!(wrong.is_err());

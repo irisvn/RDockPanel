@@ -70,8 +70,16 @@ pub async fn load_public_ip<C: sea_orm::ConnectionTrait>(db: &C) -> AppResult<()
     Ok(())
 }
 
-/// The server's hostname (the host's, installed: `HOST_PROC`).
-pub fn hostname(app: &rustcms::AppState) -> String {
+/// The server's hostname: Docker's name for its host (a container's own
+/// `/proc` names the container, even read through `HOST_PROC`), else this
+/// machine's.
+pub async fn hostname(app: &rustcms::AppState) -> String {
+    if let Some(docker) = app.service::<Docker>()
+        && let Ok(info) = docker.engine().info().await
+        && !info.name.is_empty()
+    {
+        return info.name;
+    }
     app.service::<crate::services::system_stats_service::SystemStats>()
         .map(|s| s.info().hostname)
         .unwrap_or_default()
@@ -91,7 +99,23 @@ async fn own_image(docker: &Docker) -> DockerResult<Option<(String, Option<Strin
         && let Some(reference) = doc["Config"]["Image"].as_str()
     {
         let id = doc["Image"].as_str().map(str::to_owned);
-        return Ok(Some((reference.to_owned(), id)));
+        // Updated by its tag (no digest in it): the digest the registry
+        // served it as, from the image's own record.
+        let mut reference = reference.to_owned();
+        if !reference.contains('@')
+            && let Some(id) = &id
+            && let Ok(image) = docker.engine().inspect_image(id).await
+        {
+            let repo = repository(&reference);
+            if let Some(digest) = image.repo_digests.iter().find_map(|d| {
+                d.split_once('@')
+                    .filter(|(r, _)| *r == repo)
+                    .map(|(_, d)| d.to_owned())
+            }) {
+                reference = format!("{reference}@{digest}");
+            }
+        }
+        return Ok(Some((reference, id)));
     }
     Ok(service
         .spec
@@ -99,6 +123,15 @@ async fn own_image(docker: &Docker) -> DockerResult<Option<(String, Option<Strin
         .and_then(|t| t.container_spec)
         .and_then(|c| c.image)
         .map(|image| (image, None)))
+}
+
+/// `name` of `name:tag` (a registry's port kept: `host:5000/name:tag`).
+fn repository(reference: &str) -> &str {
+    let reference = reference.split('@').next().unwrap_or(reference);
+    match reference.rsplit_once(':') {
+        Some((name, tag)) if !tag.contains('/') => name,
+        _ => reference,
+    }
 }
 
 /// What the controls show: the panel (version, image, `installed` by
@@ -114,7 +147,7 @@ pub async fn status(app: &rustcms::AppState, docker: Option<&Docker>, installed:
         "version": env!("CARGO_PKG_VERSION"),
         "installed": installed,
         "image": image,
-        "hostname": hostname(app),
+        "hostname": hostname(app).await,
         "public_ip": if ip.is_empty() { Value::Null } else { json!(ip) },
         // Installed, the panel is a Swarm service: restarted by Swarm, its
         // logs Docker's; else its own process (from source).
@@ -188,7 +221,7 @@ pub async fn reboot(
         )
         .into());
     };
-    let host = hostname(app);
+    let host = hostname(app).await;
     if host.is_empty() || confirm.trim() != host {
         return Err(ValidationErrors::field("confirm", "type the server's hostname").into());
     }
@@ -330,6 +363,17 @@ fn public(ip: IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repositories() {
+        assert_eq!(
+            repository("ghcr.io/irisvn/rdockpanel:main"),
+            "ghcr.io/irisvn/rdockpanel"
+        );
+        assert_eq!(repository("host:5000/app:v1@sha256:x"), "host:5000/app");
+        assert_eq!(repository("host:5000/app"), "host:5000/app");
+        assert_eq!(repository("nginx"), "nginx");
+    }
 
     #[test]
     fn lookup_answers() {
