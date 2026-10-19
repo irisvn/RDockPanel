@@ -182,6 +182,15 @@ async fn apply(
             blocking.join("; ")
         )));
     }
+    // A wildcard domain takes every name under it: the panel's
+    // administrators only.
+    if services
+        .iter()
+        .any(|s| s.domains.iter().any(|d| d.host.starts_with("*.")))
+        && !compose_allowed
+    {
+        return Err(AppError::Forbidden);
+    }
     // A Compose file runs anything on the host, as added capabilities and
     // sysctls reach its kernel: the panel's administrators only.
     if services.iter().any(|s| {

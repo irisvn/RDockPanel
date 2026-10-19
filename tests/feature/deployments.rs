@@ -1847,3 +1847,36 @@ db_test!(
             .assert_status(StatusCode::FORBIDDEN);
     }
 );
+
+db_test!(
+    a_network_made_before_instances_is_still_used,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let legacy = |instance: Option<&str>| {
+            let mut labels = std::collections::HashMap::from([
+                ("rdockpanel.managed".to_owned(), "true".to_owned()),
+                ("rdockpanel.project".to_owned(), "shop".to_owned()),
+            ]);
+            if let Some(i) = instance {
+                labels.insert("rdockpanel.instance".to_owned(), i.to_owned());
+            }
+            rdockpanel::services::docker_service::NetworkItem {
+                id: "netid-rdp_shop".to_owned(),
+                name: "rdp_shop".to_owned(),
+                driver: "overlay".to_owned(),
+                scope: "swarm".to_owned(),
+                labels,
+            }
+        };
+        // Made by an earlier version (no instance label): deployed into.
+        fake.networks.lock().unwrap().push(legacy(None));
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        // Another panel's (another instance): never.
+        *fake.networks.lock().unwrap() = vec![legacy(Some("another"))];
+        let refused = run(&app, &admin, "deploy", id).await;
+        assert_eq!(refused.status, "failed", "{:?}", refused.error);
+    }
+);

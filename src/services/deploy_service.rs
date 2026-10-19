@@ -1100,11 +1100,15 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                         service: page.clone(),
                         middlewares: vec![path.clone()],
                         tls: https.then(|| {
-                            if options.cert_resolver.is_empty() {
+                            let mut tls = if options.cert_resolver.is_empty() {
                                 json!({})
                             } else {
                                 json!({"certResolver": options.cert_resolver})
+                            };
+                            if domain.host.starts_with("*.") {
+                                tls["domains"] = json!([{"main": domain.host}]);
                             }
+                            tls
                         }),
                         priority: None,
                     },

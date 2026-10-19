@@ -635,11 +635,13 @@ impl Docker {
         let network = self.0.ensure_network(request.clone()).await?;
         // Swarm reports a just-created overlay without its driver for a moment:
         // the labels (set only at creation) decide; a different driver refuses.
+        // A network made before panels marked theirs (no instance label) is
+        // still this panel's; another panel's (another instance) never is.
         let same = (network.driver.is_empty() || network.driver == request.driver)
-            && request
-                .labels
-                .iter()
-                .all(|(k, v)| network.labels.get(k) == Some(v));
+            && request.labels.iter().all(|(k, v)| {
+                let found = network.labels.get(k);
+                found == Some(v) || (k == "rdockpanel.instance" && found.is_none())
+            });
         if same {
             Ok(network)
         } else {

@@ -101,6 +101,12 @@ impl Resource for ServiceDomainResource {
         record: &service_domain::Model,
         data: Data,
     ) -> AppResult<Data> {
+        // A wildcard stays its administrators' (whatever is changed).
+        if record.host.starts_with("*.")
+            && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+        {
+            return Err(rustcms::AppError::Forbidden);
+        }
         crate::admin::resources::guard::write(ctx, txn, &data, Some(record.service_id)).await?;
         let data = check(ctx, data)?;
         check_container(ctx, txn, &data, Some(record)).await?;
