@@ -79,7 +79,143 @@ pub async fn app_with(
 /// parallel.
 pub async fn swarm_lock() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-    LOCK.lock().await
+    static SWEPT: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    let guard = LOCK.lock().await;
+    SWEPT
+        .get_or_init(|| async {
+            let _ = tokio::task::spawn_blocking(sweep_dead_runs).await;
+        })
+        .await;
+    guard
+}
+
+/// The Swarm objects of test runs that died before their cleanup (killed,
+/// crashed). Each run that takes `swarm_lock` leaves a marker named after its
+/// process; the objects of a marked process no longer running are removed
+/// (their names carry its pid: `e<pid>`, `d<pid>`, `db<pid>`, `t<pid>`,
+/// `r<pid>a`, `r<pid>b`), then its marker. Nothing unmarked is touched.
+fn sweep_dead_runs() {
+    use std::process::Command;
+    let runs = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("swarm-runs");
+    let _ = std::fs::create_dir_all(&runs);
+    // Dead only when the system says there is no such process.
+    let dead = |pid: u32| {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .is_ok_and(|o| {
+                !o.status.success()
+                    && String::from_utf8_lossy(&o.stderr).contains("No such process")
+            })
+    };
+    let mut gone: Vec<(std::path::PathBuf, u32)> = vec![];
+    for entry in std::fs::read_dir(&runs).into_iter().flatten().flatten() {
+        if let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>()
+            && pid != std::process::id()
+            && dead(pid)
+        {
+            gone.push((entry.path(), pid));
+        }
+    }
+    let marker = runs.join(std::process::id().to_string());
+    let _ = std::fs::write(&marker, "");
+    if gone.is_empty() {
+        return;
+    }
+    let owned = |name: &str| {
+        let name = name.strip_prefix("rdp_").unwrap_or(name);
+        gone.iter().any(|(_, pid)| {
+            [
+                format!("e{pid}"),
+                format!("d{pid}"),
+                format!("db{pid}"),
+                format!("t{pid}"),
+                format!("r{pid}a"),
+                format!("r{pid}b"),
+            ]
+            .iter()
+            .any(|p| {
+                name == p
+                    || name
+                        .strip_prefix(p.as_str())
+                        .is_some_and(|r| r.starts_with('_'))
+            })
+        })
+    };
+    let docker = |args: &[&str]| Command::new("docker").args(args).output().ok();
+    // A listing that failed keeps the markers: nothing was cleaned up.
+    let listed = std::cell::Cell::new(true);
+    let list = |args: &[&str]| -> Vec<String> {
+        let out = docker(args).filter(|o| o.status.success());
+        listed.set(listed.get() && out.is_some());
+        out.map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|n| owned(n))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+    };
+    // Removed, or already gone.
+    let removed = |args: &[&str]| {
+        docker(args).is_some_and(|o| {
+            let err = String::from_utf8_lossy(&o.stderr);
+            o.status.success() || err.contains("No such") || err.contains("not found")
+        })
+    };
+    for s in list(&["service", "ls", "--format", "{{.Name}}"]) {
+        removed(&["service", "rm", &s]);
+    }
+    // Routes of the development Traefik (the routing test writes there).
+    let routes = concat!(env!("CARGO_MANIFEST_DIR"), "/storage/traefik/dynamic");
+    for entry in std::fs::read_dir(routes).into_iter().flatten().flatten() {
+        let file = entry.file_name().to_string_lossy().into_owned();
+        if file.strip_suffix(".yml").is_some_and(owned) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let mut networks = list(&["network", "ls", "--format", "{{.Name}}"]);
+    // Traefik leaves the networks it is on (without waiting for it).
+    let traefik = docker(&[
+        "service",
+        "inspect",
+        "rdp-traefik",
+        "--format",
+        "{{json .Spec.TaskTemplate.Networks}}",
+    ])
+    .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    .unwrap_or_default();
+    for n in &networks {
+        let id = docker(&["network", "inspect", "--format", "{{.Id}}", n])
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .unwrap_or_default();
+        if !id.is_empty() && traefik.contains(&id) {
+            removed(&[
+                "service",
+                "update",
+                "--detach",
+                "--network-rm",
+                n,
+                "rdp-traefik",
+            ]);
+        }
+    }
+    let mut volumes = list(&["volume", "ls", "-q"]);
+    // Once their containers are gone.
+    for _ in 0..30 {
+        networks.retain(|n| !removed(&["network", "rm", n]));
+        volumes.retain(|v| !removed(&["volume", "rm", v]));
+        if networks.is_empty() && volumes.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    if listed.get() && networks.is_empty() && volumes.is_empty() {
+        for (path, _) in &gone {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// Where the app writes Traefik's routes.

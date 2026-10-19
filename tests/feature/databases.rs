@@ -213,11 +213,19 @@ db_test!(
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
+        // Its volumes (Destroy keeps them): once their containers are gone.
         for (engine, _) in &engines {
-            let _ = docker
-                .engine()
-                .remove_volume(&format!("rdp_{name}_{engine}_data"))
-                .await;
+            for _ in 0..30 {
+                if docker
+                    .engine()
+                    .remove_volume(&format!("rdp_{name}_{engine}_data"))
+                    .await
+                    .is_ok()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         }
         if let Err(panic) = outcome {
             std::panic::resume_unwind(panic);
