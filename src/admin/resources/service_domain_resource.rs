@@ -153,6 +153,12 @@ fn check(ctx: &Ctx, mut data: Data) -> AppResult<Data> {
         data.insert("host".to_owned(), Value::String(host));
     }
     let mut errors = ValidationErrors::new();
+    // A wildcard takes every name under it: the panel's administrators'.
+    if text(&data, "host").is_some_and(|h| h.starts_with("*."))
+        && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+    {
+        errors.add("host", ctx.t("a wildcard needs system.manage"));
+    }
     if let Some(host) = text(&data, "host")
         && !valid_domain_host(host)
     {

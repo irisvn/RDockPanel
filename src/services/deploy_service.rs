@@ -848,6 +848,10 @@ pub struct Router {
     pub middlewares: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls: Option<Value>,
+    /// Exact hosts first, then wildcards (Traefik's default, the rule's
+    /// length, would put a wildcard's longer rule first).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1087,6 +1091,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                                 json!({"certResolver": options.cert_resolver})
                             }
                         }),
+                        priority: None,
                     },
                 );
             }
@@ -1112,11 +1117,16 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
         let mut access = access.clone();
         access.extend(domain.middlewares.iter().cloned());
         if domain.https {
-            let tls = if options.cert_resolver.is_empty() {
+            let mut tls = if options.cert_resolver.is_empty() {
                 json!({})
             } else {
                 json!({"certResolver": options.cert_resolver})
             };
+            // A wildcard's certificate is asked for by name (its resolver
+            // needs a DNS challenge).
+            if domain.host.starts_with("*.") {
+                tls["domains"] = json!([{"main": domain.host}]);
+            }
             http.routers.insert(
                 router.clone(),
                 Router {
@@ -1125,6 +1135,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                     service: target.clone(),
                     middlewares: access.clone(),
                     tls: Some(tls),
+                    priority: None,
                 },
             );
             http.routers.insert(
@@ -1135,6 +1146,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                     service: target,
                     middlewares: vec![redirect.clone()],
                     tls: None,
+                    priority: None,
                 },
             );
             http.middlewares
@@ -1149,9 +1161,18 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                     service: target,
                     middlewares: access.clone(),
                     tls: None,
+                    priority: None,
                 },
             );
         }
+    }
+    for router in http.routers.values_mut() {
+        let length = router.rule.len() as i64;
+        router.priority = Some(if router.rule.starts_with("HostRegexp") {
+            length
+        } else {
+            10_000 + length
+        });
     }
     Some(TraefikFile { http })
 }
@@ -1177,6 +1198,28 @@ mod tests {
             .unwrap()
             .to_owned();
         assert_eq!(rule, r"HostRegexp(`^[a-z0-9-]+\.shop\.example\.com$`)");
+        // Exact hosts ahead of wildcards; a wildcard's certificate by name.
+        let mut both = snapshot();
+        both.domains[0].host = "*.example.com".to_owned();
+        both.domains[0].https = true;
+        let mut exact = both.domains[0].clone();
+        exact.host = "app.example.com".to_owned();
+        both.domains.push(exact);
+        let file = routes(&both, &DeployOptions::default()).unwrap();
+        let priority = |part: &str| {
+            file.http
+                .routers
+                .values()
+                .find(|r| r.rule.contains(part))
+                .and_then(|r| r.priority)
+                .unwrap()
+        };
+        assert!(priority("app.example.com") > priority("HostRegexp"));
+        assert!(
+            file.to_yaml().contains("*.example.com"),
+            "{}",
+            file.to_yaml()
+        );
         assert!(crate::services::deploy_rules_service::valid_domain_host(
             "*.a.com"
         ));

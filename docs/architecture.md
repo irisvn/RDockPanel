@@ -192,7 +192,9 @@ one replaces it. Unknown, wrong or malformed answers 404 the same; a deployment 
 ### Wildcard domains and middlewares
 
 A domain's host may be a wildcard, `*.example.com`: every name one level under it, as Traefik's
-`HostRegexp`. Its HTTPS certificate needs a DNS-challenge resolver (the installer's uses the HTTP
+`HostRegexp`, made by the panel's administrators only (`system.manage`). Routers carry
+priorities: an exact host always wins over a wildcard. Its HTTPS certificate is asked for by name
+(`tls.domains`) and needs a DNS-challenge resolver (the installer's uses the HTTP
 challenge: Traefik serves its default certificate then). A domain may name middlewares of its own,
 defined in Traefik's files (`ratelimit@file`, in a file of `/etc/rdockpanel/traefik/dynamic` the
 panel does not write), applied after the panel's (redirects, authentication).
