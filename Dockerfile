@@ -3,6 +3,10 @@
 #   docker build -t rdockpanel .
 # The installer (install/install.sh) runs it as a Swarm service.
 FROM rust:1-bookworm AS build
+# What the binary says of itself (build.rs): the release, the commit.
+ARG RDP_VERSION=""
+ARG RDP_COMMIT=""
+ENV RDP_VERSION=${RDP_VERSION} RDP_COMMIT=${RDP_COMMIT}
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -35,6 +39,13 @@ RUN apt-get update \
  && apt-get update \
  && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
  && rm -rf /var/lib/apt/lists/*
+# Declared after the installs: a new commit keeps their cached layers.
+ARG RDP_VERSION=""
+ARG RDP_COMMIT=""
+LABEL org.opencontainers.image.title="RDockPanel" \
+      org.opencontainers.image.source="https://github.com/irisvn/rdockpanel" \
+      org.opencontainers.image.version="${RDP_VERSION}" \
+      org.opencontainers.image.revision="${RDP_COMMIT}"
 WORKDIR /app
 COPY --from=build /rdockpanel /app/rdockpanel
 COPY config /app/config

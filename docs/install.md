@@ -27,6 +27,8 @@ Point `panel.example.com` and `*.apps.example.com` (a wildcard record) to the se
 | `--no-domain` | back to `http://<server-ip>:3000` |
 | `--admin-email EMAIL` | creates the first administrator and prints its password |
 | `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:main` until the first release) |
+| `--version X.Y.Z` | that release of the panel: `ghcr.io/irisvn/rdockpanel:X.Y.Z` |
+| `--upgrade-system` | MySQL and Traefik pulled again at their tags (a newer patch of `mysql:8.4`, `traefik:v3.5`) |
 
 The options are kept in `/etc/rdockpanel/install.conf`: a later run changes only what it is given.
 That file is read as data (`KEY=value` lines of `IMAGE`, `DOMAIN`, `EMAIL`, `APPS_DOMAIN`, each
@@ -55,8 +57,17 @@ panel is reached over HTTPS only.
 
 ## Upgrading and changing options
 
-Run the installer again: it updates the panel, MySQL (8.4) and Traefik (v3.5) to their images and
-the options given, keeping the secrets, the database and the certificates. A secret file in
+Run the installer again: it updates the panel to its image (the newest of its tag) and the options
+given, keeping the secrets, the database and the certificates. MySQL and Traefik are left running
+as they are while their configuration is unchanged (no newer patch of their tag behind the
+database's back, no restart of every domain): `--upgrade-system` pulls them again; a changed
+`--email` restarts Traefik with its new arguments (the certificate resolvers added in the panel are
+kept).
+
+Images: `ghcr.io/irisvn/rdockpanel:main` (the newest commit of `main`), `:main-<commit>` (that
+commit), and for a release `vX.Y.Z` the tags `:X.Y.Z`, `:X.Y` and `:latest`. The panel says which
+it runs (its version, commit and RustCMS Core's) at the foot of the Dashboard and in
+Settings → Panel, where **Check for updates** compares it with the registry. A secret file in
 `/etc/rdockpanel/secrets` that no longer matches its Docker secret stops the installer: restore
 the file from a backup (changing `APP_KEY` needs `rustcms key:reencrypt`; see
 [security](security.md)).

@@ -243,6 +243,7 @@ window.rustcms.registerPage("rdockpanel/containers", {
             const message = JSON.parse(data);
             if (message.type === "exit") ended(t("The shell exited."));
             else if (message.type === "idle") ended(t("Closed after 30 minutes without activity."));
+            else if (message.type === "error") ended(String(message.message || ""));
           },
           onState(state) {
             if (state.state !== "closed") return;

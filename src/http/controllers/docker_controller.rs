@@ -301,10 +301,19 @@ async fn terminal(
 ) -> Result<(), String> {
     use tokio::io::AsyncWriteExt;
     // Dropped with this future, however the socket ends: the shell ends too.
-    let mut shell = docker
-        .exec(id, size, Scope::System, token)
-        .await
-        .map_err(|err| err.to_string())?;
+    let mut shell = match docker.exec(id, size, Scope::System, token).await {
+        Ok(shell) => shell,
+        Err(err) => {
+            // Said in the terminal (an image without a shell, …), then closed.
+            let message = err.to_string();
+            let _ = socket
+                .send(SocketMessage::Text(
+                    json!({ "type": "error", "message": message }).to_string(),
+                ))
+                .await;
+            return Err(message);
+        }
+    };
     let idle = tokio::time::sleep(TERMINAL_IDLE);
     tokio::pin!(idle);
     loop {

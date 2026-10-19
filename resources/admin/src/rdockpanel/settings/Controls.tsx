@@ -11,6 +11,7 @@ import { Logs } from "./Traefik";
 
 type Status = {
   version: string;
+  versions: { rdockpanel: string; commit: string | null; rustcms: string };
   installed: boolean;
   image: string | null;
   hostname: string;
@@ -136,7 +137,8 @@ export function Controls(props: PageProps<unknown>) {
       </div>
       {s && (
         <p className="rdp2-small rdp2-muted">
-          RDockPanel {s.version} · {s.installed ? (s.image ?? t("installed")) : t("from source")} · {s.hostname}
+          RDockPanel {s.version}
+          {s.versions.commit && ` (${s.versions.commit.slice(0, 7)})`} · RustCMS Core {s.versions.rustcms} · {s.installed ? (s.image ?? t("installed")) : t("from source")} · {s.hostname}
           {s.public_ip && ` · ${s.public_ip}`}
         </p>
       )}

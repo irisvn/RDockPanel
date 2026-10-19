@@ -13,6 +13,9 @@
 #   --no-domain          back to http://<server-ip>:3000 (forgets --domain)
 #   --admin-email EMAIL  creates the first administrator (prints its password)
 #   --image IMAGE        the panel's image (default ghcr.io/irisvn/rdockpanel:main)
+#   --version X.Y.Z      that release of the panel (its image ghcr.io/irisvn/rdockpanel:X.Y.Z)
+#   --upgrade-system     MySQL and Traefik pulled again at their tags (else they are
+#                        left running as they are while their configuration is unchanged)
 #
 # Run it again any time (to upgrade, or to change the options): what exists
 # is kept, its secrets first (APP_KEY, the database's passwords).
@@ -54,6 +57,7 @@ if [ -f "$CONF" ]; then
   done < "$CONF"
 fi
 ADMIN_EMAIL=""
+UPGRADE_SYSTEM=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --domain) DOMAIN="${2:-}"; shift 2 ;;
@@ -62,7 +66,11 @@ while [ $# -gt 0 ]; do
     --no-domain) DOMAIN=""; shift ;;
     --admin-email) ADMIN_EMAIL="${2:-}"; shift 2 ;;
     --image) IMAGE="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,19p' "$0" 2>/dev/null || true; exit 0 ;;
+    --version)
+      printf '%s' "${2:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "--version: not a version like 1.2.3"
+      IMAGE="ghcr.io/irisvn/rdockpanel:$2"; shift 2 ;;
+    --upgrade-system) UPGRADE_SYSTEM=1; shift ;;
+    -h|--help) sed -n '2,22p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
 done
@@ -138,6 +146,8 @@ docker network inspect rdp-internal >/dev/null 2>&1 \
   || docker network create --driver overlay --attachable --label "$SYSTEM" rdp-internal >/dev/null
 
 exists() { docker service inspect "$1" >/dev/null 2>&1; }
+# A service's image as configured, without the digest Swarm pinned.
+image_of() { docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' "$1" | sed 's/@sha256:.*//'; }
 constrained() { # service: on this node only (installs of before: on any manager)
   docker service inspect --format '{{join .Spec.TaskTemplate.Placement.Constraints ","}}' "$1" | grep -q "$PLACE" \
     || docker service update --quiet --constraint-rm node.role==manager --constraint-add "$PLACE" "$1" >/dev/null
@@ -149,8 +159,13 @@ constrained() { # service: on this node only (installs of before: on any manager
 MYSQL_HEALTH='mysqladmin ping -h 127.0.0.1 --silent'
 if exists rdp-mysql; then
   constrained rdp-mysql
-  docker service update --quiet --image "$MYSQL_IMAGE" \
-    --health-cmd "$MYSQL_HEALTH" --health-start-period 120s rdp-mysql >/dev/null
+  # Restarted only for another image (or --upgrade-system): never a newer
+  # patch of the same tag behind the database's back.
+  if [ -n "$UPGRADE_SYSTEM" ] || [ "$(image_of rdp-mysql)" != "$MYSQL_IMAGE" ]; then
+    say "Updating MySQL ($MYSQL_IMAGE)"
+    docker service update --quiet --image "$MYSQL_IMAGE" \
+      --health-cmd "$MYSQL_HEALTH" --health-start-period 120s rdp-mysql >/dev/null
+  fi
 else
   say "Starting MySQL"
   docker volume create --label "$SYSTEM" rdp-mysql-data >/dev/null
@@ -181,9 +196,34 @@ if [ -n "$EMAIL" ]; then
 --certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme/acme.json \
 --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
 fi
+# The arguments the installer owns (the panel adds certificate resolvers of
+# its own: kept as they are).
+installer_arg() {
+  case "$1" in
+    --entrypoints.web.*|--entrypoints.websecure.*|--providers.file.*|--log.level=*|--certificatesresolvers.letsencrypt.*) return 0 ;;
+  esac
+  return 1
+}
 if exists rdp-traefik; then
   constrained rdp-traefik
-  docker service update --quiet --image "$TRAEFIK_IMAGE" --args "$TRAEFIK_ARGS" rdp-traefik >/dev/null
+  now=$(docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Args}}{{println .}}{{end}}' rdp-traefik)
+  mine_now=""; theirs=""
+  for arg in $now; do
+    if installer_arg "$arg"; then mine_now="$mine_now$arg
+"; else theirs="$theirs $arg"; fi
+  done
+  mine_want=$(printf '%s\n' $TRAEFIK_ARGS | sort)
+  mine_now=$(printf '%s' "$mine_now" | sort)
+  set --
+  if [ -n "$UPGRADE_SYSTEM" ] || [ "$(image_of rdp-traefik)" != "$TRAEFIK_IMAGE" ]; then
+    set -- --image "$TRAEFIK_IMAGE"
+  fi
+  # Restarted only when something changes (its image, or its arguments).
+  if [ $# -gt 0 ] || [ "$mine_now" != "$mine_want" ]; then
+    say "Updating Traefik"
+    # shellcheck disable=SC2086
+    docker service update --quiet "$@" --args "$TRAEFIK_ARGS$theirs" rdp-traefik >/dev/null
+  fi
 else
   say "Starting Traefik"
   # shellcheck disable=SC2086

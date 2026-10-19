@@ -1,6 +1,7 @@
 # The panel's image, ghcr.io/irisvn/rdockpanel: built natively for amd64 and
-# arm64 on pushes to main (tag `main`) and on version tags (`vX.Y.Z` and
-# `latest`: releases only), then joined in one multi-arch tag.
+# arm64 on pushes to main (tags `main` and `main-<commit>`) and on version
+# tags (`X.Y.Z`, `X.Y` and `latest`: releases only), then joined in one
+# multi-arch tag. The binary knows its version and commit (build.rs).
 name: release
 
 on:
@@ -43,6 +44,9 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          build-args: |
+            RDP_COMMIT=${{ github.sha }}
+            RDP_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '' }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
@@ -75,8 +79,10 @@ jobs:
         working-directory: /tmp/digests
         run: |
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            tags="-t $IMAGE:${GITHUB_REF_NAME} -t $IMAGE:latest"
+            # v1.2.3 → 1.2.3, 1.2 and latest (v1.2.3 too, as before).
+            version="${GITHUB_REF_NAME#v}"
+            tags="-t $IMAGE:${GITHUB_REF_NAME} -t $IMAGE:$version -t $IMAGE:${version%.*} -t $IMAGE:latest"
           else
-            tags="-t $IMAGE:main"
+            tags="-t $IMAGE:main -t $IMAGE:main-${GITHUB_SHA::7}"
           fi
           docker buildx imagetools create $tags $(printf "$IMAGE@sha256:%s " *)

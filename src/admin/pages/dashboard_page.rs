@@ -29,6 +29,10 @@ impl PanelPage for DashboardPage {
     /// Who the page was opened for: its writes are refused for anyone else
     /// (signed in as another user meanwhile). The routes check again.
     async fn data(ctx: &Ctx) -> AppResult<Value> {
-        Ok(json!({ "user": ctx.principal.id }))
+        Ok(json!({
+            "user": ctx.principal.id,
+            // Shown at its foot: RDockPanel's version and commit, RustCMS Core's.
+            "versions": crate::services::system_service::versions(),
+        }))
     }
 }

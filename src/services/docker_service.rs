@@ -696,8 +696,21 @@ impl Docker {
             docker: self.clone(),
             container: container.clone(),
             token: token.to_owned(),
+            armed: true,
         };
-        let session = self.0.exec(&container, size.clamped(), token).await?;
+        let session = match self.0.exec(&container, size.clamped(), token).await {
+            Ok(session) => session,
+            // An image without a shell (distroless, scratch): no terminal,
+            // and nothing to end.
+            Err(err) if no_shell(&err.to_string()) => {
+                let mut guard = guard;
+                guard.armed = false;
+                return Err(DockerError::Conflict(
+                    "this image has no shell (/bin/sh): a terminal cannot open in it".to_owned(),
+                ));
+            }
+            Err(err) => return Err(err),
+        };
         Ok(Shell {
             session,
             _end: guard,
@@ -817,6 +830,11 @@ pub fn disposable_volume(volume: &VolumeItem) -> bool {
     !volume.name.starts_with("rdp_") && !KEPT_BY.iter().any(|l| volume.labels.contains_key(*l))
 }
 
+/// Docker's answer for an image without `/bin/sh`.
+fn no_shell(error: &str) -> bool {
+    error.contains("/bin/sh") && error.contains("no such file or directory")
+}
+
 fn checked_name(name: &str) -> DockerResult<()> {
     let mut chars = name.chars();
     let valid = name.len() <= 255
@@ -862,10 +880,15 @@ struct EndOnDrop {
     docker: Docker,
     container: String,
     token: String,
+    /// Off: nothing to end (no shell started).
+    armed: bool,
 }
 
 impl Drop for EndOnDrop {
     fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
@@ -875,8 +898,13 @@ impl Drop for EndOnDrop {
             self.token.clone(),
         );
         runtime.spawn(async move {
-            if let Err(err) = docker.0.end_exec(&container, &token).await {
-                tracing::warn!(%err, container, "could not end a terminal's shell");
+            match docker.0.end_exec(&container, &token).await {
+                Ok(()) => {}
+                // No shell to end one with: there was none.
+                Err(err) if no_shell(&err.to_string()) => {
+                    tracing::debug!(%err, container, "no shell to end");
+                }
+                Err(err) => tracing::warn!(%err, container, "could not end a terminal's shell"),
             }
         });
     }

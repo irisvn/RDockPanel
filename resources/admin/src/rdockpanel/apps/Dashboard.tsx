@@ -217,10 +217,40 @@ export function Dashboard(props: PageProps<unknown>) {
     return (
       <div className="rdp2-page">
         <ServerTiles {...props} />
+        <Versions {...props} />
       </div>
     );
   }
-  return <Projects {...props} />;
+  return (
+    <>
+      <Projects {...props} />
+      <Versions {...props} />
+    </>
+  );
+}
+
+type VersionInfo = { rdockpanel: string; commit: string | null; rustcms: string };
+
+/** What runs: RDockPanel's version (and commit), RustCMS Core's. */
+function Versions(props: PageProps<unknown>) {
+  const v = (props.data as { versions?: VersionInfo } | null)?.versions;
+  if (!v) return null;
+  return (
+    <p className="rdp2-small rdp2-muted rdp2-versions">
+      RDockPanel {v.rdockpanel}
+      {v.commit && (
+        <>
+          {" "}
+          (
+          <a className="rdp2-link" href={`https://github.com/irisvn/rdockpanel/commit/${v.commit}`} target="_blank" rel="noreferrer">
+            {v.commit.slice(0, 7)}
+          </a>
+          )
+        </>
+      )}{" "}
+      · RustCMS Core {v.rustcms}
+    </p>
+  );
 }
 
 function Projects(props: PageProps<unknown>) {

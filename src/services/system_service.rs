@@ -125,6 +125,17 @@ async fn own_image(docker: &Docker) -> DockerResult<Option<(String, Option<Strin
         .map(|image| (image, None)))
 }
 
+/// What this binary is: RDockPanel's version and commit, and the RustCMS
+/// Core it was built with (`build.rs`).
+pub fn versions() -> Value {
+    let commit = env!("RDP_COMMIT");
+    json!({
+        "rdockpanel": env!("RDP_VERSION"),
+        "commit": if commit.is_empty() { Value::Null } else { json!(commit) },
+        "rustcms": env!("RDP_CORE_VERSION"),
+    })
+}
+
 /// `name` of `name:tag` (a registry's port kept: `host:5000/name:tag`).
 fn repository(reference: &str) -> &str {
     let reference = reference.split('@').next().unwrap_or(reference);
@@ -144,7 +155,8 @@ pub async fn status(app: &rustcms::AppState, docker: Option<&Docker>, installed:
     };
     let ip = public_ip();
     json!({
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": env!("RDP_VERSION"),
+        "versions": versions(),
         "installed": installed,
         "image": image,
         "hostname": hostname(app).await,

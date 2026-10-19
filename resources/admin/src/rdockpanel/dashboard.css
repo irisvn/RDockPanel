@@ -140,3 +140,5 @@
   .rdp2-domain { grid-template-columns: minmax(0, 1fr); }
   .rdp2-domain > [aria-hidden] { display: none; }
 }
+
+.rdp2-versions { margin-top: 1.5rem; text-align: center; }
