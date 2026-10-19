@@ -33,75 +33,98 @@ fn primary_host(domains: &[service_domain::Model]) -> Option<String> {
     domains.first().map(|d| d.host.clone())
 }
 
-/// Every project with its services, for the dashboard: each kind of
-/// record only with its resource's permission (services, domains).
+/// The projects the caller sees (every one with a role's `projects.view_any`,
+/// else theirs) with their services, for the dashboard: each kind of record
+/// only with its permission there (services, domains), and what the caller
+/// may do in each.
 pub async fn overview(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Value>> {
+    use crate::services::access_service;
     let db = app.db();
     let principal = auth.principal();
-    let see_services = principal.can("services.view_any");
-    let see_domains = principal.can("service_domains.view_any");
-    let projects = project::Entity::find()
+    let visible = access_service::projects_where(db, principal, "projects.view_any").await?;
+    let projects: Vec<project::Model> = project::Entity::find()
         .order_by_asc(project::Column::Name)
         .all(db)
-        .await?;
-    let services = if see_services {
-        service::Entity::find()
-            .order_by_asc(service::Column::Name)
-            .all(db)
-            .await?
-    } else {
-        vec![]
-    };
-    let domains = if see_domains {
-        service_domain::Entity::find()
-            .order_by_asc(service_domain::Column::Id)
-            .all(db)
-            .await?
-    } else {
-        vec![]
-    };
-    let projects: Vec<Value> = projects
-        .iter()
-        .map(|p| {
-            let services: Vec<Value> = services
-                .iter()
-                .filter(|s| s.project_id == p.id)
-                .map(|s| {
-                    let own: Vec<service_domain::Model> = domains
-                        .iter()
-                        .filter(|d| d.service_id == s.id)
-                        .cloned()
-                        .collect();
-                    json!({
-                        "id": s.id,
-                        "name": s.name,
-                        "kind": s.kind,
-                        "image": s.image,
-                        "status": s.status,
-                        "desired_state": s.desired_state,
-                        "busy": s.current_deployment_id.is_some(),
-                        "domain": primary_host(&own),
-                    })
-                })
-                .collect();
-            json!({
-                "id": p.id,
-                "name": p.name,
-                "description": p.description,
-                "services": services,
-            })
-        })
+        .await?
+        .into_iter()
+        .filter(|p| visible.as_ref().is_none_or(|ids| ids.contains(&p.id)))
         .collect();
-    Ok(Json(
-        json!({ "projects": projects, "services_visible": see_services }),
-    ))
+    let ids: Vec<i64> = projects.iter().map(|p| p.id).collect();
+    let services = service::Entity::find()
+        .filter(service::Column::ProjectId.is_in(ids.clone()))
+        .order_by_asc(service::Column::Name)
+        .all(db)
+        .await?;
+    let domains = service_domain::Entity::find()
+        .filter(service_domain::Column::ServiceId.is_in(services.iter().map(|s| s.id)))
+        .order_by_asc(service_domain::Column::Id)
+        .all(db)
+        .await?;
+    let mut any_services = false;
+    let mut shown = vec![];
+    for p in &projects {
+        let may = access_service::checker(db, principal, p.id).await?;
+        let see_services = may.can("services.view_any");
+        let see_domains = may.can("service_domains.view_any");
+        any_services |= see_services;
+        let services: Vec<Value> = services
+            .iter()
+            .filter(|s| see_services && s.project_id == p.id)
+            .map(|s| {
+                let own: Vec<service_domain::Model> = domains
+                    .iter()
+                    .filter(|d| see_domains && d.service_id == s.id)
+                    .cloned()
+                    .collect();
+                json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "kind": s.kind,
+                    "image": s.image,
+                    "status": s.status,
+                    "desired_state": s.desired_state,
+                    "busy": s.current_deployment_id.is_some(),
+                    "domain": primary_host(&own),
+                })
+            })
+            .collect();
+        shown.push(json!({
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "services": services,
+            "role": may.role(),
+            "can": {
+                "create_service": may.can("services.create"),
+                "deploy": may.can("services.deploy"),
+                "update": may.can("projects.update"),
+                "delete": may.can("projects.delete"),
+                "members": may.can("projects.members"),
+            },
+        }));
+    }
+    Ok(Json(json!({
+        "projects": shown,
+        "services_visible": any_services,
+        "can": { "create_project": principal.can("projects.create") },
+    })))
 }
 
-async fn service_of(app: &AppState, id: i64) -> AppResult<service::Model> {
-    service::Entity::find_by_id(id)
-        .one(app.db())
-        .await?
-        .ok_or(AppError::NotFound)
+/// A request's body, read once the caller is allowed (a refusal says
+/// nothing of it).
+pub(crate) fn read_body<T: serde::de::DeserializeOwned>(value: Value) -> AppResult<T> {
+    serde_json::from_value(value).map_err(|e| AppError::BadRequest(format!("the request: {e}")))
+}
+
+/// The service `id` for `permission`: a role's, or the caller's role in
+/// its project (`access_service`).
+pub(crate) async fn service_for(
+    app: &AppState,
+    auth: &Auth,
+    id: i64,
+    permission: &str,
+) -> AppResult<service::Model> {
+    crate::services::access_service::service(app.db(), auth.principal(), id, permission).await
 }
 
 /// A service's page: its configuration (no secret value), domains, ports,
@@ -124,10 +147,16 @@ async fn lock_unprivileged(
 }
 
 pub(crate) fn forbid_privileged(auth: &Auth, row: &service::Model) -> AppResult<()> {
+    forbid_privileged_of(auth.principal(), row)
+}
+
+/// [`forbid_privileged`] for a principal (a live session's).
+pub(crate) fn forbid_privileged_of(
+    principal: &rustcms::Principal,
+    row: &service::Model,
+) -> AppResult<()> {
     if (row.kind == "compose" || crate::admin::resources::service_resource::privileged(row))
-        && !auth
-            .principal()
-            .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+        && !principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
     {
         return Err(AppError::Forbidden);
     }
@@ -140,15 +169,17 @@ pub async fn service(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let db = app.db();
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.view").await?;
     let principal = auth.principal();
+    // Its project's permissions: the caller's roles', or their role's there.
+    let may = crate::services::access_service::checker(db, principal, row.project_id).await?;
     let project = project::Entity::find_by_id(row.project_id)
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
     let snapshot = snapshot_without_env(db, &row).await?;
     // Related records, each with its own resource's permission.
-    let domains = if principal.can("service_domains.view_any") {
+    let domains = if may.can("service_domains.view_any") {
         service_domain::Entity::find()
             .filter(service_domain::Column::ServiceId.eq(id))
             .order_by_asc(service_domain::Column::Id)
@@ -157,7 +188,7 @@ pub async fn service(
     } else {
         vec![]
     };
-    let redirects = if principal.can("service_redirects.view_any") {
+    let redirects = if may.can("service_redirects.view_any") {
         crate::models::service_redirect::Entity::find()
             .filter(crate::models::service_redirect::Column::ServiceId.eq(id))
             .order_by_asc(crate::models::service_redirect::Column::Id)
@@ -166,7 +197,7 @@ pub async fn service(
     } else {
         vec![]
     };
-    let scripts = if principal.can("service_scripts.view_any") {
+    let scripts = if may.can("service_scripts.view_any") {
         crate::models::service_script::Entity::find()
             .filter(crate::models::service_script::Column::ServiceId.eq(id))
             .order_by_asc(crate::models::service_script::Column::Name)
@@ -184,7 +215,7 @@ pub async fn service(
         .into_iter()
         .map(|u| json!({ "id": u.id, "username": u.username }))
         .collect();
-    let ports = if principal.can("service_ports.view_any") {
+    let ports = if may.can("service_ports.view_any") {
         service_port::Entity::find()
             .filter(service_port::Column::ServiceId.eq(id))
             .order_by_asc(service_port::Column::Id)
@@ -193,7 +224,7 @@ pub async fn service(
     } else {
         vec![]
     };
-    let mounts = if principal.can("service_mounts.view_any") {
+    let mounts = if may.can("service_mounts.view_any") {
         service_mount::Entity::find()
             .filter(service_mount::Column::ServiceId.eq(id))
             .order_by_asc(service_mount::Column::Id)
@@ -207,7 +238,7 @@ pub async fn service(
         Ok(env) => (env.into_keys().collect::<Vec<_>>(), true),
         Err(_) => (vec![], false),
     };
-    let can_deployments = principal.can("deployments.view");
+    let can_deployments = may.can("deployments.view");
     let deployments: Vec<Value> = if can_deployments {
         deployment::Entity::find()
             .filter(deployment::Column::ServiceId.eq(id))
@@ -331,29 +362,39 @@ pub async fn service(
         // HTTPS without a certificate of its own: the installer's resolver
         // (none: Traefik's own certificate, as in development).
         "default_resolver": default_resolver,
+        // Its project's permissions the caller holds (a role's, or their
+        // role's there): what its tabs offer.
+        "permissions": crate::services::access_service::project_permissions()
+            .chain(["docker.exec", "docker.logs"])
+            .filter(|p| may.can(p))
+            .collect::<Vec<_>>(),
         "can": {
-            "update": principal.can("services.update"),
-            "delete": principal.can("services.delete"),
-            "deploy": principal.can("services.deploy"),
-            "destroy": principal.can("services.destroy"),
-            "secrets": principal.can(SECRETS_PERMISSION),
+            "update": may.can("services.update"),
+            "delete": may.can("services.delete"),
+            "deploy": may.can("services.deploy"),
+            "destroy": may.can("services.destroy"),
+            "secrets": may.can(SECRETS_PERMISSION),
+            // The service's logs and terminal (`/apps/services/{id}/…`).
+            "logs": may.can("services.logs") || may.can("docker.logs"),
+            "exec": may.can("services.exec") || may.can("docker.exec"),
+            "members": may.can("projects.members"),
             "deployments": can_deployments,
             "system": principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION),
             "domains": {
-                "view": principal.can("service_domains.view_any"),
-                "create": principal.can("service_domains.create"),
-                "update": principal.can("service_domains.update"),
-                "delete": principal.can("service_domains.delete"),
+                "view": may.can("service_domains.view_any"),
+                "create": may.can("service_domains.create"),
+                "update": may.can("service_domains.update"),
+                "delete": may.can("service_domains.delete"),
             },
             "ports": {
-                "view": principal.can("service_ports.view_any"),
-                "create": principal.can("service_ports.create"),
-                "delete": principal.can("service_ports.delete"),
+                "view": may.can("service_ports.view_any"),
+                "create": may.can("service_ports.create"),
+                "delete": may.can("service_ports.delete"),
             },
             "mounts": {
-                "view": principal.can("service_mounts.view_any"),
-                "create": principal.can("service_mounts.create"),
-                "delete": principal.can("service_mounts.delete"),
+                "view": may.can("service_mounts.view_any"),
+                "create": may.can("service_mounts.create"),
+                "delete": may.can("service_mounts.delete"),
             },
         },
     })))
@@ -370,7 +411,7 @@ pub async fn env(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.secrets").await?;
     let env = service_env(&row, app.keyring()).map_err(|_| {
         AppError::BadRequest(
             "the environment cannot be read (sealed with another APP_KEY): set it again".into(),
@@ -415,9 +456,10 @@ pub async fn put_env(
     auth: Auth,
     request: RequestMeta,
     Path(id): Path<i64>,
-    Json(body): Json<EnvText>,
+    Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.update").await?;
+    let body: EnvText = read_body(body)?;
     // A Compose file reads its environment (`${VAR}`, even in its volumes):
     // the panel's administrators only, as the file itself.
     if (row.kind == "compose" || crate::admin::resources::service_resource::privileged(&row))
@@ -487,12 +529,19 @@ pub async fn put_env(
 /// One deployment, with its log (a finished one: no stream needed).
 pub async fn deployment(
     State(app): State<AppState>,
+    auth: Auth,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    if !crate::services::access_service::admits(app.db(), auth.principal(), "deployments.view")
+        .await?
+    {
+        return Err(AppError::Forbidden);
+    }
     let row = deployment::Entity::find_by_id(id)
         .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
+    service_for(&app, &auth, row.service_id, "deployments.view").await?;
     Ok(Json(summary(&row)))
 }
 
@@ -520,7 +569,7 @@ pub async fn credentials(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let db = app.db();
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.secrets").await?;
     let engine = Engine::parse(&row.kind).ok_or(AppError::NotFound)?;
     let env = service_env(&row, app.keyring()).map_err(|_| {
         AppError::BadRequest("the credentials cannot be read (sealed with another APP_KEY)".into())
@@ -571,12 +620,12 @@ pub async fn create_service(
     auth: Auth,
     request: RequestMeta,
     Path(id): Path<i64>,
-    Json(body): Json<NewServiceBody>,
+    Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
-    // Only into a project the user may see (as the resources' forms).
-    if !auth.principal().can("projects.view") {
-        return Err(AppError::NotFound);
-    }
+    // Into a project where the user may add services (a role's, or theirs).
+    crate::services::access_service::project(app.db(), auth.principal(), id, "services.create")
+        .await?;
+    let body: NewServiceBody = read_body(body)?;
     // A Compose file runs anything on the host (privileged containers, host
     // directories): the panel's own administrators only.
     if body.kind == "compose"
@@ -630,7 +679,7 @@ pub async fn deploy_key(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.update").await?;
     forbid_privileged(&auth, &row)?;
     let dir = std::env::temp_dir().join(format!(
         "rdp-key-{}",
@@ -687,7 +736,7 @@ pub async fn trigger(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.deploy").await?;
     forbid_privileged(&auth, &row)?;
     let token = crate::services::database_service::random_string(40);
     let txn = rustcms::db::begin_write(app.db()).await?;
@@ -729,13 +778,23 @@ pub async fn errors(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     use crate::services::docker_service::{Docker, TaskState};
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.view").await?;
     // A Compose or privileged service's diagnostics: its administrators'.
     forbid_privileged(&auth, &row)?;
-    let name = snapshot_without_env(app.db(), &row).await?.service_name();
-    // Compose's containers are no Swarm tasks: none listed.
+    let snapshot = snapshot_without_env(app.db(), &row).await?;
+    let name = snapshot.service_name();
+    // Compose's containers are no Swarm tasks: none listed. Only the panel's
+    // own deployment of it (never another Swarm service of that name).
     let tasks = match app.service::<Docker>() {
-        Some(docker) if row.kind != "compose" => {
+        Some(docker)
+            if row.kind != "compose"
+                && matches!(
+                    docker
+                        .managed_service(&name, &snapshot.project, &snapshot.service)
+                        .await,
+                    Ok(Some(_))
+                ) =>
+        {
             docker.engine().list_tasks(&name).await.unwrap_or_default()
         }
         _ => vec![],
@@ -777,7 +836,14 @@ pub async fn errors(
         })
         .collect();
     failed.truncate(RECENT_ERRORS);
-    let deployment = if auth.principal().can("deployments.view") {
+    let deployment = if crate::services::access_service::can(
+        app.db(),
+        auth.principal(),
+        row.project_id,
+        "deployments.view",
+    )
+    .await?
+    {
         deployment::Entity::find()
             .filter(deployment::Column::ServiceId.eq(id))
             .filter(deployment::Column::Status.eq(crate::services::deployment_service::FAILED))
@@ -817,20 +883,35 @@ pub async fn stats(
     auth: Auth,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    // Container ids (the Logs and Shell links) only for who sees containers.
-    let show_ids = auth.principal().can("docker.view");
     use crate::services::docker_service::{Docker, TaskState};
     use futures_util::StreamExt;
-    let row = service_of(&app, id).await?;
-    let name = snapshot_without_env(app.db(), &row).await?.service_name();
+    let row = service_for(&app, &auth, id, "services.view").await?;
+    // Container ids (the Logs and Shell buttons) for who sees containers, or
+    // this service's logs or terminal.
+    let may = crate::services::access_service::checker(app.db(), auth.principal(), row.project_id)
+        .await?;
+    let show_ids = may.can("docker.view") || may.can("services.logs") || may.can("services.exec");
+    let snapshot = snapshot_without_env(app.db(), &row).await?;
+    let name = snapshot.service_name();
     let docker = app
         .service::<Docker>()
         .ok_or_else(|| AppError::BadRequest("Docker is not available".into()))?;
-    let tasks = docker
-        .engine()
-        .list_tasks(&name)
+    // The panel's own deployment of it only (never another Swarm service of
+    // that name): none yet, no task.
+    let managed = docker
+        .managed_service(&name, &snapshot.project, &snapshot.service)
         .await
-        .map_err(|e| AppError::BadRequest(format!("the service's tasks: {e}")))?;
+        .map_err(|e| AppError::BadRequest(format!("the service: {e}")))?
+        .is_some();
+    let tasks = if managed {
+        docker
+            .engine()
+            .list_tasks(&name)
+            .await
+            .map_err(|e| AppError::BadRequest(format!("the service's tasks: {e}")))?
+    } else {
+        vec![]
+    };
     let containers: Vec<(i64, String)> = tasks
         .iter()
         .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
@@ -897,10 +978,11 @@ pub async fn add_basic_auth(
     auth: Auth,
     request: RequestMeta,
     Path(id): Path<i64>,
-    Json(body): Json<BasicAuthBody>,
+    Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
     use crate::models::service_basic_auth;
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.update").await?;
+    let body: BasicAuthBody = read_body(body)?;
     forbid_privileged(&auth, &row)?;
     let username = body.username.trim().to_owned();
     let mut errors = ValidationErrors::new();
@@ -954,7 +1036,7 @@ pub async fn remove_basic_auth(
     Path((id, user)): Path<(i64, i64)>,
 ) -> AppResult<StatusCode> {
     use crate::models::service_basic_auth;
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.update").await?;
     forbid_privileged(&auth, &row)?;
     let txn = rustcms::db::begin_write(app.db()).await?;
     lock_unprivileged(&txn, &auth, row.id).await?;
@@ -981,7 +1063,7 @@ pub async fn github_webhook(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let row = service_of(&app, id).await?;
+    let row = service_for(&app, &auth, id, "services.deploy").await?;
     forbid_privileged(&auth, &row)?;
     let secret = crate::services::database_service::random_string(40);
     let sealed = Encrypted::seal(app.keyring(), &service::webhook_secret_context(), &secret)?;
@@ -1025,16 +1107,33 @@ pub async fn run_script(
     auth: Auth,
     request: RequestMeta,
     Path(id): Path<i64>,
-    Json(body): Json<RunScriptBody>,
+    Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
     use crate::models::service_script;
     use crate::services::action_service::{self, Initiator};
     use crate::services::docker_service::{Docker, ExecChunk, TaskState};
     use futures_util::StreamExt;
+    // Nowhere allowed: refused before any id is looked up.
+    // Its own permission (a role's, or a project role's), or Docker's.
+    if !auth.principal().can("docker.exec")
+        && !crate::services::access_service::admits(app.db(), auth.principal(), "services.exec")
+            .await?
+    {
+        return Err(AppError::Forbidden);
+    }
+    let body: RunScriptBody = read_body(body)?;
     let script = service_script::Entity::find_by_id(id)
         .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
+    // Its service's project first: its command is compared only then.
+    let row = crate::services::access_service::service_any(
+        app.db(),
+        auth.principal(),
+        script.service_id,
+        &["services.exec", "docker.exec"],
+    )
+    .await?;
     if script.command != body.command {
         return Err(AppError::Conflict {
             code: "script_changed",
@@ -1042,7 +1141,6 @@ pub async fn run_script(
             message: "The script changed since it was shown: look at it again",
         });
     }
-    let row = service_of(&app, script.service_id).await?;
     forbid_privileged(&auth, &row)?;
     if row.kind == "compose" {
         return Err(AppError::BadRequest(

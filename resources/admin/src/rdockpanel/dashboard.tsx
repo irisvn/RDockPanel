@@ -13,6 +13,7 @@ import { Settings } from "./settings/Settings";
 import { Actions } from "./actions/Actions";
 import { Domains } from "./domains/Domains";
 import { Palette } from "./lib/Palette";
+import { Members } from "./apps/Members";
 import type { Overview } from "./apps/types";
 import { StatusDot } from "./lib/ui";
 import { bindResources } from "./lib/resources";
@@ -24,6 +25,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
   const overview = useAdminQuery<Overview>(props, "/apps/overview", { refetchInterval: 5000, refetchOnMount: "always" });
   const [adding, setAdding] = useState(false);
   const [templating, setTemplating] = useState(false);
+  const [members, setMembers] = useState(false);
   if (overview.isLoading) return <Loading />;
   if (overview.error) return <ErrorState error={overview.error} />;
   const project = overview.data?.projects.find((p) => p.name === props.project);
@@ -39,14 +41,24 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
       </nav>
       <div className="rdp2-head">
         <h2 className="rdp2-title">{project.name}</h2>
-        {props.can("services.create") && (
+        {(project.can.create_service || project.can.members) && (
           <div className="rdp2-row">
-            <Button variant="outline" onClick={() => setTemplating(true)}>
-              {t("Templates")}
-            </Button>
-            <Button onClick={() => setAdding(true)}>+ {t("Service")}</Button>
+            {project.can.members && (
+              <Button variant="outline" onClick={() => setMembers(true)}>
+                {t("Members")}
+              </Button>
+            )}
+            {project.can.create_service && (
+              <>
+                <Button variant="outline" onClick={() => setTemplating(true)}>
+                  {t("Templates")}
+                </Button>
+                <Button onClick={() => setAdding(true)}>+ {t("Service")}</Button>
+              </>
+            )}
           </div>
         )}
+      {members && <Members {...props} project={project} onClose={() => setMembers(false)} />}
       </div>
       {project.description && <p className="rdp2-muted">{project.description}</p>}
       <div className="rdp2-cards">

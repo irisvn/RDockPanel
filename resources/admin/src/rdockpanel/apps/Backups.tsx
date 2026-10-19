@@ -38,6 +38,8 @@ type Tab = {
   configs: Config[];
   runs: Run[];
   providers: Array<{ id: number; name: string; kind: string }>;
+  /** This service's backups (for a project admin, who browses no provider). */
+  restorable: Array<{ storage_provider_id: number; file: string; at: string | null }>;
 };
 
 /** What a configuration backs up: "" (the database) or a volume's path. */
@@ -200,6 +202,13 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
   const list = async () => {
     setError(null);
     const ticket = ++asked.current;
+    // Without a role's restore permission: this service's own backups only.
+    if (!props.can("backups.restore")) {
+      const own = props.tab.restorable.filter((r) => String(r.storage_provider_id) === provider).map((r) => ({ file: r.file, size: 0 }));
+      setFiles(own);
+      setFile(own[0]?.file ?? "");
+      return;
+    }
     try {
       const out = await props.api.get<{ files: Array<{ file: string; size: number }> }>(
         // The query as an option: RustCMS refuses a `?` in the path.
@@ -313,7 +322,7 @@ export function BackupsTab(props: Props) {
   const [log, setLog] = useState<number | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  if (!props.can("database_backups.view_any")) return <p className="rdp2-muted">{t("You may not see backups.")}</p>;
+  if (!d.permissions.includes("database_backups.view_any")) return <p className="rdp2-muted">{t("You may not see backups.")}</p>;
   if (tab.isLoading) return <Loading />;
   if (tab.error || !tab.data) return <ErrorState error={tab.error} />;
   const data = tab.data;
@@ -337,12 +346,12 @@ export function BackupsTab(props: Props) {
         description={t("Dumps of the database (pg_dump, mysqldump, mariadb-dump, mongodump) or archives of its volumes, gzipped, written to a storage provider on a schedule.")}
         actions={
           <>
-            {props.can("backups.restore") && data.providers.length > 0 && (
+            {d.permissions.includes("backups.restore") && data.providers.length > 0 && (
               <Button variant="outline" onClick={() => setRestoring(true)}>
                 {t("Restore")}
               </Button>
             )}
-            {props.can("database_backups.create") && data.providers.length > 0 && (
+            {d.permissions.includes("database_backups.create") && data.providers.length > 0 && (
               <Button onClick={() => setEditing("new")}>{t("Create backup")}</Button>
             )}
           </>
@@ -381,17 +390,17 @@ export function BackupsTab(props: Props) {
                   <td className="rdp2-mono rdp2-small">{c.path}</td>
                   <td>{c.retention}</td>
                   <td className="rdp2-row rdp2-end">
-                    {props.can("backups.run") && (
+                    {d.permissions.includes("backups.run") && (
                       <Button size="sm" variant="outline" onClick={() => runNow(c)}>
                         {t("Run now")}
                       </Button>
                     )}
-                    {props.can("database_backups.update") && (
+                    {d.permissions.includes("database_backups.update") && (
                       <Button size="sm" variant="ghost" onClick={() => setEditing(c)}>
                         {t("Edit")}
                       </Button>
                     )}
-                    {props.can("database_backups.delete") && (
+                    {d.permissions.includes("database_backups.delete") && (
                       <Button
                         size="sm"
                         variant="ghost"

@@ -28,6 +28,18 @@ pub fn provider(api: &ApiRoutes, admin: &AdminRoutes) -> AuthProvider {
             crate::http::controllers::backups_controller::RESTORE_PERMISSION,
             "database_backups",
         )
+        // A service's logs and its terminal (without Docker's pages); a
+        // project's members.
+        .permission(rustcms::auth::ADMIN_GUARD, "services.logs", "services")
+        .permission(rustcms::auth::ADMIN_GUARD, "services.exec", "services")
+        .permission(rustcms::auth::ADMIN_GUARD, "projects.members", "projects")
+        // Opening the apps pages (Dashboard, Domains, Actions) and nothing
+        // else: given to a project's members (their projects are theirs).
+        .permission(
+            rustcms::auth::ADMIN_GUARD,
+            crate::services::access_service::APPS_ACCESS,
+            "projects",
+        )
         // Reading environment values in clear (audited); writing needs `services.update`.
         .permission(
             rustcms::auth::ADMIN_GUARD,

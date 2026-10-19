@@ -10,6 +10,7 @@ import { BackupsTab } from "./Backups";
 import { MaintenanceTab, RedirectsTab, ScriptsTab, SecurityTab } from "./Access";
 import type { Deployment, Domain, ServiceDetail } from "./types";
 import { DomainForm, plainDomain } from "./DomainForm";
+import { ServiceLogs, ServiceTerminal } from "./Terminal";
 
 type Props = PageProps<unknown> & { project: string; serviceId: number; tab: string };
 type T = (s: string) => string;
@@ -330,6 +331,7 @@ function Monitor(props: Props & { d: ServiceDetail }) {
   }, [stats.data]);
   const data = stats.data;
   const container = data?.tasks.find((task) => task.container)?.container ?? null;
+  const [open, setOpen] = useState<"logs" | "shell" | null>(null);
   if (stats.error)
     return (
       <Section title={t("Monitor")}>
@@ -343,20 +345,22 @@ function Monitor(props: Props & { d: ServiceDetail }) {
       actions={
         container && (
           <>
-            {props.can("docker.view") && props.can("docker.logs") && (
-              <a className="rdp2-button-link" href={`${document.baseURI.replace(/\/$/, "")}/p/containers?open=${container}&tab=logs`}>
+            {d.can.logs && (
+              <Button variant="outline" onClick={() => setOpen("logs")}>
                 {t("Logs")}
-              </a>
+              </Button>
             )}
-            {props.can("docker.view") && props.can("docker.exec") && (
-              <a className="rdp2-button-link" href={`${document.baseURI.replace(/\/$/, "")}/p/containers?open=${container}&tab=terminal`}>
+            {d.can.exec && (
+              <Button variant="outline" onClick={() => setOpen("shell")}>
                 {t("Shell")}
-              </a>
+              </Button>
             )}
           </>
         )
       }
     >
+      {open === "logs" && <ServiceLogs {...props} serviceId={d.service.id} onClose={() => setOpen(null)} />}
+      {open === "shell" && container && <ServiceTerminal {...props} serviceId={d.service.id} container={container} onClose={() => setOpen(null)} />}
       <div className="rdp2-tiles">
         <div className="rdp2-tile">
           <span className="rdp2-muted rdp2-small">{t("CPU")}</span>

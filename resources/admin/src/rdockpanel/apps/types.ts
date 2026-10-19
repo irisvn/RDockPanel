@@ -11,8 +11,16 @@ export type ServiceCard = {
   domain: string | null;
 };
 
-export type Project = { id: number; name: string; description: string | null; services: ServiceCard[] };
-export type Overview = { projects: Project[]; services_visible: boolean };
+export type Project = {
+  id: number;
+  name: string;
+  description: string | null;
+  services: ServiceCard[];
+  /** The caller's role in it (none: they see it through a role of theirs). */
+  role: string | null;
+  can: { create_service: boolean; deploy: boolean; update: boolean; delete: boolean; members: boolean };
+};
+export type Overview = { projects: Project[]; services_visible: boolean; can: { create_project: boolean } };
 
 export type Domain = { id: number; service_id: number; host: string; path: string; port: number; https: boolean; compose_service: string | null; middlewares: string | null; cert_resolver_id: number | null; certificate_id: number | null };
 export type Port = { id: number; published: number; target: number; protocol: string; mode: string };
@@ -109,6 +117,8 @@ export type ServiceDetail = {
   mounts: Mount[];
   latest: Deployment | null;
   deployments: Deployment[];
+  /** Its project's permissions the caller holds (a role's, or their role's there). */
+  permissions: string[];
   can: {
     update: boolean;
     delete: boolean;
@@ -116,6 +126,10 @@ export type ServiceDetail = {
     destroy: boolean;
     secrets: boolean;
     deployments: boolean;
+    /** The service's logs and terminal (its own permissions, or Docker's). */
+    logs: boolean;
+    exec: boolean;
+    members: boolean;
     /** `system.manage`: wildcards, a domain's own certificate. */
     system: boolean;
     domains: Abilities & { update: boolean };

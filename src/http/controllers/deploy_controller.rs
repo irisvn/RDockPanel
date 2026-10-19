@@ -23,10 +23,19 @@ pub async fn log(
     Path(id): Path<i64>,
 ) -> AppResult<EventStream> {
     let db = app.db().clone();
-    deployment::Entity::find_by_id(id)
+    // Nowhere allowed: refused before the id is looked up.
+    if !crate::services::access_service::admits(&db, live.principal(), "deployments.view").await? {
+        return Err(AppError::Forbidden);
+    }
+    let service = deployment::Entity::find_by_id(id)
         .one(&db)
         .await?
-        .ok_or(AppError::NotFound)?;
+        .ok_or(AppError::NotFound)?
+        .service_id;
+    // Its service's project, now and at each recheck.
+    let target =
+        crate::services::access_service::service_target(db.clone(), service, "deployments.view");
+    target(live.principal().clone()).await?;
     let events = stream::unfold(
         (db, None::<String>, false),
         move |(db, sent, over): (_, Option<String>, bool)| async move {
@@ -60,5 +69,5 @@ pub async fn log(
         },
     )
     .flatten();
-    Ok(live.stream(events))
+    Ok(live.stream(events).target(target))
 }

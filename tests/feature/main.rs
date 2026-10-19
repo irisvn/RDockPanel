@@ -16,6 +16,7 @@ mod domains;
 mod git;
 mod health;
 mod live;
+mod members;
 mod notifications;
 mod projects;
 mod routing;

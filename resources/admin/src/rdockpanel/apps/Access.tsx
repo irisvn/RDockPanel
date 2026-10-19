@@ -17,7 +17,7 @@ export function RedirectsTab(props: Props) {
   const [permanent, setPermanent] = useState(false);
   const [fields, setFields] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<unknown>(null);
-  const can = props.can("service_redirects.create");
+  const can = d.permissions.includes("service_redirects.create");
   const fail = (err: unknown) => {
     if (err instanceof ResourceError && err.status === 422) setFields(err.fieldErrors);
     else setError(err);
@@ -36,7 +36,7 @@ export function RedirectsTab(props: Props) {
             <span className="rdp2-muted">→</span>
             <code className="rdp2-ellipsis">{r.replacement}</code>
             <span className="rdp2-muted rdp2-small">{r.permanent ? t("permanent") : t("temporary")}</span>
-            {props.can("service_redirects.update") && (
+            {d.permissions.includes("service_redirects.update") && (
               <Switch
                 checked={r.enabled}
                 onCheckedChange={async (enabled) => {
@@ -49,7 +49,7 @@ export function RedirectsTab(props: Props) {
                 }}
               />
             )}
-            {props.can("service_redirects.delete") && (
+            {d.permissions.includes("service_redirects.delete") && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -257,7 +257,7 @@ export function ScriptsTab(props: Props) {
           <li key={s.id} className="rdp2-row">
             <strong>{s.name}</strong>
             <code className="rdp2-ellipsis rdp2-small">{s.command}</code>
-            {props.can("docker.exec") && (
+            {(d.permissions.includes("services.exec") || d.permissions.includes("docker.exec")) && (
               <Button
                 size="sm"
                 variant="outline"
@@ -278,7 +278,7 @@ export function ScriptsTab(props: Props) {
                 {running === s.id ? t("Running…") : t("Run")}
               </Button>
             )}
-            {props.can("service_scripts.delete") && (
+            {d.permissions.includes("service_scripts.delete") && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -306,7 +306,7 @@ export function ScriptsTab(props: Props) {
         </div>
       )}
       {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
-      {props.can("service_scripts.create") && (
+      {d.permissions.includes("service_scripts.create") && (
         <form
           className="rdp2-form"
           onSubmit={async (e) => {

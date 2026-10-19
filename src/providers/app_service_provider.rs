@@ -226,6 +226,12 @@ impl ServiceProvider for AppServiceProvider {
         // `tracing`'s).
         log::set_max_level(log::LevelFilter::Info.min(log::max_level()));
         crate::services::deploy_service::set_instance(state.keyring());
+        // Members of projects deleted since: forgotten.
+        match crate::services::access_service::forget_deleted_projects(state).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "memberships of deleted projects removed"),
+            Err(err) => tracing::debug!(%err, "memberships not checked"),
+        }
         // The public address Refresh IP found (else the installer's).
         if let Err(err) = crate::services::system_service::load_public_ip(state.db()).await {
             tracing::debug!(%err, "public address not read");

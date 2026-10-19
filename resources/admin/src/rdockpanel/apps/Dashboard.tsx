@@ -213,14 +213,6 @@ export function NewService(props: {
 
 /** The server's metrics, then the projects (with their permission). */
 export function Dashboard(props: PageProps<unknown>) {
-  if (!props.can("projects.view_any")) {
-    return (
-      <div className="rdp2-page">
-        <ServerTiles {...props} />
-        <Versions {...props} />
-      </div>
-    );
-  }
   return (
     <>
       <Projects {...props} />
@@ -261,7 +253,6 @@ function Projects(props: PageProps<unknown>) {
   const [templating, setTemplating] = useState<Project | null>(null);
   const [error, setError] = useState<unknown>(null);
   const canCreateProject = props.can("projects.create");
-  const canCreateService = props.can("services.create");
 
   return (
     <div className="rdp2-page">
@@ -286,7 +277,7 @@ function Projects(props: PageProps<unknown>) {
               {project.name}
             </button>
             <div className="rdp2-row">
-              {canCreateService && (
+              {project.can.create_service && (
                 <>
                   <Button size="sm" variant="outline" onClick={() => setTemplating(project)}>
                     {t("Templates")}
@@ -296,7 +287,8 @@ function Projects(props: PageProps<unknown>) {
                   </Button>
                 </>
               )}
-              {project.services.length === 0 && props.can("projects.delete") && (
+              {project.role && <span className="rdp2-badge">{t(project.role)}</span>}
+              {project.services.length === 0 && project.can.delete && (
                 <Button
                   size="sm"
                   variant="ghost"

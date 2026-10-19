@@ -18,8 +18,9 @@ impl PanelPage for DashboardPage {
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Dashboard")
             .icon("dashboard")
-            // The server's metrics with `server.view`, the projects with theirs.
-            .permission_any(["projects.view_any", "server.view"])
+            // The server's metrics with `server.view`; the projects a role
+            // sees, or a member's own (`apps.access`).
+            .permission_any(["projects.view_any", "server.view", "apps.access"])
     }
 
     fn view() -> PageView {

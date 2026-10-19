@@ -30,8 +30,11 @@ const STOPPED: &str = "stopped";
 pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Value>> {
     let db = app.db();
     let principal = auth.principal();
-    // Where a domain leads names its service.
-    if !principal.can("services.view_any") {
+    use crate::services::access_service::{admits, checker};
+    // Where a domain leads names its service: both, somewhere.
+    if !admits(db, principal, "services.view_any").await?
+        || !admits(db, principal, "service_domains.view_any").await?
+    {
         return Err(AppError::Forbidden);
     }
     let admin = principal.can(SYSTEM_PERMISSION);
@@ -59,15 +62,21 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
         let Some(project) = projects.get(&row.project_id) else {
             continue;
         };
+        // Its project's: the caller's roles', or their role's there.
+        let may = checker(db, principal, project.id).await?;
+        if !may.can("services.view_any") || !may.can("service_domains.view_any") {
+            continue;
+        }
         // A Compose or privileged service's records are the panel's
         // administrators' (`ChildPolicy`).
-        let writable = forbid_privileged(&auth, row).is_ok();
+        let unprivileged = forbid_privileged(&auth, row).is_ok();
+        let writable = unprivileged && may.can("service_domains.update");
         choices.push(json!({
             "id": row.id,
             "project": project.name,
             "name": row.name,
             "kind": row.kind,
-            "writable": writable,
+            "writable": unprivileged && may.can("service_domains.create"),
         }));
         let own = rows.remove(&row.id).unwrap_or_default();
         let current = snapshot_without_env(db, row).await?;
@@ -186,9 +195,10 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
             vec![]
         },
         "can": {
-            "create": principal.can("service_domains.create"),
-            "update": principal.can("service_domains.update"),
-            "delete": principal.can("service_domains.delete"),
+            // Somewhere (each row and service says where).
+            "create": admits(db, principal, "service_domains.create").await?,
+            "update": admits(db, principal, "service_domains.update").await?,
+            "delete": admits(db, principal, "service_domains.delete").await?,
             "system": admin,
         },
     })))

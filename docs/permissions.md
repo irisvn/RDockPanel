@@ -71,6 +71,35 @@ The resources use the panel's standard permissions, one set per resource
   deleted, nor renamed while one of them is deployed;
 - the ports in `[panel] reserved_ports` (the proxy's and the panel's) cannot be published.
 
+## Project members
+
+A user needs no role to work on a project: a project's admin (or anyone whose roles grant
+`projects.members`) makes them a member, with one of three roles, on the project's page
+(**Members**):
+
+| Role | May |
+|---|---|
+| viewer | see the project, its services and their records, deployments, backups, logs |
+| developer | as a viewer, and change, add, deploy and roll back its services; their domains, ports, mounts, redirects, scripts and backup schedules; read their environment (`services.secrets`); open their terminal (`services.exec`); run a backup |
+| admin | as a developer, and destroy and delete services, restore a database (its own backups only), rename the project, choose its members |
+
+A role of the user's (System → Roles) still applies to every project: a member's permissions in a
+project are their roles' plus their project role's. A member sees their projects only, through
+every route: the Dashboard and Domains, the service pages, the resources' API (lists, records,
+actions), deployment logs, terminals and logs (closed when the membership ends), backups and
+templates. `system.manage` is never a project's to give: a Compose or privileged service stays its
+administrators'. A project keeps one admin: only someone whose roles grant `projects.members`
+changes or removes its last one. Members get `apps.access` (the apps pages, nothing else) while
+they are a member of some project.
+
+Backups: a member runs a project's backup schedules (developer) and restores its service's own
+backups (admin: chosen among that service's backups, without browsing the provider). Creating a
+schedule chooses a storage provider, whose settings stay a role's (`storage_providers.view`).
+
+`services.logs` and `services.exec` also exist as permissions of their own: a role with them reads
+a service's logs and opens its terminal from the service's page, without `docker.*` (the Docker
+pages).
+
 ## The panel's own objects
 
 Objects labelled `rdockpanel.system=true` are the panel's own. The installer (Phase 2, not written

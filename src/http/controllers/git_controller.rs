@@ -301,13 +301,10 @@ pub async fn test(State(app): State<AppState>, Path(id): Path<i64>) -> AppResult
 
 /// The service, for a user who may change it (its Source).
 async fn editable(app: &AppState, auth: &Auth, id: i64) -> AppResult<service::Model> {
-    if !auth.principal().can("services.update") {
-        return Err(AppError::Forbidden);
-    }
-    let row = service::Entity::find_by_id(id)
-        .one(app.db())
-        .await?
-        .ok_or(AppError::NotFound)?;
+    // A role's, or the caller's role in its project.
+    let row =
+        crate::services::access_service::service(app.db(), auth.principal(), id, "services.update")
+            .await?;
     forbid_privileged(auth, &row)?;
     Ok(row)
 }
@@ -352,20 +349,18 @@ pub async fn repositories(
     ))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Repo {
-    pub repo: String,
-}
-
 pub async fn branches(
     State(app): State<AppState>,
     auth: Auth,
     Path((id, provider)): Path<(i64, i64)>,
-    Query(query): Query<Repo>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> AppResult<Json<Value>> {
+    // Allowed first, then the query read.
     let token = token_for(&app, &auth, id, provider).await?;
     let (owner, repo) = query
-        .repo
+        .get("repo")
+        .map(String::as_str)
+        .unwrap_or_default()
         .split_once('/')
         .ok_or_else(|| ValidationErrors::field("repo", "must be owner/name"))?;
     Ok(Json(

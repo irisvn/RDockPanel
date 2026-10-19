@@ -56,6 +56,22 @@ impl Resource for ServiceScriptResource {
         ))
     }
 
+    /// A member sees their projects' records only (a role seeing every
+    /// record: all of them).
+    fn scope(
+        query: sea_orm::Select<<Self as Resource>::Entity>,
+        ctx: &Ctx,
+    ) -> sea_orm::Select<<Self as Resource>::Entity> {
+        use sea_orm::{ColumnTrait, QueryFilter};
+        match crate::admin::resources::guard::members_only(ctx, "service_scripts") {
+            Some(user) => query.filter(
+                crate::models::service_script::Column::ServiceId
+                    .in_subquery(crate::services::access_service::member_services(user)),
+            ),
+            None => query,
+        }
+    }
+
     fn table() -> Table {
         Table::new()
             .columns(vec![
@@ -70,7 +86,7 @@ impl Resource for ServiceScriptResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(ctx, txn, &data, None).await?;
+        crate::admin::resources::guard::write(ctx, txn, &data, None, "service_scripts").await?;
         check(ctx, &data)?;
         Ok(data)
     }
@@ -81,7 +97,14 @@ impl Resource for ServiceScriptResource {
         record: &service_script::Model,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(ctx, txn, &data, Some(record.service_id)).await?;
+        crate::admin::resources::guard::write(
+            ctx,
+            txn,
+            &data,
+            Some(record.service_id),
+            "service_scripts",
+        )
+        .await?;
         check(ctx, &data)?;
         Ok(data)
     }

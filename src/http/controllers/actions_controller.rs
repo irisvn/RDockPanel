@@ -30,6 +30,8 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
         .into_iter()
         .map(|p| (p.id, p.name))
         .collect();
+    // Service id → its project (for what each caller may see).
+    let services_of: Vec<(i64, i64)> = services.iter().map(|s| (s.id, s.project_id)).collect();
     let names: HashMap<i64, (String, String)> = services
         .into_iter()
         .map(|s| {
@@ -44,13 +46,37 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
             .unwrap_or(Value::Null)
     };
     let mut items: Vec<Value> = vec![];
-    if principal.can("deployments.view_any") && principal.can("deployments.view") {
-        for row in deployment::Entity::find()
-            .order_by_desc(deployment::Column::Id)
-            .limit(LIMIT)
-            .all(db)
-            .await?
-        {
+    // The services of the projects where the caller may see `permission`
+    // (`None`: every one): filtered before the limit, never after.
+    use crate::services::access_service::projects_where;
+    let services_where = |permission: &'static str| {
+        let services = &services_of;
+        async move {
+            Ok::<_, rustcms::AppError>(projects_where(db, principal, permission).await?.map(
+                |projects| {
+                    services
+                        .iter()
+                        .filter(|(_, p)| projects.contains(p))
+                        .map(|(s, _)| *s)
+                        .collect::<Vec<i64>>()
+                },
+            ))
+        }
+    };
+    let deployments_seen = services_where("deployments.view_any").await?;
+    let deployments_one = services_where("deployments.view").await?;
+    // Both, as their pages (each `None`: everywhere).
+    let deployments_in: Option<Vec<i64>> = match (deployments_seen, deployments_one) {
+        (None, None) => None,
+        (Some(a), None) | (None, Some(a)) => Some(a),
+        (Some(a), Some(b)) => Some(a.into_iter().filter(|s| b.contains(s)).collect()),
+    };
+    if deployments_in.as_ref().is_none_or(|s| !s.is_empty()) {
+        let mut query = deployment::Entity::find().order_by_desc(deployment::Column::Id);
+        if let Some(services) = &deployments_in {
+            query = query.filter(deployment::Column::ServiceId.is_in(services.clone()));
+        }
+        for row in query.limit(LIMIT).all(db).await? {
             items.push(json!({
                 "type": "deployment",
                 "id": row.id,
@@ -63,13 +89,13 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
             }));
         }
     }
-    if principal.can("database_backups.view_any") {
-        for row in backup_run::Entity::find()
-            .order_by_desc(backup_run::Column::Id)
-            .limit(LIMIT)
-            .all(db)
-            .await?
-        {
+    let backups_in = services_where("database_backups.view_any").await?;
+    if backups_in.as_ref().is_none_or(|s| !s.is_empty()) {
+        let mut query = backup_run::Entity::find().order_by_desc(backup_run::Column::Id);
+        if let Some(services) = &backups_in {
+            query = query.filter(backup_run::Column::ServiceId.is_in(services.clone()));
+        }
+        for row in query.limit(LIMIT).all(db).await? {
             items.push(json!({
                 "type": "backup",
                 "id": row.id,

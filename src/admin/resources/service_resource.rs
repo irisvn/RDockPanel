@@ -229,12 +229,36 @@ impl Resource for ServiceResource {
         Arc::new(ServicePolicy)
     }
 
+    /// A member sees their projects' records only (a role seeing every
+    /// record: all of them).
+    fn scope(
+        query: sea_orm::Select<<Self as Resource>::Entity>,
+        ctx: &Ctx,
+    ) -> sea_orm::Select<<Self as Resource>::Entity> {
+        use sea_orm::{ColumnTrait, QueryFilter};
+        match crate::admin::resources::guard::members_only(ctx, "services") {
+            Some(user) => query.filter(
+                crate::models::service::Column::ProjectId
+                    .in_subquery(crate::services::access_service::member_projects(user)),
+            ),
+            None => query,
+        }
+    }
+
     async fn mutate_before_create(
         ctx: &Ctx,
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
         let mut data = normalize(data);
+        // Into a project where the caller adds services (Core asks the
+        // policy without the record).
+        let project = int(&data, "project_id").ok_or(rustcms::AppError::Forbidden)?;
+        if !crate::services::access_service::can(txn, &ctx.principal, project, "services.create")
+            .await?
+        {
+            return Err(rustcms::AppError::Forbidden);
+        }
         check(ctx, &data, None)?;
         check_git_provider(ctx, txn, &data, None).await?;
         // Built by the panel: no image to name (the column holds one).
@@ -262,6 +286,19 @@ impl Resource for ServiceResource {
         // capabilities or sysctls does: its administrators only.
         if (record.kind == "compose" || privileged(&record))
             && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+        {
+            return Err(rustcms::AppError::Forbidden);
+        }
+        // Moved (before its first deployment): where it lands, too.
+        if let Some(project) = int(&data, "project_id")
+            && project != record.project_id
+            && !crate::services::access_service::can(
+                txn,
+                &ctx.principal,
+                project,
+                "services.create",
+            )
+            .await?
         {
             return Err(rustcms::AppError::Forbidden);
         }
@@ -608,7 +645,12 @@ struct ServicePolicy;
 #[async_trait]
 impl Policy for ServicePolicy {
     async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
-        if !ctx.can(&format!("services.{ability}")) {
+        let permission = format!("services.{ability}");
+        let allowed = match record {
+            Some(_) => crate::admin::resources::guard::may(ctx, &permission, record).await,
+            None => crate::admin::resources::guard::admits(ctx, &permission).await,
+        };
+        if !allowed {
             return false;
         }
         // A privileged service (added capabilities, sysctls or groups):
@@ -625,7 +667,7 @@ impl Policy for ServicePolicy {
     }
 
     async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {
-        ctx.can(&format!("services.{ability}"))
+        crate::admin::resources::guard::admits(ctx, &format!("services.{ability}")).await
     }
 
     fn view_depends_on_record(&self) -> bool {

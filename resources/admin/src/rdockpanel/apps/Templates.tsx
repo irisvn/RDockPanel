@@ -33,7 +33,7 @@ function TemplateForm(props: PageProps<unknown> & { slug: string; project: Proje
   const t = props.t;
   const page = useAdminQuery<Page>(props, `/apps/templates/${props.slug}`);
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [deploy, setDeploy] = useState(props.can("services.deploy"));
+  const [deploy, setDeploy] = useState(props.project.can.deploy);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   if (page.isLoading) return <Loading />;
@@ -111,7 +111,7 @@ function TemplateForm(props: PageProps<unknown> & { slug: string; project: Proje
           </Field>
         );
       })}
-      {props.can("services.deploy") && (
+      {props.project.can.deploy && (
         <label className="rdp2-row">
           <Switch checked={deploy} onCheckedChange={setDeploy} /> {t("Deploy now")}
         </label>
@@ -153,7 +153,7 @@ function FromSchema(props: PageProps<unknown> & { project: Project; onBack: () =
       <Field label={t("Schema")} help={t("A template's output: {\"services\": [{\"type\": \"app\", \"data\": {…}}]}")}>
         <Textarea className="rdp2-env" rows={14} value={text} onChange={(e) => setText(e.target.value)} />
       </Field>
-      {props.can("services.deploy") && (
+      {props.project.can.deploy && (
         <label className="rdp2-row">
           <Switch checked={deploy} onCheckedChange={setDeploy} /> {t("Deploy now")}
         </label>

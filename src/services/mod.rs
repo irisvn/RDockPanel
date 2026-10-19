@@ -1,5 +1,6 @@
 //! Business rules shared by the admin panel, the API, jobs and seeders. `rustcms make:service <Name>` adds modules here.
 
+pub mod access_service;
 pub mod action_service;
 pub mod alert_service;
 pub mod backup_service;

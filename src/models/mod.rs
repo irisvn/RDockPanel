@@ -10,6 +10,7 @@ pub mod git_provider;
 pub mod notification_channel;
 pub mod panel_setting;
 pub mod project;
+pub mod project_member;
 pub mod service;
 pub mod service_basic_auth;
 pub mod service_domain;

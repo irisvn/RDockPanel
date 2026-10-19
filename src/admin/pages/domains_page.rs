@@ -17,8 +17,8 @@ impl PanelPage for DomainsPage {
         PanelPageMeta::new("Domains")
             .icon("globe")
             .sort(1)
-            .permission("service_domains.view_any")
-            .permission("services.view_any")
+            // A role's, or a member's (`apps.access`): their projects' domains.
+            .permission_any(["service_domains.view_any", "apps.access"])
     }
 
     fn view() -> PageView {

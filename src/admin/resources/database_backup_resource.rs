@@ -80,6 +80,22 @@ impl Resource for DatabaseBackupResource {
         ))
     }
 
+    /// A member sees their projects' records only (a role seeing every
+    /// record: all of them).
+    fn scope(
+        query: sea_orm::Select<<Self as Resource>::Entity>,
+        ctx: &Ctx,
+    ) -> sea_orm::Select<<Self as Resource>::Entity> {
+        use sea_orm::{ColumnTrait, QueryFilter};
+        match crate::admin::resources::guard::members_only(ctx, "database_backups") {
+            Some(user) => query.filter(
+                crate::models::database_backup::Column::ServiceId
+                    .in_subquery(crate::services::access_service::member_services(user)),
+            ),
+            None => query,
+        }
+    }
+
     fn table() -> Table {
         Table::new()
             .columns(vec![
@@ -96,7 +112,7 @@ impl Resource for DatabaseBackupResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(ctx, txn, &data, None).await?;
+        crate::admin::resources::guard::write(ctx, txn, &data, None, "database_backups").await?;
         check(ctx, txn, &data, None).await?;
         Ok(data)
     }
@@ -107,7 +123,14 @@ impl Resource for DatabaseBackupResource {
         record: &database_backup::Model,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(ctx, txn, &data, Some(record.service_id)).await?;
+        crate::admin::resources::guard::write(
+            ctx,
+            txn,
+            &data,
+            Some(record.service_id),
+            "database_backups",
+        )
+        .await?;
         check(ctx, txn, &data, Some(record)).await?;
         Ok(data)
     }

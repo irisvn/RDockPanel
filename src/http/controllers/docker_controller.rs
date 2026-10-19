@@ -286,7 +286,10 @@ pub async fn exec(
             let token = session_token();
             let mut log = ExecLog::start(db, &by, &id, &token).await;
             log.audit(&by, &id).await;
-            log.error = terminal(&shell, &id, size, &token, &mut socket).await.err();
+            let allowed = |principal: &Principal| principal.can("docker.exec");
+            log.error = terminal(&shell, &id, size, &token, &mut socket, &allowed)
+                .await
+                .err();
         })
         .target(target))
 }
@@ -298,6 +301,8 @@ async fn terminal(
     size: TermSize,
     token: &str,
     socket: &mut AdminSocket,
+    // Whether a command (a resize) may still run, on a fresh principal.
+    allowed: &(dyn Fn(&Principal) -> bool + Sync),
 ) -> Result<(), String> {
     use tokio::io::AsyncWriteExt;
     // Dropped with this future, however the socket ends: the shell ends too.
@@ -327,7 +332,7 @@ async fn terminal(
                     if let Ok(TermCommand::Resize(size)) = serde_json::from_str(&command) {
                         // A command: checked again now, on a fresh principal.
                         let Ok(principal) = socket.authorize().await else { return Ok(()) };
-                        if !principal.can("docker.exec") {
+                        if !allowed(&principal) {
                             return Ok(());
                         }
                         let _ = docker.resize_exec(&shell.session.id, size).await;
@@ -676,6 +681,136 @@ fn valid_image_reference(image: &str) -> bool {
         && image
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | ':' | '.' | '_' | '-' | '@'))
+}
+
+/// The permissions a service's logs, and its terminal, need: the service's
+/// own (a role's, or its project role's), or Docker's.
+const SERVICE_LOGS: &[&str] = &["services.logs", "docker.logs"];
+const SERVICE_EXEC: &[&str] = &["services.exec", "docker.exec"];
+
+/// The service `id`, for `permissions`, as the panel deployed it: its Swarm
+/// service's name, only when that service is the panel's own deployment of
+/// it (labelled with its project and service), never another object of
+/// that name. A Compose or privileged service: its administrators' only.
+async fn deployed_service(
+    app: &AppState,
+    principal: &Principal,
+    id: i64,
+    permissions: &[&str],
+) -> AppResult<String> {
+    let row =
+        crate::services::access_service::service_any(app.db(), principal, id, permissions).await?;
+    crate::http::controllers::apps_controller::forbid_privileged_of(principal, &row)?;
+    if row.kind == "compose" {
+        return Err(AppError::BadRequest(
+            "a Compose service's logs are its containers' (Docker → Containers)".into(),
+        ));
+    }
+    let snapshot =
+        crate::services::deployment_service::snapshot_without_env(app.db(), &row).await?;
+    let name = snapshot.service_name();
+    docker(app)?
+        .managed_service(&name, &snapshot.project, &snapshot.service)
+        .await
+        .map_err(AppError::from)?
+        .ok_or(AppError::NotFound)?;
+    Ok(name)
+}
+
+/// A service's logs, live (every task's: Swarm's service logs), for whoever
+/// may see them in its project: no access to Docker's pages needed.
+pub async fn service_logs(
+    live: LiveSession,
+    State(app): State<AppState>,
+    Path((id, tail)): Path<(i64, u32)>,
+) -> AppResult<EventStream> {
+    let name = deployed_service(&app, live.principal(), id, SERVICE_LOGS).await?;
+    let docker = docker(&app)?;
+    let query = LogQuery {
+        follow: true,
+        tail: Some(tail.min(MAX_LOG_LINES)),
+        since: None,
+        timestamps: false,
+    };
+    let lines = docker.engine().service_logs(&name, query);
+    // Again at each recheck: membership, privilege, the deployment.
+    let target = move |principal: Principal| {
+        let app = app.clone();
+        Box::pin(async move {
+            deployed_service(&app, &principal, id, SERVICE_LOGS)
+                .await
+                .map(drop)
+        }) as TargetFuture
+    };
+    Ok(live
+        .stream(crate::services::live_service::log_events(lines))
+        .target(target))
+}
+
+/// The running task container `container` (its full id, exactly) of the
+/// Swarm service `name`.
+async fn task_container(docker: &Docker, name: &str, container: &str) -> AppResult<()> {
+    let tasks = docker
+        .engine()
+        .list_tasks(name)
+        .await
+        .map_err(AppError::from)?;
+    let found = tasks.iter().any(|t| {
+        t.desired_state == Some(crate::services::docker_service::TaskState::RUNNING)
+            && t.status
+                .as_ref()
+                .and_then(|s| s.container_status.as_ref())
+                .and_then(|c| c.container_id.as_deref())
+                == Some(container)
+    });
+    if found {
+        Ok(())
+    } else {
+        Err(AppError::NotFound)
+    }
+}
+
+/// A shell in one of a service's containers (as [`exec`]), for whoever may
+/// run its terminal in its project: the container must be a running task
+/// of the panel's deployment of that service, checked again (with the
+/// service's privilege) at each recheck.
+pub async fn service_exec(
+    live: LiveSocket,
+    State(app): State<AppState>,
+    request: RequestMeta,
+    Path((id, container)): Path<(i64, String)>,
+) -> AppResult<SocketResponse> {
+    let name = deployed_service(&app, live.principal(), id, SERVICE_EXEC).await?;
+    let engine = docker(&app)?;
+    task_container(&engine, &name, &container).await?;
+    let by = initiator_of(live.principal(), request);
+    // Its size comes as a command once open (sockets take no query string).
+    let size = TermSize { cols: 80, rows: 24 };
+    let (db, shell) = (app.db().clone(), engine.clone());
+    let target = {
+        let (app, container) = (app.clone(), container.clone());
+        move |principal: Principal| {
+            let (app, container) = (app.clone(), container.clone());
+            Box::pin(async move {
+                let name = deployed_service(&app, &principal, id, SERVICE_EXEC).await?;
+                let engine = docker(&app)?;
+                task_container(&engine, &name, &container).await
+            }) as TargetFuture
+        }
+    };
+    Ok(live
+        .accept(move |mut socket| async move {
+            let token = session_token();
+            let mut log = ExecLog::start(db, &by, &container, &token).await;
+            log.audit(&by, &container).await;
+            // Commands run while the terminal lasts (the recheck closes it
+            // when the caller may no longer).
+            let allowed = |_: &Principal| true;
+            log.error = terminal(&shell, &container, size, &token, &mut socket, &allowed)
+                .await
+                .err();
+        })
+        .target(target))
 }
 
 #[cfg(test)]

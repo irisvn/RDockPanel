@@ -69,6 +69,22 @@ impl Resource for ProjectResource {
         Arc::new(ProjectPolicy)
     }
 
+    /// A member sees their projects' records only (a role seeing every
+    /// record: all of them).
+    fn scope(
+        query: sea_orm::Select<<Self as Resource>::Entity>,
+        ctx: &Ctx,
+    ) -> sea_orm::Select<<Self as Resource>::Entity> {
+        use sea_orm::{ColumnTrait, QueryFilter};
+        match crate::admin::resources::guard::members_only(ctx, "projects") {
+            Some(user) => query.filter(
+                crate::models::project::Column::Id
+                    .in_subquery(crate::services::access_service::member_projects(user)),
+            ),
+            None => query,
+        }
+    }
+
     async fn mutate_before_create(
         ctx: &Ctx,
         _txn: &DatabaseTransaction,
@@ -128,7 +144,18 @@ struct ProjectPolicy;
 #[async_trait]
 impl Policy for ProjectPolicy {
     async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
-        if !ctx.can(&format!("projects.{ability}")) {
+        let permission = format!("projects.{ability}");
+        // A project's own id is its project.
+        let allowed = match record.and_then(|r| int(r, "id")) {
+            _ if ctx.can(&permission) => true,
+            Some(id) => {
+                crate::services::access_service::can(&ctx.conn(), &ctx.principal, id, &permission)
+                    .await
+                    .unwrap_or(false)
+            }
+            None => crate::admin::resources::guard::admits(ctx, &permission).await,
+        };
+        if !allowed {
             return false;
         }
         match (ability, record.and_then(|r| int(r, "id"))) {
@@ -143,7 +170,7 @@ impl Policy for ProjectPolicy {
     }
 
     async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {
-        ctx.can(&format!("projects.{ability}"))
+        crate::admin::resources::guard::admits(ctx, &format!("projects.{ability}")).await
     }
 
     fn view_depends_on_record(&self) -> bool {

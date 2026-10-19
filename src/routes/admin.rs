@@ -8,12 +8,17 @@ use rustcms::prelude::*;
 use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
     deploy_controller as deploy, docker_controller as docker, domains_controller as domains,
-    git_controller as git, notifications_controller as notifications, server_controller as server,
+    git_controller as git, members_controller as members,
+    notifications_controller as notifications, server_controller as server,
     system_controller as system, templates_controller as templates, traefik_controller as traefik,
 };
 
 /// Every admin route, with the access it requires.
 pub fn routes() -> AdminRoutes {
+    // A project's: any signed-in user, then the handler checks the
+    // permission in the record's project (a role's, or a project role's:
+    // `access_service`).
+    let member = AdminAccess::authenticated;
     let view = || AdminAccess::can("docker.view");
     let manage = || AdminAccess::can("docker.manage");
     AdminRoutes::scope()
@@ -72,16 +77,8 @@ pub fn routes() -> AdminRoutes {
         .nest(
             "/apps",
             AdminRoutes::scope()
-                .get(
-                    "/overview",
-                    AdminAccess::can("projects.view_any"),
-                    apps::overview,
-                )
-                .get(
-                    "/domains",
-                    AdminAccess::can("service_domains.view_any"),
-                    domains::index,
-                )
+                .get("/overview", member(), apps::overview)
+                .get("/domains", member(), domains::index)
                 .get(
                     "/traefik/resolvers",
                     AdminAccess::can("system.manage"),
@@ -93,6 +90,17 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                .get("/projects/{id}/members", member(), members::index)
+                .post("/projects/{id}/members", member(), members::add)
+                .patch("/projects/{id}/members/{user}", member(), members::update)
+                .delete("/projects/{id}/members/{user}", member(), members::remove)
+                .get("/users", member(), members::users)
+                .events("/services/{id}/logs/{tail}", member(), docker::service_logs)
+                .socket(
+                    "/services/{id}/exec/{container}",
+                    member(),
+                    docker::service_exec,
+                )
                 .get(
                     "/git/providers",
                     AdminAccess::can("system.manage"),
@@ -118,19 +126,15 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("system.manage"),
                     git::test,
                 )
-                .get(
-                    "/services/{id}/github",
-                    AdminAccess::can("services.update"),
-                    git::for_service,
-                )
+                .get("/services/{id}/github", member(), git::for_service)
                 .get(
                     "/services/{id}/github/{provider}/repos",
-                    AdminAccess::can("services.update"),
+                    member(),
                     git::repositories,
                 )
                 .get(
                     "/services/{id}/github/{provider}/branches",
-                    AdminAccess::can("services.update"),
+                    member(),
                     git::branches,
                 )
                 .get(
@@ -213,132 +217,48 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("system.manage"),
                     traefik::delete_certificate,
                 )
-                .get(
-                    "/services/{id}",
-                    AdminAccess::can("services.view"),
-                    apps::service,
-                )
-                .post(
-                    "/projects/{id}/services",
-                    AdminAccess::can("services.create"),
-                    apps::create_service,
-                )
-                .get(
-                    "/templates",
-                    AdminAccess::can("projects.view_any"),
-                    templates::list,
-                )
+                .get("/services/{id}", member(), apps::service)
+                .post("/projects/{id}/services", member(), apps::create_service)
+                .get("/templates", member(), templates::list)
                 .post(
                     "/templates/refresh",
                     AdminAccess::can("services.create"),
                     templates::refresh,
                 )
-                .get(
-                    "/templates/{slug}",
-                    AdminAccess::can("projects.view_any"),
-                    templates::show,
-                )
-                .get(
-                    "/templates/{slug}/logo",
-                    AdminAccess::can("projects.view_any"),
-                    templates::logo,
-                )
+                .get("/templates/{slug}", member(), templates::show)
+                .get("/templates/{slug}/logo", member(), templates::logo)
                 .post(
                     "/projects/{id}/templates/{slug}",
-                    AdminAccess::can("services.create"),
+                    member(),
                     templates::create,
                 )
-                .post(
-                    "/projects/{id}/schema",
-                    AdminAccess::can("services.create"),
-                    templates::from_schema,
-                )
-                .get(
-                    "/deployments/{id}",
-                    AdminAccess::can("deployments.view"),
-                    apps::deployment,
-                )
-                .post(
-                    "/services/{id}/deploy-key",
-                    AdminAccess::can("services.update"),
-                    apps::deploy_key,
-                )
-                .post(
-                    "/services/{id}/trigger",
-                    AdminAccess::can("services.deploy"),
-                    apps::trigger,
-                )
-                .get(
-                    "/services/{id}/credentials",
-                    AdminAccess::can(apps::SECRETS_PERMISSION),
-                    apps::credentials,
-                )
-                .get(
-                    "/services/{id}/env",
-                    AdminAccess::can(apps::SECRETS_PERMISSION),
-                    apps::env,
-                )
-                .put(
-                    "/services/{id}/env",
-                    AdminAccess::can("services.update"),
-                    apps::put_env,
-                )
+                .post("/projects/{id}/schema", member(), templates::from_schema)
+                .get("/deployments/{id}", member(), apps::deployment)
+                .post("/services/{id}/deploy-key", member(), apps::deploy_key)
+                .post("/services/{id}/trigger", member(), apps::trigger)
+                .get("/services/{id}/credentials", member(), apps::credentials)
+                .get("/services/{id}/env", member(), apps::env)
+                .put("/services/{id}/env", member(), apps::put_env)
                 // Database backups (configurations: the `database_backups` resource).
-                .get(
-                    "/services/{id}/backups",
-                    AdminAccess::can("database_backups.view_any"),
-                    backups::index,
-                )
-                .post(
-                    "/services/{id}/restore",
-                    AdminAccess::can(backups::RESTORE_PERMISSION),
-                    backups::restore,
-                )
-                .post(
-                    "/backups/{id}/run",
-                    AdminAccess::can(backups::RUN_PERMISSION),
-                    backups::run,
-                )
-                .get(
-                    "/backup-runs/{id}",
-                    AdminAccess::can("database_backups.view_any"),
-                    backups::show_run,
-                )
-                .get(
-                    "/services/{id}/stats",
-                    AdminAccess::can("services.view"),
-                    apps::stats,
-                )
-                .get(
-                    "/services/{id}/errors",
-                    AdminAccess::can("services.view"),
-                    apps::errors,
-                )
-                .post(
-                    "/services/{id}/basic-auth",
-                    AdminAccess::can("services.update"),
-                    apps::add_basic_auth,
-                )
+                .get("/services/{id}/backups", member(), backups::index)
+                .post("/services/{id}/restore", member(), backups::restore)
+                .post("/backups/{id}/run", member(), backups::run)
+                .get("/backup-runs/{id}", member(), backups::show_run)
+                .get("/services/{id}/stats", member(), apps::stats)
+                .get("/services/{id}/errors", member(), apps::errors)
+                .post("/services/{id}/basic-auth", member(), apps::add_basic_auth)
                 .delete(
                     "/services/{id}/basic-auth/{user}",
-                    AdminAccess::can("services.update"),
+                    member(),
                     apps::remove_basic_auth,
                 )
                 .post(
                     "/services/{id}/github-webhook",
-                    AdminAccess::can("services.deploy"),
+                    member(),
                     apps::github_webhook,
                 )
-                .post(
-                    "/scripts/{id}/run",
-                    AdminAccess::can("docker.exec"),
-                    apps::run_script,
-                )
-                .get(
-                    "/actions",
-                    AdminAccess::can("projects.view_any"),
-                    actions::index,
-                )
+                .post("/scripts/{id}/run", member(), apps::run_script)
+                .get("/actions", member(), actions::index)
                 .get(
                     "/notification-channels",
                     AdminAccess::can("notification_channels.view_any"),
@@ -367,10 +287,6 @@ pub fn routes() -> AdminRoutes {
         )
         .nest(
             "/deploy",
-            AdminRoutes::scope().events(
-                "/deployments/{id}/log",
-                AdminAccess::can("deployments.view"),
-                deploy::log,
-            ),
+            AdminRoutes::scope().events("/deployments/{id}/log", member(), deploy::log),
         )
 }

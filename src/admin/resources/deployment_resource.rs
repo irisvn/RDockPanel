@@ -92,6 +92,22 @@ impl Resource for DeploymentResource {
         Arc::new(ReadOnly)
     }
 
+    /// A member sees their projects' records only (a role seeing every
+    /// record: all of them).
+    fn scope(
+        query: sea_orm::Select<<Self as Resource>::Entity>,
+        ctx: &Ctx,
+    ) -> sea_orm::Select<<Self as Resource>::Entity> {
+        use sea_orm::{ColumnTrait, QueryFilter};
+        match crate::admin::resources::guard::members_only(ctx, "deployments") {
+            Some(user) => query.filter(
+                crate::models::deployment::Column::ServiceId
+                    .in_subquery(crate::services::access_service::member_services(user)),
+            ),
+            None => query,
+        }
+    }
+
     /// "Roll back to this": deploys a succeeded deployment's configuration
     /// and image again (`services.deploy`).
     fn actions() -> Vec<Action<deployment::Entity>> {
@@ -162,11 +178,20 @@ struct ReadOnly;
 #[async_trait]
 impl Policy for ReadOnly {
     async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
+        use crate::admin::resources::guard::{admits, may};
+        // With a record: in its service's project; without: anywhere.
+        let can = |permission: &'static str| async move {
+            match record {
+                Some(_) => may(ctx, permission, record).await,
+                None => admits(ctx, permission).await,
+            }
+        };
         match ability {
-            "view_any" | "view" => ctx.can(&format!("deployments.{ability}")),
+            "view_any" => can("deployments.view_any").await,
+            "view" => can("deployments.view").await,
             "rollback" => {
-                ctx.can("deployments.view")
-                    && ctx.can("services.deploy")
+                can("deployments.view").await
+                    && can("services.deploy").await
                     && record.is_none_or(can_return_to)
                     // Back to added capabilities or sysctls: as setting them.
                     && (record.is_none_or(|r| !privileged(r))

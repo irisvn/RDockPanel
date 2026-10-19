@@ -11,7 +11,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::models::{backup_run, database_backup, service, storage_provider};
+use crate::models::{backup_run, database_backup, storage_provider};
 use crate::services::backup_service::{self, supported, valid_database};
 use crate::services::database_service::Engine;
 use crate::services::storage_service::{Store, valid_key};
@@ -68,10 +68,13 @@ pub async fn index(
     auth: Auth,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let row = service::Entity::find_by_id(id)
-        .one(app.db())
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let row = crate::services::access_service::service(
+        app.db(),
+        auth.principal(),
+        id,
+        "database_backups.view_any",
+    )
+    .await?;
     let volumes = volume_paths(&app, row.id).await?;
     let db = app.db();
     let configs = database_backup::Entity::find()
@@ -85,8 +88,41 @@ pub async fn index(
         .limit(30)
         .all(db)
         .await?;
+    // Their names: a role's (every one), or a project admin's restoring this
+    // service (those its backups went to: never another project's files).
+    let may_restore = crate::services::access_service::can(
+        db,
+        auth.principal(),
+        row.project_id,
+        RESTORE_PERMISSION,
+    )
+    .await?;
+    let restorable: Vec<Value> = runs
+        .iter()
+        .filter(|r| r.kind == "backup" && r.status == "succeeded")
+        .filter_map(|r| {
+            Some(json!({
+                "storage_provider_id": r.storage_provider_id?,
+                "file": r.file.clone()?,
+                "at": r.finished_at,
+            }))
+        })
+        .collect();
     let providers = if auth.principal().can("storage_providers.view_any") {
         storage_provider::Entity::find()
+            .order_by_asc(storage_provider::Column::Name)
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|p| json!({ "id": p.id, "name": p.name, "kind": p.kind }))
+            .collect()
+    } else if may_restore {
+        let used: Vec<i64> = restorable
+            .iter()
+            .filter_map(|f| f["storage_provider_id"].as_i64())
+            .collect();
+        storage_provider::Entity::find()
+            .filter(storage_provider::Column::Id.is_in(used))
             .order_by_asc(storage_provider::Column::Name)
             .all(db)
             .await?
@@ -97,6 +133,9 @@ pub async fn index(
         vec![]
     };
     Ok(Json(json!({
+        // This service's backups to restore from (for who cannot browse a
+        // provider: a project admin).
+        "restorable": restorable,
         "supported": Engine::parse(&row.kind).is_some_and(supported),
         "volumes": volumes,
         "configs": configs.iter().map(|c| json!({
@@ -116,11 +155,27 @@ pub async fn index(
 }
 
 /// One run with its log.
-pub async fn show_run(State(app): State<AppState>, Path(id): Path<i64>) -> AppResult<Json<Value>> {
+pub async fn show_run(
+    State(app): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    use crate::services::access_service;
+    if !access_service::admits(app.db(), auth.principal(), "database_backups.view_any").await? {
+        return Err(AppError::Forbidden);
+    }
     let run = backup_run::Entity::find_by_id(id)
         .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
+    // Its service's project's.
+    access_service::service(
+        app.db(),
+        auth.principal(),
+        run.service_id,
+        "database_backups.view_any",
+    )
+    .await?;
     let mut body = summary(&run);
     body["log"] = json!(run.log.unwrap_or_default());
     body["service_id"] = json!(run.service_id);
@@ -134,14 +189,21 @@ pub async fn run(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
+    use crate::services::access_service;
+    if !access_service::admits(app.db(), auth.principal(), RUN_PERMISSION).await? {
+        return Err(AppError::Forbidden);
+    }
     let config = database_backup::Entity::find_by_id(id)
         .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
-    let parent = service::Entity::find_by_id(config.service_id)
-        .one(app.db())
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let parent = access_service::service(
+        app.db(),
+        auth.principal(),
+        config.service_id,
+        RUN_PERMISSION,
+    )
+    .await?;
     crate::http::controllers::apps_controller::forbid_privileged(&auth, &parent)?;
     let txn = rustcms::db::begin_write(app.db()).await?;
     let run = backup_service::request(&txn, &config, "manual", user_id(&auth)).await?;
@@ -171,12 +233,16 @@ pub async fn restore(
     auth: Auth,
     request: RequestMeta,
     Path(id): Path<i64>,
-    Json(body): Json<RestoreBody>,
+    Json(body): Json<Value>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    let row = service::Entity::find_by_id(id)
-        .one(app.db())
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let row = crate::services::access_service::service(
+        app.db(),
+        auth.principal(),
+        id,
+        RESTORE_PERMISSION,
+    )
+    .await?;
+    let body: RestoreBody = crate::http::controllers::apps_controller::read_body(body)?;
     // A restore runs its file's commands in the service's container.
     crate::http::controllers::apps_controller::forbid_privileged(&auth, &row)?;
     let mut errors = ValidationErrors::new();
@@ -223,6 +289,19 @@ pub async fn restore(
         return Err(errors.into());
     }
     let provider = provider.ok_or(AppError::NotFound)?;
+    // A project's admin restores this service's own backups only (a role's
+    // restore permission: any file of the provider, which they may browse).
+    if !auth.principal().can(RESTORE_PERMISSION)
+        && backup_run::Entity::find()
+            .filter(backup_run::Column::ServiceId.eq(row.id))
+            .filter(backup_run::Column::StorageProviderId.eq(provider.id))
+            .filter(backup_run::Column::File.eq(file))
+            .one(app.db())
+            .await?
+            .is_none()
+    {
+        return Err(ValidationErrors::field("file", "is not a backup of this service").into());
+    }
     let txn = rustcms::db::begin_write(app.db()).await?;
     let run = backup_service::request_restore(
         &txn,

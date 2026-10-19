@@ -507,6 +507,22 @@ window.rustcms?.registerTranslations?.("vi", {
   "Every service, the panel and Traefik stop until the server is back (usually a minute or two).":
     "Mọi service, panel và Traefik sẽ dừng tới khi server chạy lại (thường một, hai phút).",
   "Type the server's hostname to confirm": "Gõ hostname của server để xác nhận",
+  // Project members
+  Members: "Thành viên",
+  viewer: "Xem",
+  developer: "Developer",
+  admin: "Quản trị",
+  "Viewer: sees the project. Developer: changes, deploys and runs its services (their secrets and terminal). Admin: also removes services, restores databases and chooses members.":
+    "Xem: thấy project. Developer: sửa, deploy và chạy service (cả biến bí mật và terminal). Quản trị: thêm quyền xoá service, khôi phục database và chọn thành viên.",
+  "Remove this member?": "Xoá thành viên này?",
+  "No member yet: only users whose roles see every project see it.": "Chưa có thành viên: chỉ người có quyền xem mọi project thấy project này.",
+  "A user's email": "Email của người dùng",
+  "Connecting…": "Đang kết nối…",
+  "The terminal could not load.": "Không tải được terminal.",
+  "The shell exited.": "Shell đã thoát.",
+  "Closed after 30 minutes without activity.": "Đã đóng sau 30 phút không hoạt động.",
+  "You may no longer use this terminal.": "Bạn không còn quyền dùng terminal này.",
+  "Disconnected.": "Mất kết nối.",
   // Notification events
   "A running service fails, and when it is back": "Service đang chạy bị lỗi, và khi chạy lại",
   "Traefik stops, and when it is back": "Traefik ngừng chạy, và khi chạy lại",

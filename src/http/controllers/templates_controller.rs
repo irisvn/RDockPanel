@@ -30,8 +30,21 @@ fn unavailable(message: String) -> AppError {
     AppError::BadRequest(message)
 }
 
+/// Who adds services somewhere (a role's, or a project role's): the
+/// catalog is theirs.
+async fn creator(app: &AppState, auth: &Auth) -> AppResult<()> {
+    if crate::services::access_service::admits(app.db(), auth.principal(), "services.create")
+        .await?
+    {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
 /// The catalog (fetched from the templates' repository, kept a few hours).
-pub async fn list(State(app): State<AppState>) -> AppResult<Json<Value>> {
+pub async fn list(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Value>> {
+    creator(&app, &auth).await?;
     let list = templates(&app)?.list().await.map_err(unavailable)?;
     Ok(Json(json!({ "templates": list })))
 }
@@ -45,8 +58,10 @@ pub async fn refresh(State(app): State<AppState>) -> AppResult<Json<Value>> {
 /// A template's logo (through the panel: its CSP loads images from itself).
 pub async fn logo(
     State(app): State<AppState>,
+    auth: Auth,
     Path(slug): Path<String>,
 ) -> AppResult<rustcms::axum::response::Response> {
+    creator(&app, &auth).await?;
     use rustcms::axum::http::header;
     use rustcms::axum::response::IntoResponse;
     let (kind, bytes) = templates(&app)?
@@ -71,7 +86,12 @@ pub async fn logo(
 }
 
 /// A template's page: name, description, instructions, its form's schema.
-pub async fn show(State(app): State<AppState>, Path(slug): Path<String>) -> AppResult<Json<Value>> {
+pub async fn show(
+    State(app): State<AppState>,
+    auth: Auth,
+    Path(slug): Path<String>,
+) -> AppResult<Json<Value>> {
+    creator(&app, &auth).await?;
     Ok(Json(
         templates(&app)?.page(&slug).await.map_err(unavailable)?,
     ))
@@ -94,8 +114,13 @@ pub async fn create(
     auth: Auth,
     request: RequestMeta,
     Path((id, slug)): Path<(i64, String)>,
-    Json(body): Json<UseTemplate>,
+    Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
+    // Allowed in that project first: no generator runs for anyone else.
+    crate::services::access_service::project(app.db(), auth.principal(), id, "services.create")
+        .await?;
+    let body: UseTemplate = serde_json::from_value(body)
+        .map_err(|e| AppError::BadRequest(format!("the request: {e}")))?;
     let source = templates(&app)?;
     let (meta, code) = source.template(&slug).await.map_err(unavailable)?;
     let input = with_defaults(&meta, body.input);
@@ -121,8 +146,12 @@ pub async fn from_schema(
     auth: Auth,
     request: RequestMeta,
     Path(id): Path<i64>,
-    Json(body): Json<FromSchema>,
+    Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
+    crate::services::access_service::project(app.db(), auth.principal(), id, "services.create")
+        .await?;
+    let body: FromSchema = serde_json::from_value(body)
+        .map_err(|e| AppError::BadRequest(format!("the request: {e}")))?;
     apply(&app, &auth, request, id, &body.schema, body.deploy, None).await
 }
 
@@ -157,10 +186,11 @@ async fn apply(
     slug: Option<&str>,
 ) -> AppResult<Json<Value>> {
     let principal = auth.principal();
-    if !principal.can("projects.view") {
-        return Err(AppError::NotFound);
-    }
-    if deploy && !principal.can("services.deploy") {
+    // Into a project where the caller adds (and deploys) services: a role's,
+    // or their role's there.
+    use crate::services::access_service;
+    access_service::project(app.db(), principal, project_id, "services.create").await?;
+    if deploy && !access_service::can(app.db(), principal, project_id, "services.deploy").await? {
         return Err(AppError::Forbidden);
     }
     let compose_allowed =
@@ -225,7 +255,8 @@ async fn apply(
             "services.update",
         ),
     ] {
-        if wanted && !principal.can(permission) {
+        // A role's, or the caller's role in this project.
+        if wanted && !access_service::can(&txn, principal, project_id, permission).await? {
             return Err(AppError::Forbidden);
         }
     }

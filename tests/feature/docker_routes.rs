@@ -59,9 +59,43 @@ db_test!(
                 read("/docker/containers/web/logs/follow"),
                 read("/docker/containers/web/logs/follow/10"),
                 // The apps routes need the resources' permissions, which none of these has.
+                // Every signed-in user: their projects (none here).
                 Case::new(Method::GET, "/apps/overview")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::OK),
+                // A project's members: its admins (projects.members there).
+                Case::new(Method::GET, "/apps/projects/1/members")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/projects/1/members").expect(
+                    "viewer",
+                    &viewer,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::PATCH, "/apps/projects/1/members/1").expect(
+                    "viewer",
+                    &viewer,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::DELETE, "/apps/projects/1/members/1").expect(
+                    "viewer",
+                    &viewer,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::GET, "/apps/users")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                // A service's logs and terminal: its own permissions, or Docker's.
+                Case::new(Method::GET, "/apps/services/1/logs/10")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN),
+                // A socket: refused unsigned here (a WebSocket upgrade first;
+                // its permission in tests/feature/members.rs).
+                Case::new(Method::GET, "/apps/services/1/exec/abc").expect(
+                    "anonymous",
+                    &anonymous,
+                    StatusCode::UNAUTHORIZED,
+                ),
                 // GitHub tokens: system.manage; a service's: services.update.
                 Case::new(Method::GET, "/apps/git/providers")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
@@ -236,9 +270,10 @@ db_test!(
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN),
+                // Every signed-in user: what they may see (none here).
                 Case::new(Method::GET, "/apps/actions")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
-                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                    .expect("viewer", &viewer, StatusCode::OK),
                 Case::new(Method::GET, "/apps/notification-channels")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

@@ -7,6 +7,7 @@ pub mod deploy_controller;
 pub mod docker_controller;
 pub mod domains_controller;
 pub mod git_controller;
+pub mod members_controller;
 pub mod notifications_controller;
 pub mod server_controller;
 pub mod system_controller;

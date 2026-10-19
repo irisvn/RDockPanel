@@ -68,6 +68,8 @@ pub fn failing(
 /// Running services (deployed, not deploying now, not Compose) and Traefik:
 /// a change since last said is said.
 pub async fn check_health(state: &AppState) -> AppResult<()> {
+    // Memberships of projects deleted since (their `apps.access` too).
+    let _ = crate::services::access_service::forget_deleted_projects(state).await;
     let Some(docker) = state.service::<Docker>() else {
         return Ok(());
     };
