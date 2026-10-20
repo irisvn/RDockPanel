@@ -374,7 +374,7 @@ At boot, then every minute (the RustCMS scheduler's `reap-deployments`, run in t
 deployments whose lease expired (their run died, or its job timed out) become `interrupted` and free
 their service.
 
-The service page's aside (`ServiceLiveSlot`, `service-live.js`) shows the state, pending changes, the
+The service page's aside (`ServiceLiveSlot`, `docker/ServiceLive.tsx`) shows the state, pending changes, the
 action buttons and the latest deployment, its log followed live over SSE.
 
 ### Routes (Traefik)

@@ -12,6 +12,7 @@
 //   RDP_SHOT_WIDTHS    1440,768,390
 //   RDP_SHOT_THEMES    light,dark
 //   RDP_SHOT_LOCALES   en,vi
+//   RDP_SHOT_SCALE     the device pixel ratio (1; 2 for README images)
 // The host's name is replaced by `server-01` on every shot.
 import { createRequire } from "node:module";
 import fs from "node:fs";
@@ -34,6 +35,7 @@ const out = process.argv[2] ?? "storage/ui-shots";
 const widths = list("RDP_SHOT_WIDTHS", "1440,768,390").map(Number);
 const themes = list("RDP_SHOT_THEMES", "light,dark");
 const locales = list("RDP_SHOT_LOCALES", "en,vi");
+const scale = Number(env("RDP_SHOT_SCALE", "1"));
 
 // name, path, and what to do on the page before the shot (a dialog, a menu).
 const PAGES = [
@@ -68,10 +70,26 @@ const PAGES = [
   ["images", "/p/images"],
   ["volumes", "/p/volumes"],
   ["networks", "/p/networks"],
+  ["container-logs", "/p/containers/demo_web/logs"],
+  ["service-record", "/r/services/records/9"],
   ["users", "/system/users"],
   ["roles", "/system/roles"],
   ["new-service", "/p/dashboard", (page) => page.getByRole("button", { name: /Add service|\+ Service|Thêm service/ }).first().click()],
   ["add-domain", "/p/dashboard/demo/web/domains", (page) => page.getByRole("button", { name: /Add domain|Thêm domain/ }).first().click()],
+  ["templates", "/p/dashboard", async (page) => {
+    await page.getByRole("button", { name: /^Templates$|^Template$/ }).last().click();
+    await page.waitForTimeout(6000);
+  }],
+  ["service-logs", "/p/dashboard/demo/web/overview", async (page) => {
+    await page.getByRole("button", { name: /^Logs$|^Log$/ }).first().click();
+    await page.waitForTimeout(3000);
+  }],
+  ["service-terminal", "/p/dashboard/demo/web/overview", async (page) => {
+    await page.getByRole("button", { name: /^Shell$/ }).first().click();
+    await page.waitForTimeout(3000);
+    await page.keyboard.type("nginx -v; ls /usr/share/nginx/html; uptime\n");
+    await page.waitForTimeout(2000);
+  }],
 ];
 const wanted = list("RDP_SHOT_PAGES", PAGES.map(([name]) => name).join(","));
 
@@ -91,7 +109,7 @@ const browser = await chromium.launch({ channel: "chrome" });
 let failed = 0;
 for (const locale of locales) {
   for (const theme of themes) {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, locale });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: scale, colorScheme: theme, locale });
     // The shell's own choices (theme, language), before any page loads.
     await context.addInitScript(([scheme, lang]) => {
       try {

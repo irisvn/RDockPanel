@@ -1,5 +1,5 @@
 //! The `Volumes` page (`/admin/p/volumes`): volumes: create and remove. Drawn by
-//! `resources/admin/js/rdockpanel/volumes.js`, which calls the routes of
+//! `resources/admin/src/rdockpanel/docker/VolumesNetworks.tsx` (React), which calls the routes of
 //! `routes/admin.rs`.
 
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};

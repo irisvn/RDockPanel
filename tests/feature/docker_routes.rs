@@ -360,6 +360,8 @@ db_test!(
                     StatusCode::UNPROCESSABLE_ENTITY,
                 ),
                 write(Method::DELETE, "/docker/images/web:latest", StatusCode::OK),
+                // No `image`: a bad query, once allowed.
+                write(Method::DELETE, "/docker/images", StatusCode::BAD_REQUEST),
                 write(Method::POST, "/docker/prune", StatusCode::OK),
                 write(
                     Method::POST,
@@ -617,6 +619,34 @@ db_test!(
         assert!(
             as_operator.contains(r#""system.manage":false"#),
             "{as_operator}"
+        );
+    }
+);
+
+db_test!(
+    an_image_is_removed_by_any_name_in_the_query,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::with_app_and_panel();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        // A tag: the panel's path segments do not take `:` (nor a registry's `/`).
+        let url = app.admin_api("x/docker/images?image=web%3Alatest&force=true");
+        let answer = admin.send(Method::DELETE, &url, None).await;
+        assert_eq!(
+            answer.status,
+            StatusCode::OK,
+            "{} {:?}",
+            answer.text(),
+            fake.calls()
+        );
+        assert!(
+            fake.calls()
+                .contains(&"remove-image web:latest force=true".to_owned()),
+            "{:?}",
+            fake.calls()
         );
     }
 );

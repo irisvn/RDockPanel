@@ -68,14 +68,12 @@ RustCMS extension host v2:
   the built `js/rdockpanel/dashboard.js`, `css/rdockpanel/dashboard.css`, `.rustcms-build.json` and
   `package-lock.json`: `cargo build` reads the built files and needs no Node. CI's `frontend` job
   checks the committed bundle is up to date.
-- **Styles:** `dashboard.css`, theme variables, `rdp2-` prefix. Status dots use fixed colors (the
-  theme keeps `--success` and `--warning` grey).
+- **Styles:** `dashboard.css`, theme variables and the panel's status and terminal tokens (light and
+  dark), `rdp2-` prefix; the rules are [ui-guidelines.md](ui-guidelines.md).
 
-**The Docker pages** are plain JavaScript (`resources/admin/js/rdockpanel/`), loaded with
-`extension_script` and styled by `resources/admin/css/rdockpanel/panel.css` (theme variables, `rdp-`
-prefix, no inline styles). Shared helpers are in `panel.js` (`window.rdockPanel`): `h` builds elements
-(never `innerHTML`), `api` calls the routes with the CSRF token. Translations: `registerTranslations`
-in `panel.js`.
+**Every page is React** (`resources/admin/src/rdockpanel/`): the apps interface, Domains, Actions,
+Settings, and the Docker pages (`docker/`: Containers, Images, Volumes, Networks, and the service
+record's live aside `ServiceLive`). Logs and terminals use the shared viewers in `lib/viewers.tsx`.
 
 xterm.js is vendored in `resources/admin/js/rdockpanel/vendor/` (see its README to update it).
 

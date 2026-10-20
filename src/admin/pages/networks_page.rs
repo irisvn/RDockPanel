@@ -1,5 +1,5 @@
 //! The `Networks` page (`/admin/p/networks`): networks: create and remove. Drawn by
-//! `resources/admin/js/rdockpanel/networks.js`, which calls the routes of
+//! `resources/admin/src/rdockpanel/docker/VolumesNetworks.tsx` (React), which calls the routes of
 //! `routes/admin.rs`.
 
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};

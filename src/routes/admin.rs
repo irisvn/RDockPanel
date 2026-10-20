@@ -59,6 +59,7 @@ pub fn routes() -> AdminRoutes {
                 .get("/images", view(), docker::images)
                 .post("/images/pull", manage(), docker::pull_image)
                 .delete("/images/{id}", manage(), docker::remove_image)
+                .delete("/images", manage(), docker::remove_image_named)
                 .post("/prune", manage(), docker::prune)
                 .get("/actions/{id}", view(), docker::action)
                 .get("/volumes", view(), docker::volumes)

@@ -1,5 +1,5 @@
 //! The `Containers` page (`/admin/p/containers`): containers: state, logs, inspect and actions. Drawn by
-//! `resources/admin/js/rdockpanel/containers.js`, which calls the routes of
+//! `resources/admin/src/rdockpanel/docker/Containers.tsx` (React), which calls the routes of
 //! `routes/admin.rs`.
 
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};

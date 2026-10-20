@@ -507,6 +507,35 @@ pub async fn remove_image(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// An image named in the query (`?image=nginx:1.27&force=true`): a tag or a
+/// registry path does not fit the panel's path segments (`:` and `/`).
+#[derive(Debug, Deserialize)]
+pub struct ImageRef {
+    pub image: String,
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// `DELETE /docker/images?image=…`: [`remove_image`] by a name of any shape.
+pub async fn remove_image_named(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Query(ImageRef { image, force }): Query<ImageRef>,
+) -> AppResult<Json<Value>> {
+    let docker = docker(&app)?;
+    let by = initiator(&auth, request);
+    action_service::run(
+        app.db(),
+        &by,
+        "image.remove",
+        &image,
+        docker.remove_image(&image, force, scope(&auth)),
+    )
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// One entry of the actions log (a pull's progress and outcome).
 /// A user reads their own actions; all of them need `system.manage` (they
 /// may concern the panel's own objects and carry Docker's raw errors).

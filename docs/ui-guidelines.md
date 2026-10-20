@@ -219,7 +219,7 @@ Raw values (`exited (0)`) stay available in a tooltip or a detail view, not as t
 
 ## 7. Shared components (`lib/`)
 
-Their CSS classes keep the `rdp2-` prefix (the plain-JS pages' `panel.css` owns `rdp-` until R5).
+Their CSS classes use the `rdp2-` prefix, in `dashboard.css`.
 
 | Component | What |
 |---|---|

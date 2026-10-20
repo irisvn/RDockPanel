@@ -1,6 +1,6 @@
 //! Beside a service: its state, whether its configuration changed since the
 //! last deployment, and its latest deployment (followed live by the script
-//! `resources/admin/js/rdockpanel/service-live.js`).
+//! `resources/admin/src/rdockpanel/docker/ServiceLive.tsx` (React)).
 
 use rustcms::admin::{Ctx, Envelope, PageView, PanelSlot, Placement, SlotMeta};
 use rustcms::{AppError, AppResult, async_trait};

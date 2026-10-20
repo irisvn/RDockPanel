@@ -3,7 +3,7 @@
 // tabs, by sub-path: `<project>`, `<project>/<service>`, `<project>/<service>/<tab>`.
 // A React page on the panel's React, React Query and UI kit (host API v2);
 // `npm run build` in resources/admin, then commit the built files.
-import { type PageProps, registerPage, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps, registerPage, registerSlot, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, ErrorState, Loading } from "@rustcms/admin-sdk/ui";
 import { useEffect, useState } from "react";
 import { Dashboard, NewService, ServiceCards, templateWarnings } from "./apps/Dashboard";
@@ -12,6 +12,10 @@ import { Templates } from "./apps/Templates";
 import { Settings } from "./settings/Settings";
 import { Actions } from "./actions/Actions";
 import { Domains } from "./domains/Domains";
+import { Containers } from "./docker/Containers";
+import { Images } from "./docker/Images";
+import { Networks, Volumes } from "./docker/VolumesNetworks";
+import { ServiceLive } from "./docker/ServiceLive";
 import { Palette } from "./lib/Palette";
 import { Members } from "./apps/Members";
 import type { Overview } from "./apps/types";
@@ -168,3 +172,22 @@ function DomainsRoute(props: PageProps<{ user?: string | number }>) {
 }
 
 registerPage("rdockpanel/domains", DomainsRoute as (p: PageProps<unknown>) => ReturnType<typeof DomainsRoute>);
+
+/** The Docker pages, on the same frame as the rest (docs/ui-redesign.md R5). */
+function dockerRoute(Page: (p: PageProps<never>) => ReturnType<typeof Containers>) {
+  return function DockerRoute(props: PageProps<{ user?: string | number }>) {
+    bindResources(props.resources);
+    return (
+      <ConfirmProvider t={props.t} path={props.path}>
+        <Page {...(props as PageProps<never>)} />
+        <Palette {...props} />
+      </ConfirmProvider>
+    );
+  };
+}
+
+registerPage("rdockpanel/containers", dockerRoute(Containers as never) as (p: PageProps<unknown>) => ReturnType<typeof Containers>);
+registerPage("rdockpanel/images", dockerRoute(Images as never) as (p: PageProps<unknown>) => ReturnType<typeof Containers>);
+registerPage("rdockpanel/volumes", dockerRoute(Volumes as never) as (p: PageProps<unknown>) => ReturnType<typeof Containers>);
+registerPage("rdockpanel/networks", dockerRoute(Networks as never) as (p: PageProps<unknown>) => ReturnType<typeof Containers>);
+registerSlot("rdockpanel/service-live", ServiceLive as never);

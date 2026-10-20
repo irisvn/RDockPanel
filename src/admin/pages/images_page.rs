@@ -1,5 +1,5 @@
 //! The `Images` page (`/admin/p/images`): images: pull, remove, prune. Drawn by
-//! `resources/admin/js/rdockpanel/images.js`, which calls the routes of
+//! `resources/admin/src/rdockpanel/docker/Images.tsx` (React), which calls the routes of
 //! `routes/admin.rs`.
 
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
