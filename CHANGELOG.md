@@ -3,6 +3,16 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.4.1 — 2026-10-20
+
+On RustCMS Core 0.7.0.
+
+- **Branding** (Settings): the panel's name, primary color, logos and favicon while it runs, on
+  the sign-in page too (images PNG, WebP or ICO up to 512 KB; no SVG).
+- **Roles page:** the panel's permissions in areas with labels and descriptions, and four presets.
+- The system line (versions, image, host) moved to the foot of Settings → Panel.
+- Images' version label without the tag's `v` (`0.4.1`, as the panel shows it).
+
 ## 0.4.0 — 2026-10-20
 
 The first tagged release, on RustCMS Core 0.6.1.
@@ -22,5 +32,3 @@ The first tagged release, on RustCMS Core 0.6.1.
 - **Installer:** version tags, MySQL and Traefik restarted only when their configuration changes,
   the panel's healthcheck kept, a short line per try while MySQL starts.
 
-Not in this release: the Roles page with areas and presets, and white-label branding (they need
-RustCMS Core 0.7.0).

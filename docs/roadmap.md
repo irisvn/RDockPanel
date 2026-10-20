@@ -39,6 +39,7 @@ Done (feature by feature in [the EasyPanel comparison](easypanel-comparison.md))
   middlewares).
 - Cloudflare Tunnel (Settings): cloudflared with the tunnel's token as a Swarm secret; every domain
   and the panel also served on Traefik's `tunnel` entrypoint (plain HTTP, Cloudflare holds TLS).
+- Branding in Settings (RustCMS 0.7.0 runtime branding); the Roles page's areas, labels and presets.
 
 Next:
 

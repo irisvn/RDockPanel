@@ -61,6 +61,20 @@ async function reloadWhenBack(base: string) {
   }
 }
 
+/** The page's footer: what runs (versions, image) and where (host, address). */
+export function SystemFooter(props: PageProps<unknown>) {
+  const t = props.t;
+  const s = useAdminQuery<Status>(props, "/apps/system/status").data;
+  if (!s) return null;
+  return (
+    <p className="rdp2-small rdp2-muted rdp2-versions">
+      RDockPanel {s.version}
+      {s.versions.commit && ` (${s.versions.commit.slice(0, 7)})`} · RustCMS Core {s.versions.rustcms} · {s.installed ? (s.image ?? t("installed")) : t("from source")} · {s.hostname}
+      {s.public_ip && ` · ${s.public_ip}`}
+    </p>
+  );
+}
+
 export function Controls(props: PageProps<unknown>) {
   const t = props.t;
   const status = useAdminQuery<Status>(props, "/apps/system/status");
@@ -135,13 +149,6 @@ export function Controls(props: PageProps<unknown>) {
           ))}
         </DropdownMenu>
       </div>
-      {s && (
-        <p className="rdp2-small rdp2-muted">
-          RDockPanel {s.version}
-          {s.versions.commit && ` (${s.versions.commit.slice(0, 7)})`} · RustCMS Core {s.versions.rustcms} · {s.installed ? (s.image ?? t("installed")) : t("from source")} · {s.hostname}
-          {s.public_ip && ` · ${s.public_ip}`}
-        </p>
-      )}
       {waiting && <Alert>{waiting}</Alert>}
       <ErrorNote error={error} />
       {logs && (

@@ -11,6 +11,8 @@ pub fn provider() -> AdminProvider {
         .home("dashboard")
         // Light by default, as EasyPanel; not the operating system's scheme.
         .theme(rustcms::admin::Theme::new().color_scheme(rustcms::admin::ColorScheme::Light))
+        // Settings → Branding, while the panel runs.
+        .branding(crate::services::branding_service::PanelBranding)
         // Labels in Vietnamese (`rustcms lang:missing vi` lists what is missing).
         .translations("vi", include_str!("../../lang/vi.toml"))
         .resource::<crate::admin::resources::project_resource::ProjectResource>()

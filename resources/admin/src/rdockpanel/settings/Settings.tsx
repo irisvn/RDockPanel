@@ -15,6 +15,7 @@ import { Panel } from "./Panel";
 import { Git } from "./Git";
 import { Tokens } from "./Tokens";
 import { Tunnel } from "./Tunnel";
+import { BrandingSettings } from "./Branding";
 
 type Provider = {
   id: number;
@@ -240,6 +241,7 @@ const TABS: Array<{ id: string; label: string; permission: string | null }> = [
   { id: "traefik", label: "Traefik", permission: "system.manage" },
   { id: "certificates", label: "Certificates", permission: "system.manage" },
   { id: "tunnel", label: "Cloudflare Tunnel", permission: "system.manage" },
+  { id: "branding", label: "Branding", permission: "system.manage" },
   { id: "git", label: "Git", permission: "system.manage" },
   { id: "backups", label: "Backups", permission: "storage_providers.view_any" },
   { id: "notifications", label: "Notifications", permission: "notification_channels.view_any" },
@@ -272,6 +274,7 @@ export function Settings(props: PageProps<unknown>) {
           </>
         )}
         {tab === "tunnel" && <Tunnel {...props} />}
+        {tab === "branding" && <BrandingSettings {...props} />}
         {tab === "git" && <Git {...props} />}
         {tab === "backups" && <StorageProviders {...props} />}
         {tab === "notifications" && <Notifications {...props} />}

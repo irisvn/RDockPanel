@@ -526,6 +526,17 @@ window.rustcms?.registerTranslations?.("vi", {
   "Change and add services and domains": "Sửa và thêm service, domain",
   "Read environment values": "Đọc giá trị biến môi trường",
   "Read services' logs": "Đọc log của service",
+  // Branding
+  Branding: "Thương hiệu",
+  "The panel's name, color, logos and favicon, on every page and the sign-in page. Left empty: RDockPanel's own.":
+    "Tên, màu, logo và favicon của panel, trên mọi trang và trang đăng nhập. Để trống: dùng của RDockPanel.",
+  "Primary color": "Màu chính",
+  Logo: "Logo",
+  "Logo (dark mode)": "Logo (chế độ tối)",
+  Favicon: "Favicon",
+  "RDockPanel's own": "Của RDockPanel",
+  "PNG, WebP or ICO, at most 512 KB each (no SVG).": "PNG, WebP hoặc ICO, mỗi file tối đa 512 KB (không nhận SVG).",
+  "Saved: reload the page to see it.": "Đã lưu: tải lại trang để thấy thay đổi.",
   // Cloudflare Tunnel
   "Cloudflare Tunnel": "Cloudflare Tunnel",
   "Reach your domains through Cloudflare, without opening ports 80 and 443 (cloudflared runs beside Traefik).":

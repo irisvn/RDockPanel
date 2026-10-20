@@ -301,3 +301,49 @@ db_test!(
         );
     }
 );
+
+db_test!(
+    the_roles_page_shows_areas_labels_and_presets,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let permissions = admin.get(&app.admin_api("system/permissions")).await;
+        permissions.assert_status(StatusCode::OK);
+        let list = permissions.json();
+        let find = |name: &str| {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["name"] == name)
+                .cloned()
+                .unwrap_or_else(|| panic!("{name} in {list}"))
+        };
+        let deploy = find("services.deploy");
+        assert_eq!(deploy["label"], "Deploy services");
+        assert_eq!(deploy["area"], "apps");
+        assert_eq!(find("docker.manage")["area"], "docker");
+        assert_eq!(find("system.manage")["area"], "system");
+        // A project role's permissions, as a starting selection for a role.
+        let presets = admin
+            .get(&app.admin_api("system/permission-presets"))
+            .await
+            .json();
+        let ids: Vec<&str> = presets
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            ["viewer", "developer", "admin", "monitor"],
+            "{presets}"
+        );
+        let viewer = presets[0]["permissions"].to_string();
+        assert!(viewer.contains("apps.access") && viewer.contains("services.view"));
+        assert!(!viewer.contains("services.deploy") && !viewer.contains("system."));
+    }
+);

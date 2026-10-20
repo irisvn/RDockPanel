@@ -39,6 +39,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # A tag's version without its `v` (v0.4.0 → 0.4.0), as the binary and
+      # the image's labels show it.
+      - id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"; fi
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -46,7 +51,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           build-args: |
             RDP_COMMIT=${{ github.sha }}
-            RDP_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '' }}
+            RDP_VERSION=${{ steps.version.outputs.value }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}

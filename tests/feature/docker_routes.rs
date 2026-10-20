@@ -235,6 +235,18 @@ db_test!(
                 Case::new(Method::POST, "/apps/traefik/apply")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/branding")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::PUT, "/apps/branding")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::PUT, "/apps/branding/images/logo")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::DELETE, "/apps/branding/images/logo")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
                 Case::new(Method::GET, "/apps/tunnel")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("operator", &operator, StatusCode::FORBIDDEN),

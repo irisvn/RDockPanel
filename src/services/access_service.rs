@@ -97,6 +97,18 @@ const ADMIN: &[&str] = &[
     "projects.members",
 ];
 
+/// The permissions `role` grants in its projects (a viewer's, a developer's
+/// with them, an admin's with both): also the Roles page's presets.
+pub fn role_permissions(role: &str) -> Vec<&'static str> {
+    let lists: &[&[&str]] = match role {
+        "viewer" => &[VIEWER],
+        "developer" => &[VIEWER, DEVELOPER],
+        "admin" => &[VIEWER, DEVELOPER, ADMIN],
+        _ => &[],
+    };
+    lists.iter().flat_map(|list| list.iter().copied()).collect()
+}
+
 /// Every permission a project role may grant (what a project's page asks).
 pub fn project_permissions() -> impl Iterator<Item = &'static str> {
     VIEWER.iter().chain(DEVELOPER).chain(ADMIN).copied()

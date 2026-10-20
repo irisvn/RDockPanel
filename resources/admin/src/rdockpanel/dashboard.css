@@ -144,3 +144,4 @@
 .rdp2-versions { margin-top: 1.5rem; text-align: center; }
 .rdp2-terminal { height: 26rem; background: #0b0b0e; border-radius: var(--radius); padding: 0.4rem; }
 .rdp2-grow { flex: 1 1 14rem; }
+.rdp2-brand-preview { max-height: 2.5rem; max-width: 10rem; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); padding: 0.2rem; background: var(--muted); }

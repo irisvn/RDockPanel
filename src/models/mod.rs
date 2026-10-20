@@ -2,6 +2,7 @@
 
 pub mod action;
 pub mod backup_run;
+pub mod branding_image;
 pub mod cert_resolver;
 pub mod certificate;
 pub mod database_backup;

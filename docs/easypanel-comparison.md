@@ -30,7 +30,7 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Scripts | Partly | run non-interactively, at most 25 s, output shown (EasyPanel runs them in a shell) |
 | Resources: CPU and memory reservations and limits | Done | in Advanced |
 | Maintenance mode: title, subtitle | Done | the panel serves the page (503) |
-| Maintenance: white-label logo and CSS | Missing | a paid EasyPanel feature |
+| White-label: name, logos, favicon, primary color | Done | Settings → Branding (the sign-in page too); no custom CSS |
 | Storage: volume, bind (system managers), file mounts | Done | file contents encrypted |
 | Storage: volume backups | Done | scheduled, retention, restore |
 | Advanced: ports, replicas, zero downtime, command, health check | Done | |
@@ -66,4 +66,4 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Project members (users per project, roles) | Done | viewer, developer, admin per project, on every route ([permissions](permissions.md)) |
 | API with tokens, CLI | Done | `/api/v1` with scoped tokens (Settings → API tokens), the `rdp` command line ([api](api.md)) |
 | Cloudflare Tunnel | Done | Settings → Cloudflare Tunnel: cloudflared with the tunnel's token (a Swarm secret); each public hostname to `http://rdp-traefik:8081` |
-| Cluster (several nodes), white-label | Missing | later (see the [roadmap](roadmap.md)) |
+| Cluster (several nodes) | Missing | later (see the [roadmap](roadmap.md)) |

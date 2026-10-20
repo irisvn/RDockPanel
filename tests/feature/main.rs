@@ -7,6 +7,7 @@ mod support;
 mod api;
 mod apps;
 mod backups;
+mod branding;
 mod certificates;
 mod compose;
 mod databases;

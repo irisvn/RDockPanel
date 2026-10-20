@@ -67,6 +67,8 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Panel trong Settings:** domain panel, email Let's Encrypt và domain cho app được kiểm tra (DNS, tên đang dùng), kèm sẵn lệnh installer để áp dụng.
 - **Traefik trong Settings:** xem trạng thái, khởi động lại, log trực tiếp, và middleware tuỳ chỉnh (`custom-<tên>`: headers, giới hạn tốc độ, danh sách IP…) cho domain, không cần SSH.
 - **Cloudflare Tunnel** (Settings): chạy cloudflared bằng token tunnel của bạn (mã hoá, đưa vào dưới dạng Swarm secret), để vào domain qua Cloudflare mà không cần mở cổng 80 và 443.
+- **Thương hiệu** (Settings): tên, màu chính, logo (sáng và tối) và favicon của panel, trên mọi trang và trang đăng nhập, không cần khởi động lại.
+- **Trang Roles:** quyền chia theo nhóm (Ứng dụng, Docker, Server, Hệ thống) có nhãn và mô tả, ô tìm kiếm, và preset (xem, developer, quản trị ứng dụng; giám sát) để tạo role nhanh.
 - **Từng service:** biểu đồ CPU và RAM, ghi chú cho nhóm, script (lệnh chạy một lần trong container đang chạy, hiện output); quản trị panel còn đặt được capability, sysctl và group bổ sung.
 - **Bí mật:** biến môi trường (sửa như file `.env`) và tài khoản registry riêng được mã hoá bằng app key; chỉ người có quyền `services.secrets` mới xem được giá trị, mỗi lần xem đều ghi audit. Rollback trả lại đúng biến môi trường của lần deploy đó.
 

@@ -93,6 +93,10 @@ feature is free: no project limits, no paid tiers.
   (`custom-<name>`, headers, rate limits, IP allow lists…) for domains, all without SSH.
 - **Cloudflare Tunnel** (Settings): cloudflared run with your tunnel's token (kept encrypted, given
   as a Swarm secret), so domains are reached through Cloudflare without opening ports 80 and 443.
+- **Branding** (Settings): the panel's name, primary color, logos (light and dark) and favicon,
+  on every page and the sign-in page, without a restart.
+- **Roles page**: permissions in areas (Apps, Docker, Server, System) with labels and descriptions,
+  a search, and presets (apps viewer, developer, administrator; monitor) to start a role from.
 - **Per service**: CPU and memory charts, notes for the team, scripts (one-off commands in the running
   container, their output shown), and, for administrators, capabilities, sysctls and supplemental
   groups.

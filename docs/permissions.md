@@ -2,6 +2,11 @@
 
 Permissions live in the `admin` guard and are granted through roles (System → Roles). Run
 `rustcms permission:sync` after an upgrade to create new ones. A `super_admin` has all of them.
+The Roles page groups the panel's own permissions in areas (Apps and deployments, Docker, Server,
+System) with a label and a description each, and offers presets to start a role from: **Apps
+viewer**, **Apps developer** and **Apps administrator** (a project role's permissions, in every
+project) and **Monitor** (`server.view`, `docker.view`, `docker.logs`). A preset only fills the
+unsaved selection: nothing is granted until the role is saved.
 
 | Permission | Allows |
 |---|---|

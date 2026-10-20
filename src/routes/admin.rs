@@ -7,8 +7,8 @@ use rustcms::prelude::*;
 
 use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
-    deploy_controller as deploy, docker_controller as docker, domains_controller as domains,
-    git_controller as git, members_controller as members,
+    branding_controller as branding, deploy_controller as deploy, docker_controller as docker,
+    domains_controller as domains, git_controller as git, members_controller as members,
     notifications_controller as notifications, server_controller as server,
     system_controller as system, templates_controller as templates, tokens_controller as tokens,
     traefik_controller as traefik, tunnel_controller as tunnel,
@@ -91,6 +91,27 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                // Branding (Settings): the panel's name, color and images.
+                .get(
+                    "/branding",
+                    AdminAccess::can("system.manage"),
+                    branding::index,
+                )
+                .put(
+                    "/branding",
+                    AdminAccess::can("system.manage"),
+                    branding::update,
+                )
+                .put(
+                    "/branding/images/{kind}",
+                    AdminAccess::can("system.manage"),
+                    branding::upload,
+                )
+                .delete(
+                    "/branding/images/{kind}",
+                    AdminAccess::can("system.manage"),
+                    branding::remove,
+                )
                 // Cloudflare Tunnel (Settings).
                 .get("/tunnel", AdminAccess::can("system.manage"), tunnel::status)
                 .post(
