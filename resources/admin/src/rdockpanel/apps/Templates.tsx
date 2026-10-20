@@ -1,5 +1,5 @@
 // EasyPanel's templates in a project: the catalog (searchable), a
-// template's form (its JSON Schema), and "Create from Schema" (a generator's
+// template's form (its JSON Schema), and "Create from schema" (a generator's
 // `{services}` output, pasted). Creating can deploy at once.
 import { useMemo, useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
@@ -191,7 +191,7 @@ export function Templates(props: PageProps<unknown> & { project: Project; onClos
           <div className="rdp2-row">
             <Input autoFocus placeholder={t("Search templates")} value={search} onChange={(e) => setSearch(e.target.value)} />
             <Button type="button" variant="outline" onClick={() => setSchema(true)}>
-              {t("Create from Schema")}
+              {t("Create from schema")}
             </Button>
           </div>
           {list.isLoading && <Loading />}

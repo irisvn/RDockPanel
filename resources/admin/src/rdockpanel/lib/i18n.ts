@@ -211,7 +211,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "A URL is set (shown when it was made).": "Đã có URL (chỉ hiện lúc tạo).",
   Templates: "Template",
   "Search templates": "Tìm template",
-  "Create from Schema": "Tạo từ Schema",
+  "Create from schema": "Tạo từ Schema",
   "templates from easypanel.io, fetched when opened.": "template từ easypanel.io, tải về khi mở.",
   "Deploy now": "Deploy ngay",
   Schema: "Schema",

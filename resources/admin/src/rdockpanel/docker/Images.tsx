@@ -119,12 +119,16 @@ export function Images(props: PageProps<{ can?: Can }>) {
             className="rdp2-toolbar rdp2-toolbar-inline"
             onSubmit={async (e) => {
               e.preventDefault();
+              if (pulling !== null) return;
               setError(null);
+              // Disabled while it is being queued too: one click, one pull.
+              setPulling(-1);
               try {
                 const queued = await props.api.post<{ action: { id: number } }>("/docker/images/pull", { image: reference.trim() });
                 setPulling(queued.action.id);
                 setShown(queued.action.id);
               } catch (err) {
+                setPulling(null);
                 setError(err);
               }
             }}

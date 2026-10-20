@@ -13,6 +13,7 @@
 //   RDP_SHOT_THEMES    light,dark
 //   RDP_SHOT_LOCALES   en,vi
 //   RDP_SHOT_SCALE     the device pixel ratio (1; 2 for README images)
+//   RDP_SHOT_FULL      0: the first screen only, as README images are (default: whole pages)
 // The host's name is replaced by `server-01` on every shot.
 import { createRequire } from "node:module";
 import fs from "node:fs";
@@ -36,6 +37,7 @@ const widths = list("RDP_SHOT_WIDTHS", "1440,768,390").map(Number);
 const themes = list("RDP_SHOT_THEMES", "light,dark");
 const locales = list("RDP_SHOT_LOCALES", "en,vi");
 const scale = Number(env("RDP_SHOT_SCALE", "1"));
+const full = env("RDP_SHOT_FULL", "1") !== "0";
 
 // name, path, and what to do on the page before the shot (a dialog, a menu).
 const PAGES = [
@@ -142,7 +144,7 @@ for (const locale of locales) {
           const lang = await page.evaluate(() => document.documentElement.lang);
           if (lang && !lang.startsWith(locale)) throw new Error(`shown in ${lang}, not ${locale} (the user's saved language wins)`);
           await mask(page);
-          await page.screenshot({ path: file, fullPage: !act });
+          await page.screenshot({ path: file, fullPage: full && !act });
           console.log("shot", path.basename(file));
         } catch (err) {
           failed += 1;

@@ -3,6 +3,17 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## Unreleased
+
+- **New look** ([docs/ui-guidelines.md](docs/ui-guidelines.md)): every page on one set of rules
+  (button sizes, one primary action per area, a ⋯ menu per row, a type scale, statuses with the
+  same words and colors in light and dark), the panel's own dialogs instead of the browser's, and
+  tables that page and scroll on a phone.
+- The Docker pages (Containers, Images, Volumes, Networks) and the live part of a service are React
+  pages like the rest: logs with a line count and Follow, a terminal with New session.
+- Images are removed by any of their names (`DELETE /admin/api/x/docker/images?image=…`).
+- New screenshots in the README.
+
 ## 0.4.1 — 2026-10-20
 
 On RustCMS Core 0.7.0.

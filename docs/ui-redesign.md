@@ -1,6 +1,6 @@
 # UI redesign plan
 
-Applies [ui-guidelines.md](ui-guidelines.md) to every page. Status: **approved 2026-10-20**, in progress.
+Applies [ui-guidelines.md](ui-guidelines.md) to every page. Status: **approved and done 2026-10-20** (R0–R6).
 Screenshots of today's pages: 49 shots taken 2026-10-20 (1440px, 390px), audited page by page.
 
 ## What is wrong today (the audit, condensed)
