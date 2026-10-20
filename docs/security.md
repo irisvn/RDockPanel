@@ -174,8 +174,9 @@ administrator presses Update (`system.manage`, audited as `system.panel.update`)
 always `ghcr.io/irisvn/rdockpanel:<version>`, pinned to the digest the panel asked the registry
 for (never one the browser sends); the panel's database is dumped first (readable by root only,
 in the backups directory), and Swarm rolls back to the previous image if the new one does not
-become healthy. Until RustCMS lets an older panel start on a newer database (asked), a rollback
-after the new version migrated its database does not start: restore the dump then
+become healthy. The rolled-back version starts on the database as the new one left it (`migrate
+--allow-newer`, RustCMS 0.8.1: from 0.5.0 on; the panel's migrations only add — new tables,
+nullable or defaulted columns); the dump is there if anything else is needed
 ([install](install.md#restoring-the-panels-database)). Release notes are shown as text, never as HTML.
 
 ## GitHub tokens

@@ -524,6 +524,10 @@ pub async fn status(app: &AppState, installed: bool) -> AppResult<Value> {
         "components": components,
         "history": history(app.db()).await?,
         "updating": crate::services::panel_update_service::progress(app.db()).await?,
+        // Migrations a newer version applied (this one rolled back to).
+        "newer_migrations": rustcms::db::unknown_migrations::<crate::database::migrations::Migrator>(app.db())
+            .await
+            .unwrap_or_default(),
         // The button's: a release's panel, installed, its service found.
         "can_update": update.is_some() && installed && image.is_some(),
     }))

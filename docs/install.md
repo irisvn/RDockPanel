@@ -86,9 +86,10 @@ the file from a backup (changing `APP_KEY` needs `rustcms key:reencrypt`; see
 ### Restoring the panel's database
 
 Settings → Version's Update dumps the panel's database first, to
-`/var/lib/rdockpanel/backups/panel/rdockpanel-<version>-<time>-<id>.sql`. If the new version
-migrated the database and then failed, Swarm's rollback to the previous version cannot start on
-it (its `migrate` refuses a newer database): restore the dump, then start the previous version:
+`/var/lib/rdockpanel/backups/panel/rdockpanel-<version>-<time>-<id>.sql`. When the new version
+fails, Swarm rolls back to the previous one, which starts on the database as the new one left it
+(from 0.5.0 on: `migrate --allow-newer`; Settings → Version then lists the newer migrations).
+Rolling back to a version before 0.5.0, or undoing what a release changed, needs the dump:
 
 ```sh
 c=$(docker ps -q -f name=rdp-mysql)

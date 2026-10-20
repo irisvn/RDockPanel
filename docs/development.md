@@ -90,7 +90,7 @@ xterm.js is vendored in `resources/admin/js/rdockpanel/vendor/` (see its README 
 
 ## RustCMS dependency
 
-`Cargo.toml` pins RustCMS-Core by a release tag (`v0.6.1`), or by git rev between releases. Never
+`Cargo.toml` pins RustCMS-Core by a release tag (`v0.8.1`), or by git rev between releases. Never
 use a plain path dependency on a working checkout: it picks up unfinished framework changes. For
 unpushed framework commits, pin a `file://` git rev and switch back to GitHub once pushed. After an
 upgrade, run `rustcms migrate` (framework tables) and `rustcms permission:sync`.
@@ -103,5 +103,13 @@ panel's schedules.
 - Follow the RustCMS layout and generators (`rustcms make:service`, `make:model -m`, `make:job`,
   `make:page --script`).
 - Comments explain why; doc comments on public items.
+- **Migrations only add**: new tables, nullable or defaulted columns; never a rename, a drop or a
+  stricter constraint in the same release. Settings → Version's Update rolls a failing release
+  back, and the previous version starts on the database as the new one left it (`migrate
+  --allow-newer`): it must still be one it can use.
+- **A release for a big change**: bump `Cargo.toml`, write its `## X.Y.Z` section of
+  `CHANGELOG.md` (the GitHub Release's notes), push, let CI and the image build, then push the tag
+  `vX.Y.Z` (`release.yml` names the image and publishes the Release). The docs follow the code in
+  the same commit.
 - Commit messages: short, in Vietnamese or English, describing the change.
 - Changes are reviewed (Codex review in this project) before they are committed; CI must be green.

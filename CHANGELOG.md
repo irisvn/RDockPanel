@@ -5,7 +5,7 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
 
 ## 0.5.0 — 2026-10-20
 
-On RustCMS Core 0.8.0 (the image runs `migrate` and `permission:sync` at its start).
+On RustCMS Core 0.8.1 (the image runs `migrate --allow-newer` and `permission:sync` at its start).
 
 - **Settings → Version**: what the panel runs (version, commit, image) and with what (Core,
   Traefik, MySQL, cloudflared, Docker, the OS); whether a newer release is out (the registry's
@@ -16,8 +16,9 @@ On RustCMS Core 0.8.0 (the image runs `migrate` and `permission:sync` at its sta
   administrator's Update moves it to the newest release. New deployments, backups and restores
   wait while those running end; the panel's database is dumped to
   `/var/lib/rdockpanel/backups/panel/`; Swarm replaces the panel (pinned to the registry's
-  digest) and rolls back if the new version does not become healthy; the next panel records how
-  it ended. A plain installer run keeps a newer release the panel updated to.
+  digest) and rolls back if the new version does not become healthy — the version rolled back to
+  starts on the database as the new one left it (`migrate --allow-newer`); the next panel records
+  how it ended. A plain installer run keeps a newer release the panel updated to.
 - **Old versions removed** (Settings → Version): the stopped containers of the panel's services'
   old tasks and their images, the running and previous versions kept. The Images page says which
   images run, which only stopped containers keep, and which none uses.

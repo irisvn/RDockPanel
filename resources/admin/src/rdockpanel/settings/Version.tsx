@@ -28,6 +28,7 @@ type VersionStatus = {
   components: Record<string, string | undefined>;
   history: Array<{ kind: string; target: string; status: string; error: string | null; log: string | null; at: string }>;
   updating: { from: string; to: string; stage: string; at: string } | null;
+  newer_migrations: string[];
   can_update: boolean;
 };
 
@@ -90,7 +91,7 @@ export function Version(props: PageProps<unknown>) {
     const ok = await ask({
       title: t("Update RDockPanel to {v}?").replace("{v}", version),
       body: t(
-        "New deployments and backups wait; those running end first. The panel's database is backed up, then Swarm replaces the panel: it is unavailable for about a minute. Your services keep running. If the new version does not start, Swarm goes back to {from}; if it had already changed the database, {from} may not start on it: restore the backup (the installation guide says how).",
+        "New deployments and backups wait; those running end first. The panel's database is backed up, then Swarm replaces the panel: it is unavailable for about a minute. Your services keep running. If the new version does not start, Swarm goes back to {from} (which runs on the database as the new one left it; the backup is kept).",
       ).replace("{from}", p.version),
       action: t("Update to {v}").replace("{v}", version),
     });
@@ -135,6 +136,11 @@ export function Version(props: PageProps<unknown>) {
         <Alert>
           {`${t("Updating to {v}").replace("{v}", s.updating.to)}: ${t(STAGES[s.updating.stage] ?? s.updating.stage)}`}
           {status.error ? ` ${t("(the panel is restarting)")}` : ""}
+        </Alert>
+      )}
+      {s.newer_migrations.length > 0 && (
+        <Alert variant="warning">
+          {t("A newer version migrated this database ({names}): this one runs on it as it is (an update rolled back). Update again once the newer release is fixed.").replace("{names}", s.newer_migrations.join(", "))}
         </Alert>
       )}
       {loaded.current && loaded.current !== p.version && (
