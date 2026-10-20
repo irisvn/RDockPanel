@@ -128,3 +128,45 @@ db_test!(
         assert!(spec(&fake, "rdp-cloudflared").is_none());
     }
 );
+
+db_test!(
+    an_installed_traefik_keeps_its_tunnel_entrypoint_as_it_is,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        // As the installer starts it: the entrypoint there before any tunnel.
+        let installed = [
+            "--providers.file.directory=/etc/traefik/dynamic",
+            "--entrypoints.tunnel.address=:8081",
+            "--entrypoints.tunnel.http.aliasHeadersStrategy=delete",
+        ];
+        {
+            let mut services = fake.services.lock().unwrap();
+            let traefik = services.get_mut("rdp-traefik").unwrap();
+            let spec = traefik.spec.as_mut().unwrap();
+            spec.task_template
+                .as_mut()
+                .unwrap()
+                .container_spec
+                .as_mut()
+                .unwrap()
+                .args = Some(installed.iter().map(|a| a.to_string()).collect());
+        }
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        admin
+            .post_json(
+                &app.admin_api("x/apps/tunnel/enable"),
+                &json!({"token": TOKEN}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let traefik = spec(&fake, "rdp-traefik").unwrap();
+        let args: Vec<String> =
+            serde_json::from_value(traefik["TaskTemplate"]["ContainerSpec"]["Args"].clone())
+                .unwrap();
+        assert_eq!(args, installed);
+    }
+);

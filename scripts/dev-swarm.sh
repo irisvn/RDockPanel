@@ -12,7 +12,7 @@ set -eu
 
 cd "$(dirname "$0")/.."
 DYNAMIC="$(pwd)/storage/traefik/dynamic"
-TRAEFIK_IMAGE="traefik:v3.5"
+TRAEFIK_IMAGE="traefik:v3.7"
 SYSTEM_LABEL="rdockpanel.system=true"
 
 state="$(docker info --format '{{.Swarm.LocalNodeState}}')"
@@ -38,6 +38,10 @@ else
     "$TRAEFIK_IMAGE" \
     --entrypoints.web.address=:80 \
     --entrypoints.websecure.address=:443 \
+    --entrypoints.tunnel.address=:8081 \
+    --entrypoints.web.http.aliasHeadersStrategy=delete \
+    --entrypoints.websecure.http.aliasHeadersStrategy=delete \
+    --entrypoints.tunnel.http.aliasHeadersStrategy=delete \
     --providers.file.directory=/etc/traefik/dynamic \
     --providers.file.watch=true \
     --log.level=INFO >/dev/null

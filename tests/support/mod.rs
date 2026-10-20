@@ -41,7 +41,7 @@ pub async fn app_with_docker(db: TestDb, docker: fake_docker::FakeDocker) -> Tes
         "Name": "rdp-traefik",
         "Labels": {"rdockpanel.system": "true"},
         "TaskTemplate": {
-            "ContainerSpec": {"Image": "traefik:v3.5", "Args": ["--providers.file.directory=/etc/traefik/dynamic"]},
+            "ContainerSpec": {"Image": "traefik:v3.7", "Args": ["--providers.file.directory=/etc/traefik/dynamic"]},
             "Networks": [{"Target": "ingress-extra"}],
         },
     });

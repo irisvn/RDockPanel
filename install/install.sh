@@ -29,7 +29,7 @@ COMPOSE=/var/lib/rdockpanel/compose
 CONF="$ETC/install.conf"
 SYSTEM=rdockpanel.system=true
 MYSQL_IMAGE=mysql:8.4
-TRAEFIK_IMAGE=traefik:v3.5
+TRAEFIK_IMAGE=traefik:v3.7
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf 'rdockpanel: %s\n' "$*" >&2; exit 1; }
@@ -188,7 +188,15 @@ fi
 # --- Traefik (ports 80 and 443; Let's Encrypt with --email) -------------------
 # The values are checked above: no spaces, so the arguments split as meant.
 RESOLVER=""
+# The tunnel's entrypoint is always there (never published; routed only while
+# the tunnel is on): turning it on changes nothing of Traefik. Header names
+# that alias others (`X_Forwarded_For`) are dropped: some backends (PHP, WSGI)
+# read them as the real ones.
 TRAEFIK_ARGS="--entrypoints.web.address=:80 --entrypoints.websecure.address=:443 \
+--entrypoints.tunnel.address=:8081 \
+--entrypoints.web.http.aliasHeadersStrategy=delete \
+--entrypoints.websecure.http.aliasHeadersStrategy=delete \
+--entrypoints.tunnel.http.aliasHeadersStrategy=delete \
 --providers.file.directory=/etc/traefik/dynamic --providers.file.watch=true --log.level=WARN"
 if [ -n "$EMAIL" ]; then
   RESOLVER=letsencrypt
@@ -200,7 +208,7 @@ fi
 # its own: kept as they are).
 installer_arg() {
   case "$1" in
-    --entrypoints.web.*|--entrypoints.websecure.*|--providers.file.*|--log.level=*|--certificatesresolvers.letsencrypt.*) return 0 ;;
+    --entrypoints.web.*|--entrypoints.websecure.*|--entrypoints.tunnel.*|--providers.file.*|--log.level=*|--certificatesresolvers.letsencrypt.*) return 0 ;;
   esac
   return 1
 }

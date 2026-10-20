@@ -705,7 +705,7 @@ db_test!(
         // Its state, never its arguments.
         let status = admin.get(&app.admin_api("x/apps/traefik/status")).await;
         status.assert_status(StatusCode::OK);
-        assert_eq!(status.json()["traefik"]["image"], "traefik:v3.5");
+        assert_eq!(status.json()["traefik"]["image"], "traefik:v3.7");
         assert!(
             !status.text().contains("certificatesresolvers"),
             "{}",

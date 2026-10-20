@@ -28,7 +28,7 @@ Point `panel.example.com` and `*.apps.example.com` (a wildcard record) to the se
 | `--admin-email EMAIL` | creates the first administrator and prints its password |
 | `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:main` until the first release) |
 | `--version X.Y.Z` | that release of the panel: `ghcr.io/irisvn/rdockpanel:X.Y.Z` |
-| `--upgrade-system` | MySQL and Traefik pulled again at their tags (a newer patch of `mysql:8.4`, `traefik:v3.5`) |
+| `--upgrade-system` | MySQL and Traefik pulled again at their tags (a newer patch of `mysql:8.4`, `traefik:v3.7`) |
 
 The options are kept in `/etc/rdockpanel/install.conf`: a later run changes only what it is given.
 That file is read as data (`KEY=value` lines of `IMAGE`, `DOMAIN`, `EMAIL`, `APPS_DOMAIN`, each

@@ -3,6 +3,16 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## Unreleased
+
+- **Traefik v3.7** (from v3.5): the installer moves it at the next upgrade (one restart of
+  Traefik). Header names that alias others (`X_Forwarded_For`) are dropped on every entrypoint:
+  some backends (PHP, WSGI) read them as the real ones.
+- The tunnel's entrypoint is always in Traefik (never published, routed only while the tunnel is
+  on): turning the tunnel on no longer logs "EntryPoint doesn't exist" while Traefik restarts.
+- A console command (`schedule:list`, `migrate`) run beside the panel no longer ends its open
+  terminals or writes its route files: that is the server's work at start.
+
 ## 0.4.2 — 2026-10-20
 
 On RustCMS Core 0.7.0.

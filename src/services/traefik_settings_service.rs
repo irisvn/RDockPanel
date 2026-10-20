@@ -249,6 +249,16 @@ fn has_template(value: &Value) -> bool {
 /// its options (of the right kinds), no key twice, no template (once its
 /// escapes are read), chains of their own without cycles.
 pub fn parse_middlewares(yaml: &str) -> Result<Option<serde_json::Map<String, Value>>, String> {
+    parse(yaml, false)
+}
+
+/// [`parse_middlewares`] of what was saved: an authentication without users
+/// (accepted before Traefik v3.6.19 refused it) is left out, not the others.
+fn parse_saved(yaml: &str) -> Result<Option<serde_json::Map<String, Value>>, String> {
+    parse(yaml, true)
+}
+
+fn parse(yaml: &str, saved: bool) -> Result<Option<serde_json::Map<String, Value>>, String> {
     if yaml.len() > MAX_YAML {
         return Err("too long (32 KB at most)".to_owned());
     }
@@ -268,9 +278,10 @@ pub fn parse_middlewares(yaml: &str) -> Result<Option<serde_json::Map<String, Va
     if has_template(&value) {
         return Err("templates ({{ … }}) are not allowed".to_owned());
     }
-    let Value::Object(map) = value else {
+    let Value::Object(mut map) = value else {
         return Err("a map of middlewares: `custom-name: {headers: …}`".to_owned());
     };
+    let mut without_users = Vec::new();
     for (name, definition) in &map {
         if !valid_name(name) {
             return Err(format!(
@@ -311,6 +322,18 @@ pub fn parse_middlewares(yaml: &str) -> Result<Option<serde_json::Map<String, Va
                 None => return Err(format!("{name}: {kind} has no option {option}")),
             }
         }
+        // Without users Traefik refuses it (v3.6.19+), and every router using it.
+        if (kind == "basicAuth" || kind == "digestAuth")
+            && options
+                .get("users")
+                .and_then(Value::as_array)
+                .is_none_or(|users| users.is_empty())
+        {
+            if !saved {
+                return Err(format!("{name}: {kind} needs at least one user"));
+            }
+            without_users.push(name.clone());
+        }
         // A chain of the administrators' own only.
         if kind == "chain" {
             let refs = options
@@ -331,6 +354,13 @@ pub fn parse_middlewares(yaml: &str) -> Result<Option<serde_json::Map<String, Va
     }
     if let Some(name) = chain_cycle(&map) {
         return Err(format!("{name}: its chain comes back to itself"));
+    }
+    for name in without_users {
+        tracing::warn!(
+            middleware = name,
+            "an authentication without users: not written"
+        );
+        map.remove(&name);
     }
     Ok(Some(map))
 }
@@ -394,7 +424,7 @@ pub async fn sync_middlewares(
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
     // Kept only once checked: a check failing now writes none.
-    let map = parse_middlewares(&yaml).unwrap_or(None);
+    let map = parse_saved(&yaml).unwrap_or(None);
     let dir = traefik.dir.clone();
     tokio::task::spawn_blocking(move || {
         FILE.write(generation, || write_middlewares(&dir, map.as_ref()))
@@ -419,7 +449,7 @@ pub async fn status(docker: &Docker, traefik: &Traefik) -> DockerResult<Value> {
         .and_then(|t| t.container_spec.as_ref())
         .and_then(|c| c.image.clone())
         .unwrap_or_default();
-    // `traefik:v3.5@sha256:…`: shown without its digest.
+    // `traefik:v3.7@sha256:…`: shown without its digest.
     let shown = image.split('@').next().unwrap_or_default().to_owned();
     let ports: Vec<Value> = spec
         .endpoint_spec
@@ -498,6 +528,10 @@ mod tests {
         let ok = "custom-limit:\n  rateLimit:\n    average: 50\ncustom-sec:\n  headers:\n    frameDeny: true\ncustom-both:\n  chain:\n    middlewares: [custom-limit, custom-sec]\n";
         let map = parse_middlewares(ok).unwrap().unwrap();
         assert_eq!(map.len(), 3);
+        // Saved before Traefik refused it: that one left out, the others kept.
+        let older = "custom-limit:\n  rateLimit:\n    average: 50\ncustom-auth:\n  basicAuth:\n    users: []\n";
+        let kept = parse_saved(older).unwrap().unwrap();
+        assert_eq!(kept.keys().collect::<Vec<_>>(), ["custom-limit"]);
         assert_eq!(parse_middlewares("  ").unwrap(), None);
         for (bad, why) in [
             (
@@ -510,6 +544,11 @@ mod tests {
                 "custom-x:\n  basicAuth:\n    usersFile: /etc/passwd\n",
                 "usersFile",
             ),
+            (
+                "custom-x:\n  basicAuth:\n    users: []\n",
+                "at least one user",
+            ),
+            ("custom-x:\n  digestAuth: {}\n", "at least one user"),
             ("custom-x:\n  headers: {}\n  compress: {}\n", "exactly one"),
             (
                 "custom-x:\n  chain:\n    middlewares: [panel-auth@file]\n",

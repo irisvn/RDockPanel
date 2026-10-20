@@ -35,6 +35,8 @@ const ENABLED_KEY: &str = "tunnel.enabled";
 /// it): the client's address there is cloudflared's; Cloudflare's own
 /// `Cf-Connecting-Ip` holds the visitor's, and `Cf-Visitor` their scheme.
 const TRAEFIK_ARG: &str = "--entrypoints.tunnel.address=:8081";
+/// Its aliasing header names dropped (the installer's, kept).
+const TRAEFIK_ALIAS_ARG: &str = "--entrypoints.tunnel.http.aliasHeadersStrategy=delete";
 /// Cloudflare's header for a visitor who came over plain HTTP (routed to
 /// a redirect to HTTPS: no loop, the ones over HTTPS do not carry it).
 pub const PLAIN_VISITOR: &str = r#"Header(`Cf-Visitor`, `{"scheme":"http"}`)"#;
@@ -260,8 +262,13 @@ pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> App
                 .args
                 .get_or_insert_with(Vec::new);
             let before = args.len();
-            // Exactly its address: nothing else of the entrypoint (no trust).
-            args.retain(|a| !a.starts_with("--entrypoints.tunnel.") || a == TRAEFIK_ARG);
+            // Its address, and nothing else of the entrypoint (no trust).
+            // The installer gives Traefik both: then nothing changes.
+            args.retain(|a| {
+                !a.starts_with("--entrypoints.tunnel.")
+                    || a == TRAEFIK_ARG
+                    || a == TRAEFIK_ALIAS_ARG
+            });
             let mut changed = args.len() != before;
             if !args.iter().any(|a| a == TRAEFIK_ARG) {
                 args.push(TRAEFIK_ARG.to_owned());

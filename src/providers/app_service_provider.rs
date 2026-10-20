@@ -236,19 +236,27 @@ impl ServiceProvider for AppServiceProvider {
         if let Err(err) = crate::services::system_service::load_public_ip(state.db()).await {
             tracing::debug!(%err, "public address not read");
         }
-        // A restart of the panel or a reboot it asked for: it came back
-        // (the server only; a console command is not the panel).
-        if std::env::args().nth(1).as_deref() == Some("serve") {
-            match crate::services::action_service::came_back(
-                state.db(),
-                &crate::services::system_service::DISRUPTIVE,
-            )
-            .await
-            {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(n, "restart or reboot done"),
-                Err(err) => tracing::debug!(%err, "restarts not checked"),
-            }
+        // Cloudflare Tunnel on or off (routes are written with it, by the
+        // server and by a console worker's jobs alike).
+        if let Err(err) = crate::services::tunnel_service::load(state).await {
+            tracing::warn!(%err, "the tunnel's setting not read");
+        }
+        // The rest is the server's: a console command beside a running panel
+        // (`schedule:list`, `migrate`) ends none of its terminals, deployments
+        // or backups, and writes no route.
+        if std::env::args().nth(1).as_deref() != Some("serve") {
+            return Ok(());
+        }
+        // A restart of the panel or a reboot it asked for: it came back.
+        match crate::services::action_service::came_back(
+            state.db(),
+            &crate::services::system_service::DISRUPTIVE,
+        )
+        .await
+        {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "restart or reboot done"),
+            Err(err) => tracing::debug!(%err, "restarts not checked"),
         }
         // Deployments whose run died: interrupted, their services released.
         match crate::services::deployment_service::recover_interrupted(state.db()).await {
@@ -267,10 +275,6 @@ impl ServiceProvider for AppServiceProvider {
             Ok(0) => {}
             Ok(n) => tracing::info!(n, "backups interrupted by a stop"),
             Err(err) => tracing::debug!(%err, "interrupted backups not checked"),
-        }
-        // Cloudflare Tunnel on or off (routes are written with it).
-        if let Err(err) = crate::services::tunnel_service::load(state).await {
-            tracing::warn!(%err, "the tunnel's setting not read");
         }
         crate::services::tunnel_service::sync_panel_route(state);
         crate::services::tunnel_service::reconcile(state);

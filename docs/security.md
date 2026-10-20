@@ -160,6 +160,10 @@ trusted. Without that setting, every sign-in seems to come from Traefik, and the
 address" notification (off by default) says nothing useful. Running the panel behind another proxy
 (Cloudflare, a load balancer), add its addresses there.
 
+Traefik drops request headers whose names alias others (`X_Forwarded_For` beside
+`X-Forwarded-For`: `aliasHeadersStrategy=delete` on every entrypoint), so an app whose runtime reads
+both alike (PHP, WSGI) never takes a client's forged one for Traefik's.
+
 ## GitHub tokens
 
 A token of Settings → Git is sealed with `APP_KEY`, never shown again, and usable only by the
