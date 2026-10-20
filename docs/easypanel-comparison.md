@@ -65,5 +65,5 @@ free. **Done** works in the panel; **partly** works with the limits said; **miss
 | Quick search (⌘K) | Done | |
 | Project members (users per project, roles) | Done | viewer, developer, admin per project, on every route ([permissions](permissions.md)) |
 | API with tokens, CLI | Done | `/api/v1` with scoped tokens (Settings → API tokens), the `rdp` command line ([api](api.md)) |
-| Cloudflare Tunnel | Done | Settings → Cloudflare Tunnel: cloudflared with the tunnel's token (a Swarm secret); each public hostname to `http://rdp-traefik:8081` |
+| Cloudflare Tunnel | Done | Settings → Cloudflare Tunnel: cloudflared with the tunnel's token (a Swarm secret); each public hostname to `http://rdp-traefik:8081`; HTTPS visitors told so (`X-Forwarded-Proto`), Let's Encrypt's HTTP challenge answered through it |
 | Cluster (several nodes) | Missing | later (see the [roadmap](roadmap.md)) |

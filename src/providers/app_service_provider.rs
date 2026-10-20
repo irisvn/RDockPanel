@@ -276,7 +276,7 @@ impl ServiceProvider for AppServiceProvider {
             Ok(n) => tracing::info!(n, "backups interrupted by a stop"),
             Err(err) => tracing::debug!(%err, "interrupted backups not checked"),
         }
-        crate::services::tunnel_service::sync_panel_route(state);
+        crate::services::tunnel_service::sync_panel_route(state).await;
         crate::services::tunnel_service::reconcile(state);
         // Traefik's routes, written again from the database.
         if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {

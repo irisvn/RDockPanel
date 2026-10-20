@@ -17,6 +17,11 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
   some backends (PHP, WSGI) read them as the real ones.
 - The tunnel's entrypoint is always in Traefik (never published, routed only while the tunnel is
   on): turning the tunnel on no longer logs "EntryPoint doesn't exist" while Traefik restarts.
+- **Cloudflare Tunnel** (tested with a real tunnel): cloudflared 2026.10.2 (2025.9.1 was no longer
+  supported by Cloudflare; an older one is run again as pinned at the panel's start). A visitor over
+  HTTPS at Cloudflare is told so to the service (`X-Forwarded-Proto: https`: links and HTTPS
+  redirects stay right), and Let's Encrypt's HTTP challenges are answered through the tunnel (a
+  domain reached only through it gets its certificate).
 - A console command (`schedule:list`, `migrate`) run beside the panel no longer ends its open
   terminals or writes its route files: that is the server's work at start.
 

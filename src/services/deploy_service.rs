@@ -1279,6 +1279,14 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                 // An HTTPS domain's visitor over plain HTTP (Cloudflare's
                 // `Cf-Visitor`): redirected, as on Traefik's own port 80.
                 if snapshot.domains[index].https {
+                    // The others came over HTTPS (Cloudflare's), as the
+                    // service is told (`X-Forwarded-Proto`): its links and
+                    // redirects to HTTPS stay right.
+                    let proto = format!("{base}-tunnel-proto");
+                    http.middlewares.entry(proto.clone()).or_insert_with(|| {
+                        json!({"headers": {"customRequestHeaders": {"X-Forwarded-Proto": "https"}}})
+                    });
+                    router.middlewares.insert(0, proto);
                     let redirect = format!("{base}-tunnel-https");
                     http.middlewares
                         .entry(redirect.clone())
@@ -1555,6 +1563,13 @@ mod tests {
             assert!(tunnel.tls.is_none());
             // The serving router's middlewares (never the HTTPS redirect).
             assert!(!tunnel.middlewares.contains(&format!("{base}-https")));
+            // Told the visitor came over HTTPS (Cloudflare's), for an
+            // HTTPS domain only.
+            assert_eq!(
+                tunnel.middlewares.first() == Some(&format!("{base}-tunnel-proto")),
+                *https,
+                "{index}"
+            );
             // A visitor over plain HTTP: redirected, for an HTTPS domain only.
             let plain = routes
                 .http
@@ -1575,6 +1590,12 @@ mod tests {
                 routes.http.routers[&format!("{base}-{index}")].service
             );
         }
+        let proto = serde_json::to_value(&routes.http.middlewares[&format!("{base}-tunnel-proto")])
+            .unwrap();
+        assert_eq!(
+            proto["headers"]["customRequestHeaders"]["X-Forwarded-Proto"],
+            "https"
+        );
         // Off: none.
         let off = routes_of(&plain);
         assert!(!off.http.routers.keys().any(|k| k.ends_with("-tunnel")));

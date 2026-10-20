@@ -94,6 +94,8 @@ pub async fn apply(
         cert_service::apply(&docker, &traefik, &plan),
     )
     .await?;
+    // An HTTP resolver: its challenges answered through the tunnel too.
+    crate::services::tunnel_service::sync_panel_route(&app).await;
     Ok(Json(json!({ "changed": changed, "applied": true })))
 }
 

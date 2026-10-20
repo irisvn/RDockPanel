@@ -22,7 +22,7 @@ use crate::services::docker_service::{Docker, DockerError, NetworkRequest, SYSTE
 use crate::services::traefik_service::Traefik;
 
 /// cloudflared, pinned (it reads `--token-file`).
-pub const IMAGE: &str = "cloudflare/cloudflared:2025.9.1";
+pub const IMAGE: &str = "cloudflare/cloudflared:2026.10.2";
 pub const SERVICE: &str = "rdp-cloudflared";
 pub const NETWORK: &str = "rdp-tunnel";
 /// Traefik's entrypoint for the tunnel, and its port.
@@ -407,13 +407,19 @@ pub fn reconcile(app: &AppState) {
             .ok()
             .flatten();
         let present = found.is_some();
-        // Made by an older panel (no healthcheck): made again as now.
+        // Made by an older panel (no healthcheck, another cloudflared): made
+        // again as now (Cloudflare stops supporting old versions).
         let older = found.is_some_and(|s| {
-            s.spec
+            let container = s
+                .spec
                 .and_then(|spec| spec.task_template)
-                .and_then(|t| t.container_spec)
-                .and_then(|c| c.health_check)
-                .is_none()
+                .and_then(|t| t.container_spec);
+            container.as_ref().is_none_or(|c| {
+                c.health_check.is_none()
+                    || c.image
+                        .as_deref()
+                        .is_none_or(|i| i.split('@').next() != Some(IMAGE))
+            })
         });
         let result = match (enabled(&app), present) {
             (true, false) => enable(&app, &docker, None).await,
@@ -441,44 +447,84 @@ async fn republish(app: &AppState) -> AppResult<()> {
     let options = crate::services::deployment_service::deploy_options(0);
     crate::services::traefik_service::sync_all(app.db(), &traefik, &options).await?;
     write_panel_route(app)
+        .await
         .map_err(|err| AppError::internal(format!("the panel's tunnel route: {err}")))
 }
 
-/// At boot, after [`load`]: the panel's own tunnel route as the setting says.
-pub fn sync_panel_route(app: &AppState) {
-    if let Err(err) = write_panel_route(app) {
+/// At boot, after [`load`], and when the certificate resolvers change: the
+/// tunnel's own routes (the panel's domain, the challenges) as now.
+pub async fn sync_panel_route(app: &AppState) {
+    if let Err(err) = write_panel_route(app).await {
         tracing::warn!(%err, "the panel's tunnel route not written");
     }
 }
 
-/// The panel's own domain through the tunnel (the installer's route serves
-/// it on `web`/`websecure`): a router on the tunnel's entrypoint to the
-/// installer's `rdockpanel@file` service; removed when off.
-fn write_panel_route(app: &AppState) -> std::io::Result<()> {
+/// What the tunnel's entrypoint serves beside the services' domains: Let's
+/// Encrypt's HTTP challenges (a domain reached only through the tunnel gets
+/// its certificate so: the challenge comes in here, not on port 80), and the
+/// panel's own domain (the installer's route serves it on `web`/`websecure`)
+/// to the installer's `rdockpanel@file` service. Removed when off.
+async fn write_panel_route(app: &AppState) -> std::io::Result<()> {
     let cfg = crate::services::deploy_rules_service::config();
     let Some(traefik) = app.service::<Traefik>() else {
         return Ok(());
     };
     let path = traefik.dir.join("rdp-tunnel-panel.yml");
     let host = cfg.panel_host.clone();
-    if !traefik.tunnel()
-        || !cfg.installed
-        || host.is_empty()
-        || host.parse::<std::net::IpAddr>().is_ok()
-    {
-        return match std::fs::remove_file(&path) {
+    let panel = cfg.installed && !host.is_empty() && host.parse::<std::net::IpAddr>().is_err();
+    // Traefik answers HTTP challenges (`acme-http@internal`) for the
+    // installer's resolver and the panel's HTTP ones.
+    let challenges = !cfg.cert_resolver.is_empty() || {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        crate::models::cert_resolver::Entity::find()
+            .filter(crate::models::cert_resolver::Column::Kind.ne("dns"))
+            .one(app.db())
+            .await
+            .is_ok_and(|r| r.is_some())
+    };
+    let file = traefik
+        .tunnel()
+        .then(|| tunnel_file(panel.then_some(host.as_str()), challenges))
+        .flatten();
+    match file {
+        Some(yaml) => std::fs::write(path, yaml),
+        None => match std::fs::remove_file(&path) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
-        };
+        },
     }
-    // Over HTTPS (Cloudflare's), and a visitor over plain HTTP redirected:
-    // passwords never cross plain HTTP.
-    let plain = PLAIN_VISITOR.replace('"', "\\\"");
-    let yaml = format!(
-        "http:\n  routers:\n    rdockpanel-tunnel:\n      rule: \"Host(`{host}`)\"\n      entryPoints: [\"{ENTRYPOINT}\"]\n      service: rdockpanel@file\n      priority: 1000000\n    rdockpanel-tunnel-http:\n      rule: \"Host(`{host}`) && {plain}\"\n      entryPoints: [\"{ENTRYPOINT}\"]\n      service: rdockpanel@file\n      middlewares: [\"rdockpanel-https@file\"]\n      priority: 1000001\n"
-    );
-    std::fs::write(path, yaml)
 }
+
+/// [`write_panel_route`]'s file: the panel's `host` (if any), the challenges
+/// (if the installer's resolver answers them). `None`: nothing to serve.
+fn tunnel_file(host: Option<&str>, challenges: bool) -> Option<String> {
+    if host.is_none() && !challenges {
+        return None;
+    }
+    let mut routers = String::new();
+    if challenges {
+        routers.push_str(&format!(
+            "    rdp-tunnel-acme:\n      rule: \"PathPrefix(`/.well-known/acme-challenge/`)\"\n      entryPoints: [\"{ENTRYPOINT}\"]\n      service: acme-http@internal\n      priority: 2000000\n"
+        ));
+    }
+    let mut middlewares = String::new();
+    if let Some(host) = host {
+        // Over HTTPS (Cloudflare's: said to the panel), and a visitor over
+        // plain HTTP redirected: passwords never cross plain HTTP.
+        let plain = PLAIN_VISITOR.replace('"', "\\\"");
+        routers.push_str(&format!(
+            "    rdockpanel-tunnel:\n      rule: \"Host(`{host}`)\"\n      entryPoints: [\"{ENTRYPOINT}\"]\n      service: rdockpanel@file\n      middlewares: [\"{HTTPS_VISITOR}\"]\n      priority: 1000000\n    rdockpanel-tunnel-http:\n      rule: \"Host(`{host}`) && {plain}\"\n      entryPoints: [\"{ENTRYPOINT}\"]\n      service: rdockpanel@file\n      middlewares: [\"rdockpanel-https@file\"]\n      priority: 1000001\n"
+        ));
+        middlewares = format!(
+            "  middlewares:\n    {HTTPS_VISITOR}:\n      headers:\n        customRequestHeaders:\n          X-Forwarded-Proto: https\n"
+        );
+    }
+    Some(format!("http:\n  routers:\n{routers}{middlewares}"))
+}
+
+/// A visitor over HTTPS at Cloudflare, said so to what they reach (Traefik
+/// sees the tunnel's plain HTTP).
+pub const HTTPS_VISITOR: &str = "rdp-tunnel-proto";
 
 #[cfg(test)]
 mod tests {
@@ -492,6 +538,40 @@ mod tests {
         assert!(!connected && error.is_some());
         assert_eq!(health_news(&state("starting")), (false, None));
         assert_eq!(health_news(&json!({})), (false, None));
+    }
+
+    #[test]
+    fn the_tunnel_file_serves_challenges_and_the_panel() {
+        assert_eq!(tunnel_file(None, false), None);
+        let both = tunnel_file(Some("panel.example.com"), true).unwrap();
+        let yaml: serde_json::Value = serde_yaml_ng::from_str(&both).unwrap();
+        let routers = &yaml["http"]["routers"];
+        assert_eq!(routers["rdp-tunnel-acme"]["service"], "acme-http@internal");
+        assert_eq!(routers["rdp-tunnel-acme"]["entryPoints"], json!(["tunnel"]));
+        assert_eq!(
+            routers["rdockpanel-tunnel"]["rule"],
+            "Host(`panel.example.com`)"
+        );
+        assert_eq!(
+            routers["rdockpanel-tunnel"]["middlewares"],
+            json!([HTTPS_VISITOR])
+        );
+        assert!(
+            routers["rdockpanel-tunnel-http"]["rule"]
+                .as_str()
+                .unwrap()
+                .ends_with(PLAIN_VISITOR)
+        );
+        assert_eq!(
+            yaml["http"]["middlewares"][HTTPS_VISITOR]["headers"]["customRequestHeaders"]["X-Forwarded-Proto"],
+            "https"
+        );
+        let challenges = tunnel_file(None, true).unwrap();
+        let yaml: serde_json::Value = serde_yaml_ng::from_str(&challenges).unwrap();
+        assert!(yaml["http"]["routers"].get("rdockpanel-tunnel").is_none());
+        let panel = tunnel_file(Some("panel.example.com"), false).unwrap();
+        let yaml: serde_json::Value = serde_yaml_ng::from_str(&panel).unwrap();
+        assert!(yaml["http"]["routers"].get("rdp-tunnel-acme").is_none());
     }
 
     #[test]

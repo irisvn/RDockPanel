@@ -170,3 +170,54 @@ db_test!(
         assert_eq!(args, installed);
     }
 );
+
+db_test!(
+    an_older_cloudflared_is_run_again_as_pinned,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        admin
+            .post_json(
+                &app.admin_api("x/apps/tunnel/enable"),
+                &json!({"token": TOKEN}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let image = |fake: &FakeDocker| {
+            spec(fake, "rdp-cloudflared").unwrap()["TaskTemplate"]["ContainerSpec"]["Image"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(image(&fake), rdockpanel::services::tunnel_service::IMAGE);
+        // An older panel's cloudflared (Cloudflare stops supporting old ones).
+        {
+            let mut services = fake.services.lock().unwrap();
+            let service = services.get_mut("rdp-cloudflared").unwrap();
+            let container = service
+                .spec
+                .as_mut()
+                .unwrap()
+                .task_template
+                .as_mut()
+                .unwrap()
+                .container_spec
+                .as_mut()
+                .unwrap();
+            container.image = Some("cloudflare/cloudflared:2025.9.1@sha256:00".to_owned());
+        }
+        // At boot: run again with the pinned one (in the background).
+        rdockpanel::services::tunnel_service::reconcile(app.state());
+        for _ in 0..100 {
+            if image(&fake) == rdockpanel::services::tunnel_service::IMAGE {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(image(&fake), rdockpanel::services::tunnel_service::IMAGE);
+    }
+);
