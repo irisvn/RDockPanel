@@ -4012,7 +4012,7 @@ dependencies = [
 
 [[package]]
 name = "rdockpanel"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
