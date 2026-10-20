@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, CodeBlock, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section, StatusDot } from "../lib/ui";
+import { ErrorNote, Field, Section, StatusDot, useAsk } from "../lib/ui";
 
 type Status = {
   enabled: boolean;
@@ -19,6 +19,7 @@ type Status = {
 };
 
 export function Tunnel(props: PageProps<unknown>) {
+  const ask = useAsk();
   const t = props.t;
   const status = useAdminQuery<Status>(props, "/apps/tunnel", { refetchInterval: 10000 });
   const [token, setToken] = useState("");
@@ -44,7 +45,6 @@ export function Tunnel(props: PageProps<unknown>) {
   const state = !s.enabled ? "stopped" : s.connected ? "running" : s.error ? "failed" : "queued";
   return (
     <Section
-      level={2}
       title={t("Cloudflare Tunnel")}
       description={t("Reach your domains through Cloudflare, without opening ports 80 and 443 (cloudflared runs beside Traefik).")}
     >
@@ -79,10 +79,14 @@ export function Tunnel(props: PageProps<unknown>) {
             <Button
               variant="ghost"
               disabled={busy}
-              onClick={() => {
-                if (window.confirm(t("Turn the tunnel off? Domains are then reached only through ports 80 and 443."))) {
-                  void act("/apps/tunnel/disable", {});
-                }
+              onClick={async () => {
+                const ok = await ask({
+                  title: t("Turn the tunnel off?"),
+                  body: t("Domains are then reached only through ports 80 and 443."),
+                  action: t("Turn off"),
+                  destructive: true,
+                });
+                if (ok) void act("/apps/tunnel/disable", {});
               }}
             >
               {t("Turn off")}

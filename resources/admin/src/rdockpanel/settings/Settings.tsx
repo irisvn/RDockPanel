@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section, Tabs } from "../lib/ui";
+import { EmptyState, ErrorNote, Field, type MenuItem, Page, RowActions, Section, TableScroll, Tabs, useAsk } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 import { Notifications } from "./Notifications";
 import { Certificates } from "./Certificates";
@@ -135,90 +135,102 @@ function StorageProviders(props: PageProps<unknown>) {
   const [editing, setEditing] = useState<Provider | "new" | null>(null);
   const [tested, setTested] = useState<Record<number, { ok: boolean; error?: string } | "busy">>({});
   const [error, setError] = useState<unknown>(null);
+  const ask = useAsk();
   if (list.isLoading) return <Loading />;
   if (list.error || !list.data) return <ErrorState error={list.error} />;
   return (
     <Section
-      level={2}
+      flush
       title={t("Storage providers")}
       description={t("Where database backups are written.")}
       actions={props.can("storage_providers.create") && <Button onClick={() => setEditing("new")}>{t("Add storage provider")}</Button>}
     >
-      <ErrorNote error={error} />
-      {list.data.providers.length === 0 && <p className="rdp2-muted">{t("No storage provider yet.")}</p>}
-      {list.data.providers.length > 0 && (
-        <table className="rdp2-table">
-          <thead>
-            <tr>
-              <th>{t("Name")}</th>
-              <th>{t("Type")}</th>
-              <th>{t("Where")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {list.data.providers.map((p) => {
-              const result = tested[p.id];
-              return (
-                <tr key={p.id}>
-                  <td>{p.name}</td>
-                  <td>{p.kind === "s3" ? "S3" : t("Local directory")}</td>
-                  <td className="rdp2-mono rdp2-small rdp2-ellipsis">{p.kind === "s3" ? `${p.bucket} · ${p.endpoint}` : p.local_path}</td>
-                  <td className="rdp2-row rdp2-end">
-                    {result && result !== "busy" && (
-                      <span className={result.ok ? "rdp2-small" : "rdp2-error rdp2-small"}>{result.ok ? t("Works") : result.error}</span>
-                    )}
-                    {props.can("storage_providers.update") && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={result === "busy"}
-                        onClick={async () => {
-                          setTested((s) => ({ ...s, [p.id]: "busy" }));
-                          try {
-                            const out = await props.api.post<{ ok: boolean; error?: string }>(`/apps/storage-providers/${p.id}/check`, {});
-                            setTested((s) => ({ ...s, [p.id]: out }));
-                          } catch (err) {
-                            setTested((s) => ({ ...s, [p.id]: { ok: false, error: err instanceof Error ? err.message : String(err) } }));
-                          }
-                        }}
-                      >
-                        {t("Test")}
-                      </Button>
-                    )}
-                    {props.can("storage_providers.update") && (
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(p)}>
-                        {t("Edit")}
-                      </Button>
-                    )}
-                    {props.can("storage_providers.delete") && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={async () => {
-                          if (!window.confirm(t("Delete this storage provider? Its files stay where they are."))) return;
-                          setError(null);
-                          try {
-                            await resources.remove("storage_providers", p.id);
-                            list.refetch();
-                          } catch (err) {
-                            setError(
-                              err instanceof ResourceError && err.status === 403
-                                ? new Error(t("A backup uses this provider: change or delete it first."))
-                                : err,
-                            );
-                          }
-                        }}
-                      >
-                        {t("Delete")}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {error != null && (
+        <div className="rdp2-flush-note">
+          <ErrorNote error={error} />
+        </div>
+      )}
+      {list.data.providers.length === 0 ? (
+        <EmptyState title={t("No storage provider yet.")} hint={t("Backups need one: a directory on the server or an S3 bucket.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Name")}</th>
+                <th>{t("Type")}</th>
+                <th className="rdp2-hide-sm">{t("Where")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.data.providers.map((p) => {
+                const result = tested[p.id];
+                const menu: MenuItem[] = [];
+                if (props.can("storage_providers.update")) menu.push({ label: t("Edit"), onSelect: () => setEditing(p) });
+                if (props.can("storage_providers.delete"))
+                  menu.push("separator", {
+                    label: t("Delete…"),
+                    destructive: true,
+                    onSelect: async () => {
+                      const ok = await ask({
+                        title: t("Delete the storage provider {name}?").replace("{name}", p.name),
+                        body: t("Its files stay where they are."),
+                        action: t("Delete provider"),
+                        destructive: true,
+                      });
+                      if (!ok) return;
+                      setError(null);
+                      try {
+                        await resources.remove("storage_providers", p.id);
+                        list.refetch();
+                      } catch (err) {
+                        setError(
+                          err instanceof ResourceError && err.status === 403 ? new Error(t("A backup uses this provider: change or delete it first.")) : err,
+                        );
+                      }
+                    },
+                  });
+                return (
+                  <tr key={p.id}>
+                    <td className="rdp2-strong-cell">{p.name}</td>
+                    <td>{p.kind === "s3" ? "S3" : t("Local directory")}</td>
+                    <td className="rdp2-hide-sm">
+                      <span className="rdp2-mono rdp2-ellipsis rdp2-cell-clip">{p.kind === "s3" ? `${p.bucket} · ${p.endpoint}` : p.local_path}</span>
+                    </td>
+                    <td>
+                      <RowActions label={t("Actions for {host}").replace("{host}", p.name)} menu={menu}>
+                        {result && result !== "busy" && (
+                          <span className={result.ok ? "rdp2-small" : "rdp2-error rdp2-small"}>{result.ok ? t("Works") : result.error}</span>
+                        )}
+                        {props.can("storage_providers.update") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={result === "busy"}
+                            onClick={async () => {
+                              setTested((s) => ({ ...s, [p.id]: "busy" }));
+                              try {
+                                const out = await props.api.post<{ ok: boolean; error?: string }>(`/apps/storage-providers/${p.id}/check`, {});
+                                setTested((s) => ({ ...s, [p.id]: out }));
+                              } catch (err) {
+                                setTested((s) => ({ ...s, [p.id]: { ok: false, error: err instanceof Error ? err.message : String(err) } }));
+                              }
+                            }}
+                          >
+                            {result === "busy" ? t("Testing…") : t("Test")}
+                          </Button>
+                        )}
+                      </RowActions>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
       )}
       {editing && (
         <ProviderForm
@@ -256,9 +268,20 @@ export function Settings(props: PageProps<unknown>) {
   const tabs = TABS.filter((tab) => tab.permission === null || props.can(tab.permission));
   const wanted = (props.path ?? "").split("/")[0];
   const tab = tabs.find((x) => x.id === wanted)?.id ?? tabs[0]?.id;
-  if (!tab) return <p className="rdp2-muted">{t("Nothing to set here with your permissions.")}</p>;
+  const header = {
+    title: props.title,
+    eyebrow: t("Workspace"),
+    heading: t("Settings"),
+    description: t("The panel, its proxy and certificates, storage, notifications and your API tokens."),
+  };
+  if (!tab)
+    return (
+      <Page {...header}>
+        <EmptyState title={t("Nothing to set here with your permissions.")} />
+      </Page>
+    );
   return (
-    <div className="rdp2-page">
+    <Page {...header}>
       <Tabs
         label={t("Settings")}
         value={tab}
@@ -280,6 +303,6 @@ export function Settings(props: PageProps<unknown>) {
         {tab === "notifications" && <Notifications {...props} />}
         {tab === "tokens" && <Tokens {...props} />}
       </Tabs>
-    </div>
+    </Page>
   );
 }

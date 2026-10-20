@@ -4,7 +4,8 @@
 import { useState } from "react";
 import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Checkbox, CodeBlock, Dialog, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section, when } from "../lib/ui";
+import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk, when } from "../lib/ui";
+import { dateTime, relative } from "../lib/format";
 
 type Token = { id: number; name: string; scopes: string[]; created_at: string; last_used_at: string | null; expires_at: string | null };
 type List = { tokens: Token[]; scopes: string[]; max_days: number };
@@ -23,53 +24,90 @@ export function Tokens(props: PageProps<unknown>) {
   const [adding, setAdding] = useState(false);
   const [made, setMade] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const ask = useAsk();
   if (list.isLoading) return <Loading />;
   if (list.error || !list.data) return <ErrorState error={list.error} />;
   const data = list.data;
   return (
     <Section
-      level={2}
+      flush
       title={t("API tokens")}
       description={t("For the API (/api/v1) and the rdp command line: a token does what you may, within its scopes.")}
-      actions={<Button onClick={() => setAdding(true)}>+ {t("New token")}</Button>}
+      actions={<Button onClick={() => setAdding(true)}>{t("New token")}</Button>}
     >
-      <ErrorNote error={error} />
-      {made && (
-        <div className="rdp2-form">
-          <Alert variant="warning">{t("Copy it now: it is not shown again.")}</Alert>
-          <CodeBlock code={made} label={t("Token")} />
-          <CodeBlock code={`rdp login ${window.location.origin}`} label={t("Command line")} />
+      {(error != null || made) && (
+        <div className="rdp2-flush-note rdp2-form">
+          <ErrorNote error={error} />
+          {made && (
+            <>
+              <Alert variant="warning">{t("Copy it now: it is not shown again.")}</Alert>
+              <CodeBlock code={made} label={t("Token")} />
+              <CodeBlock code={`rdp login ${window.location.origin}`} label={t("Command line")} />
+            </>
+          )}
         </div>
       )}
-      {data.tokens.length === 0 && <p className="rdp2-muted">{t("No token yet.")}</p>}
-      <ul className="rdp2-list">
-        {data.tokens.map((tok) => (
-          <li key={tok.id} className="rdp2-list-row">
-            <span className="rdp2-form">
-              <strong>{tok.name}</strong>
-              <span className="rdp2-small rdp2-muted">
-                {tok.scopes.join(", ")} · {t("expires")} {when(tok.expires_at, props.locale)} · {t("last used")} {tok.last_used_at ? when(tok.last_used_at, props.locale) : t("never")}
-              </span>
-            </span>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={async () => {
-                if (!window.confirm(t("Revoke this token? What uses it stops working."))) return;
-                setError(null);
-                try {
-                  await props.api.delete(`/apps/tokens/${tok.id}`);
-                  list.refetch();
-                } catch (err) {
-                  setError(err);
-                }
-              }}
-            >
-              {t("Revoke")}
-            </Button>
-          </li>
-        ))}
-      </ul>
+      {data.tokens.length === 0 ? (
+        <EmptyState title={t("No token yet.")} hint={t("Make one for a CI job or the rdp command line.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Name")}</th>
+                <th>{t("Scopes")}</th>
+                <th className="rdp2-hide-sm">{t("Expires")}</th>
+                <th className="rdp2-hide-sm">{t("Last used")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.tokens.map((tok) => (
+                <tr key={tok.id}>
+                  <td className="rdp2-strong-cell">{tok.name}</td>
+                  <td>{tok.scopes.join(", ")}</td>
+                  <td className="rdp2-hide-sm rdp2-nowrap" title={dateTime(tok.expires_at, props.locale)}>
+                    {relative(tok.expires_at, props.locale)}
+                  </td>
+                  <td className="rdp2-hide-sm rdp2-nowrap" title={dateTime(tok.last_used_at, props.locale)}>
+                    {tok.last_used_at ? relative(tok.last_used_at, props.locale) : <span className="rdp2-muted">{t("never")}</span>}
+                  </td>
+                  <td>
+                    <RowActions
+                      label={t("Actions for {host}").replace("{host}", tok.name)}
+                      menu={[
+                        {
+                          label: t("Revoke…"),
+                          destructive: true,
+                          onSelect: async () => {
+                            const ok = await ask({
+                              title: t("Revoke the token {name}?").replace("{name}", tok.name),
+                              body: t("What uses it stops working."),
+                              action: t("Revoke token"),
+                              destructive: true,
+                            });
+                            if (!ok) return;
+                            setError(null);
+                            try {
+                              await props.api.delete(`/apps/tokens/${tok.id}`);
+                              props.toast.success(t("Token revoked"));
+                              list.refetch();
+                            } catch (err) {
+                              setError(err);
+                            }
+                          },
+                        },
+                      ]}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
       {adding && (
         <NewToken
           {...props}

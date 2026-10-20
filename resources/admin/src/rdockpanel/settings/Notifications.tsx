@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section } from "../lib/ui";
+import { EmptyState, ErrorNote, Field, type MenuItem, RowActions, Section, TableScroll, useAsk } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 
 type Channel = {
@@ -180,92 +180,99 @@ export function Notifications(props: PageProps<unknown>) {
   const [editing, setEditing] = useState<Channel | "new" | null>(null);
   const [tested, setTested] = useState<Record<number, { ok: boolean; error?: string } | "busy">>({});
   const [error, setError] = useState<unknown>(null);
+  const ask = useAsk();
   if (list.isLoading) return <Loading />;
   if (list.error || !list.data) return <ErrorState error={list.error} />;
   return (
     <Section
-      level={2}
+      flush
       title={t("Notifications")}
       description={t("Where the panel says what happened: deployments, backups, failing services, Traefik, a full disk, updates.")}
       actions={props.can("notification_channels.create") && <Button onClick={() => setEditing("new")}>{t("Add channel")}</Button>}
     >
-      <ErrorNote error={error} />
-      {list.data.channels.length === 0 && <p className="rdp2-muted">{t("No channel yet.")}</p>}
-      {list.data.channels.length > 0 && (
-        <table className="rdp2-table">
-          <thead>
-            <tr>
-              <th>{t("Name")}</th>
-              <th>{t("Type")}</th>
-              <th>{t("Events")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {list.data.channels.map((c) => {
-              const result = tested[c.id];
-              const events = EVENTS.filter((e) => c.events.includes(e.name))
-                .map((e) => (e.name === "disk" ? `${t("disk")} ≥ ${c.disk_threshold}%` : t(e.short)))
-                .join(", ");
-              return (
-                <tr key={c.id}>
-                  <td>
-                    {c.name}
-                    {!c.enabled && <span className="rdp2-muted"> · {t("off")}</span>}
-                  </td>
-                  <td>{KINDS.find(([v]) => v === c.kind)?.[1] ?? c.kind}</td>
-                  <td className="rdp2-small">{events}</td>
-                  <td className="rdp2-row rdp2-end">
-                    {result && result !== "busy" && (
-                      <span className={result.ok ? "rdp2-small" : "rdp2-error rdp2-small"}>{result.ok ? t("Sent") : result.error}</span>
-                    )}
-                    {props.can("notification_channels.update") && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={result === "busy"}
-                        onClick={async () => {
-                          setTested((s) => ({ ...s, [c.id]: "busy" }));
-                          try {
-                            const out = await props.api.post<{ ok: boolean; error?: string }>(`/apps/notification-channels/${c.id}/test`, {});
-                            setTested((s) => ({ ...s, [c.id]: out }));
-                          } catch (err) {
-                            setTested((s) => ({ ...s, [c.id]: { ok: false, error: err instanceof Error ? err.message : String(err) } }));
-                          }
-                        }}
-                      >
-                        {t("Send test notification")}
-                      </Button>
-                    )}
-                    {props.can("notification_channels.update") && (
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(c)}>
-                        {t("Edit")}
-                      </Button>
-                    )}
-                    {props.can("notification_channels.delete") && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={async () => {
-                          if (!window.confirm(t("Delete this channel?"))) return;
-                          setError(null);
-                          try {
-                            await resources.remove("notification_channels", c.id);
-                            list.refetch();
-                          } catch (err) {
-                            setError(err);
-                          }
-                        }}
-                      >
-                        {t("Delete")}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {error != null && (
+        <div className="rdp2-flush-note">
+          <ErrorNote error={error} />
+        </div>
+      )}
+      {list.data.channels.length === 0 ? (
+        <EmptyState title={t("No channel yet.")} hint={t("Add Discord, Slack, Telegram, email or a webhook to hear what happens.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Name")}</th>
+                <th>{t("Type")}</th>
+                <th className="rdp2-hide-sm">{t("Events")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.data.channels.map((c) => {
+                const result = tested[c.id];
+                const events = EVENTS.filter((e) => c.events.includes(e.name))
+                  .map((e) => (e.name === "disk" ? `${t("disk")} ≥ ${c.disk_threshold}%` : t(e.short)))
+                  .join(", ");
+                const menu: MenuItem[] = [];
+                if (props.can("notification_channels.update")) menu.push({ label: t("Edit"), onSelect: () => setEditing(c) });
+                if (props.can("notification_channels.delete"))
+                  menu.push("separator", {
+                    label: t("Delete…"),
+                    destructive: true,
+                    onSelect: async () => {
+                      const ok = await ask({ title: t("Delete the channel {name}?").replace("{name}", c.name), action: t("Delete channel"), destructive: true });
+                      if (!ok) return;
+                      setError(null);
+                      try {
+                        await resources.remove("notification_channels", c.id);
+                        list.refetch();
+                      } catch (err) {
+                        setError(err);
+                      }
+                    },
+                  });
+                return (
+                  <tr key={c.id}>
+                    <td>
+                      <div className="rdp2-strong-cell">{c.name}</div>
+                      {!c.enabled && <div className="rdp2-muted rdp2-small">{t("off")}</div>}
+                    </td>
+                    <td>{KINDS.find(([v]) => v === c.kind)?.[1] ?? c.kind}</td>
+                    <td className="rdp2-hide-sm rdp2-small">{events}</td>
+                    <td>
+                      <RowActions label={t("Actions for {host}").replace("{host}", c.name)} menu={menu}>
+                        {result && result !== "busy" && (
+                          <span className={result.ok ? "rdp2-small" : "rdp2-error rdp2-small"}>{result.ok ? t("Sent") : result.error}</span>
+                        )}
+                        {props.can("notification_channels.update") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={result === "busy"}
+                            onClick={async () => {
+                              setTested((s) => ({ ...s, [c.id]: "busy" }));
+                              try {
+                                const out = await props.api.post<{ ok: boolean; error?: string }>(`/apps/notification-channels/${c.id}/test`, {});
+                                setTested((s) => ({ ...s, [c.id]: out }));
+                              } catch (err) {
+                                setTested((s) => ({ ...s, [c.id]: { ok: false, error: err instanceof Error ? err.message : String(err) } }));
+                              }
+                            }}
+                          >
+                            {result === "busy" ? t("Sending…") : t("Send test")}
+                          </Button>
+                        )}
+                      </RowActions>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
       )}
       {editing && (
         <ChannelForm

@@ -1,10 +1,11 @@
 // The dashboard: the server at a glance, then every project with its
 // services as cards (status, kind, domain). Creating a project or a service
 // asks for a name (and an image), nothing else.
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { type AdminApi, type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
 import { Button, Dialog, Input, Loading, ErrorState, Textarea } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Sparkline, StatusDot, bytes } from "../lib/ui";
+import { EmptyState, ErrorNote, Field, Metric, NavLink, Page, RowActions, Section, Status, useAsk, useConfirm } from "../lib/ui";
+import { percent, size } from "../lib/format";
 import { ResourceError, resources } from "../lib/resources";
 import { Templates } from "./Templates";
 import type { Overview, Project } from "./types";
@@ -33,39 +34,75 @@ function LiveTiles(props: PageProps<unknown>) {
   });
   const last = samples[samples.length - 1];
   const t = props.t;
-  const tiles: Array<[string, string, string, number[], number | undefined]> = last
-    ? [
-        [t("CPU"), `${last.cpu_percent.toFixed(1)}%`, "", samples.map((s) => s.cpu_percent), 100],
-        [
-          t("Memory"),
-          `${((last.mem_used / Math.max(1, last.mem_total)) * 100).toFixed(1)}%`,
-          `${bytes(last.mem_used)} / ${bytes(last.mem_total)}`,
-          samples.map((s) => s.mem_used),
-          last.mem_total,
-        ],
-        [
-          t("Disk"),
-          `${((last.disk_used / Math.max(1, last.disk_total)) * 100).toFixed(1)}%`,
-          `${bytes(last.disk_used)} / ${bytes(last.disk_total)}`,
-          samples.map((s) => s.disk_used),
-          last.disk_total,
-        ],
-        [t("Network in"), `${bytes(last.net_rx_rate)}/s`, "", samples.map((s) => s.net_rx_rate), undefined],
-        [t("Network out"), `${bytes(last.net_tx_rate)}/s`, "", samples.map((s) => s.net_tx_rate), undefined],
-      ]
-    : [];
+  const locale = props.locale;
+  if (!last) return null;
+  const share = (used: number, total: number) => percent((used / Math.max(1, total)) * 100, locale);
   return (
-    <div className="rdp2-tiles">
-      {tiles.map(([label, value, sub, series, max]) => (
-        <div key={label} className="rdp2-tile">
-          <span className="rdp2-muted rdp2-small">{label}</span>
-          <strong className="rdp2-tile-value">{value}</strong>
-          <span className="rdp2-muted rdp2-small">{sub || " "}</span>
-          <Sparkline values={series} max={max} />
-        </div>
+    <div className="rdp2-metrics">
+      <Metric label={t("CPU")} value={percent(last.cpu_percent, locale)} values={samples.map((s) => s.cpu_percent)} max={100} />
+      <Metric
+        label={t("Memory")}
+        value={share(last.mem_used, last.mem_total)}
+        sub={`${size(last.mem_used, locale)} / ${size(last.mem_total, locale)}`}
+        values={samples.map((s) => s.mem_used)}
+        max={last.mem_total}
+      />
+      <Metric
+        label={t("Disk")}
+        value={share(last.disk_used, last.disk_total)}
+        sub={`${size(last.disk_used, locale)} / ${size(last.disk_total, locale)}`}
+        values={samples.map((s) => s.disk_used)}
+        max={last.disk_total}
+      />
+      <Metric label={t("Network in")} value={`${size(last.net_rx_rate, locale)}/s`} values={samples.map((s) => s.net_rx_rate)} />
+      <Metric label={t("Network out")} value={`${size(last.net_tx_rate, locale)}/s`} values={samples.map((s) => s.net_tx_rate)} />
+    </div>
+  );
+}
+
+/** A project's services as cards (the Dashboard's one use of cards): name and
+ * status, kind, domain (or image); each opens its service. */
+export function ServiceCards(props: Pick<PageProps<unknown>, "t" | "navigate"> & { project: Project }) {
+  const t = props.t;
+  if (props.project.services.length === 0) {
+    return <EmptyState title={t("No service yet")} hint={t("Add one, or start from a template.")} />;
+  }
+  return (
+    <div className="rdp2-cards">
+      {props.project.services.map((s) => (
+        <button key={s.id} type="button" className="rdp2-card" onClick={() => props.navigate(`/p/dashboard/${props.project.name}/${s.name}`)}>
+          <span className="rdp2-card-top">
+            <strong className="rdp2-ellipsis">{s.name}</strong>
+            <Status kind="service" status={s.status} busy={s.busy} t={t} />
+          </span>
+          <span className="rdp2-muted rdp2-small">{t(s.kind)}</span>
+          <span className="rdp2-mono rdp2-muted rdp2-ellipsis">{s.domain ?? s.image}</span>
+        </button>
       ))}
     </div>
   );
+}
+
+/** A template's warnings once it made its services, in full (a dialog: a
+ * toast would cut long ones). */
+export function templateWarnings(
+  props: Pick<PageProps<unknown>, "toast" | "t">,
+  warnings: string[],
+  ask: (o: { title: string; body: ReactNode; action: string; notice: boolean }) => Promise<boolean>,
+) {
+  if (!warnings.length) return props.toast.success(props.t("Created"));
+  void ask({
+    title: props.t("Created, with warnings"),
+    body: (
+      <ul className="rdp2-plain-list">
+        {warnings.map((w) => (
+          <li key={w}>{w}</li>
+        ))}
+      </ul>
+    ),
+    action: props.t("OK"),
+    notice: true,
+  });
 }
 
 function NewProject(props: { t: (s: string) => string; onDone: (name: string) => void; onClose: () => void }) {
@@ -213,11 +250,21 @@ export function NewService(props: {
 
 /** The server's metrics, then the projects (with their permission). */
 export function Dashboard(props: PageProps<unknown>) {
+  const t = props.t;
+  const [creating, setCreating] = useState(false);
+  const canCreateProject = props.can("projects.create");
   return (
-    <>
-      <Projects {...props} />
+    <Page
+      title={props.title}
+      eyebrow={t("Workspace")}
+      heading={t("Dashboard")}
+      description={t("Your server and the projects running on it.")}
+      actions={canCreateProject && <Button onClick={() => setCreating(true)}>{t("New project")}</Button>}
+    >
+      <ServerTiles {...props} />
+      <Projects {...props} creating={creating} setCreating={setCreating} />
       <Versions {...props} />
-    </>
+    </Page>
   );
 }
 
@@ -228,7 +275,7 @@ function Versions(props: PageProps<unknown>) {
   const v = (props.data as { versions?: VersionInfo } | null)?.versions;
   if (!v) return null;
   return (
-    <p className="rdp2-small rdp2-muted rdp2-versions">
+    <p className="rdp2-versions">
       RDockPanel {v.rdockpanel}
       {v.commit && (
         <>
@@ -245,96 +292,92 @@ function Versions(props: PageProps<unknown>) {
   );
 }
 
-function Projects(props: PageProps<unknown>) {
+function Projects(props: PageProps<unknown> & { creating: boolean; setCreating: (on: boolean) => void }) {
   const t = props.t;
   const overview = useAdminQuery<Overview>(props, "/apps/overview", { refetchInterval: 5000 });
-  const [creating, setCreating] = useState(false);
   const [adding, setAdding] = useState<Project | null>(null);
   const [templating, setTemplating] = useState<Project | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [confirm, confirmDialog] = useConfirm(t);
+  const ask = useAsk();
   const canCreateProject = props.can("projects.create");
+  const remove = async (project: Project) => {
+    const ok = await confirm({
+      title: t("Delete the project {name}?").replace("{name}", project.name),
+      body: t("It has no service; its members are removed with it."),
+      action: t("Delete project"),
+      destructive: true,
+      typed: project.name,
+    });
+    if (!ok) return;
+    try {
+      await resources.remove("projects", project.id);
+      props.toast.success(t("Project deleted"));
+      overview.refetch();
+    } catch (err) {
+      setError(err);
+    }
+  };
 
   return (
-    <div className="rdp2-page">
-      <ServerTiles {...props} />
-      <div className="rdp2-head">
-        <h2 className="rdp2-title">{t("Projects")}</h2>
-        {canCreateProject && <Button onClick={() => setCreating(true)}>+ {t("New project")}</Button>}
-      </div>
+    <>
       <ErrorNote error={error} />
       {overview.isLoading && <Loading />}
       {overview.error && <ErrorState error={overview.error} />}
       {overview.data?.projects.length === 0 && (
-        <div className="rdp2-empty">
-          <p>{t("No project yet. A project groups the services of one app: its web, its database, …")}</p>
-          {canCreateProject && <Button onClick={() => setCreating(true)}>+ {t("Create your first project")}</Button>}
-        </div>
+        <Section title={t("Projects")}>
+          <EmptyState
+            title={t("No project yet")}
+            hint={t("A project groups the services of one app: its web, its database, …")}
+            action={canCreateProject && <Button onClick={() => props.setCreating(true)}>{t("New project")}</Button>}
+          />
+        </Section>
       )}
       {overview.data?.projects.map((project) => (
-        <section key={project.id} className="rdp2-project">
-          <header className="rdp2-project-head">
-            <button type="button" className="rdp2-link rdp2-project-name" onClick={() => props.navigate(`/p/dashboard/${project.name}`)}>
+        <Section
+          key={project.id}
+          title={
+            <NavLink to={`/p/dashboard/${project.name}`} navigate={props.navigate}>
               {project.name}
-            </button>
-            <div className="rdp2-row">
+            </NavLink>
+          }
+          description={
+            <>
+              {t("{n} services").replace("{n}", String(project.services.length))}
+              {project.role && <> · {t(project.role)}</>}
+            </>
+          }
+          actions={
+            <>
               {project.can.create_service && (
                 <>
                   <Button size="sm" variant="outline" onClick={() => setTemplating(project)}>
                     {t("Templates")}
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setAdding(project)}>
-                    + {t("Service")}
+                    {t("Add service")}
                   </Button>
                 </>
               )}
-              {project.role && <span className="rdp2-badge">{t(project.role)}</span>}
               {project.services.length === 0 && project.can.delete && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={async () => {
-                    if (!window.confirm(t("Delete this empty project?"))) return;
-                    try {
-                      await resources.remove("projects", project.id);
-                      overview.refetch();
-                    } catch (err) {
-                      setError(err);
-                    }
-                  }}
-                >
-                  {t("Delete")}
-                </Button>
+                <RowActions
+                  label={t("Actions for {host}").replace("{host}", project.name)}
+                  menu={[{ label: t("Delete project…"), destructive: true, onSelect: () => void remove(project) }]}
+                />
               )}
-            </div>
-          </header>
-          <div className="rdp2-cards">
-            {project.services.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className="rdp2-card"
-                onClick={() => props.navigate(`/p/dashboard/${project.name}/${s.name}`)}
-              >
-                <span className="rdp2-row">
-                  <StatusDot status={s.status} busy={s.busy} />
-                  <strong>{s.name}</strong>
-                </span>
-                <span className="rdp2-muted rdp2-small">{t(s.kind)}</span>
-                <span className="rdp2-muted rdp2-small rdp2-ellipsis">{s.domain ?? s.image}</span>
-              </button>
-            ))}
-            {project.services.length === 0 && (
-              <p className="rdp2-muted rdp2-small">{t("No service: add one with + Service.")}</p>
-            )}
-          </div>
-        </section>
+            </>
+          }
+        >
+          <ServiceCards t={t} navigate={props.navigate} project={project} />
+        </Section>
       ))}
-      {creating && (
+      {props.creating && (
         <NewProject
           t={t}
-          onClose={() => setCreating(false)}
+          onClose={() => props.setCreating(false)}
           onDone={() => {
-            setCreating(false);
+            props.setCreating(false);
+            props.toast.success(t("Project created"));
             overview.refetch();
           }}
         />
@@ -346,7 +389,7 @@ function Projects(props: PageProps<unknown>) {
           onClose={() => setTemplating(null)}
           onDone={(made) => {
             setTemplating(null);
-            if (made.warnings.length) window.alert(made.warnings.join("\n"));
+            templateWarnings(props, made.warnings, ask);
             props.navigate(`/p/dashboard/${made.project}`);
           }}
         />
@@ -365,6 +408,7 @@ function Projects(props: PageProps<unknown>) {
           }}
         />
       )}
-    </div>
+      {confirmDialog}
+    </>
   );
 }

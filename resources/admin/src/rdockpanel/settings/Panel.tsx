@@ -51,9 +51,7 @@ export function Panel(props: PageProps<unknown>) {
   };
   return (
     <>
-    <Controls {...props} />
     <Section
-      level={2}
       title={t("Panel")}
       description={t("The panel's domain, its Let's Encrypt email and the apps' domain. Changed by the installer: check new ones here, then run the command shown on the server.")}
     >
@@ -109,7 +107,7 @@ export function Panel(props: PageProps<unknown>) {
         </Field>
         <ErrorNote error={error} />
         <div className="rdp2-row rdp2-end">
-          <Button type="submit" variant="outline" disabled={busy}>
+          <Button type="submit" disabled={busy}>
             {t("Check")}
           </Button>
         </div>
@@ -138,6 +136,7 @@ export function Panel(props: PageProps<unknown>) {
         </div>
       )}
     </Section>
+    <Controls {...props} />
     <SystemFooter {...props} />
     </>
   );

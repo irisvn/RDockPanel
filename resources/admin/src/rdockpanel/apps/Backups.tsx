@@ -4,7 +4,8 @@
 import { useRef, useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section, StatusBadge, bytes, when } from "../lib/ui";
+import { bytes, EmptyState, ErrorNote, Field, type MenuItem, NavLink, RowActions, Section, Status, StatusBadge, TableScroll, useAsk, when } from "../lib/ui";
+import { dateTime, relative, size } from "../lib/format";
 import { ResourceError, resources } from "../lib/resources";
 import type { ServiceDetail } from "./types";
 
@@ -182,6 +183,7 @@ function RunLog(props: Props & { id: number; onClose: () => void }) {
 }
 
 function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () => void }) {
+  const ask = useAsk();
   const { t, d } = props;
   const [provider, setProvider] = useState(String(props.tab.providers[0]?.id ?? ""));
   const [folder, setFolder] = useState(props.tab.configs[0]?.path ?? `${d.project.name}/${d.service.name}`);
@@ -228,7 +230,13 @@ function RestoreForm(props: Props & { tab: Tab; onClose: () => void; onDone: () 
         className="rdp2-form"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!window.confirm(t("Restore this file into the database? Its current data is replaced."))) return;
+          const ok = await ask({
+            title: t("Restore this backup?"),
+            body: t("Restore this file into the database? Its current data is replaced."),
+            action: t("Restore"),
+            destructive: true,
+          });
+          if (!ok) return;
           setFields({});
           setError(null);
           try {
@@ -322,12 +330,13 @@ export function BackupsTab(props: Props) {
   const [log, setLog] = useState<number | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  if (!d.permissions.includes("database_backups.view_any")) return <p className="rdp2-muted">{t("You may not see backups.")}</p>;
+  const ask = useAsk();
+  if (!d.permissions.includes("database_backups.view_any")) return <EmptyState title={t("You may not see backups.")} />;
   if (tab.isLoading) return <Loading />;
   if (tab.error || !tab.data) return <ErrorState error={tab.error} />;
   const data = tab.data;
   if (!data.supported && data.volumes.length === 0)
-    return <p className="rdp2-muted">{t("Redis keeps its data in its volume (append-only file): it has no database backups.")}</p>;
+    return <EmptyState title={t("Redis keeps its data in its volume (append-only file): it has no database backups.")} />;
   const providerName = (id: number) => data.providers.find((p) => p.id === id)?.name ?? `#${id}`;
   const runNow = async (c: Config) => {
     setError(null);
@@ -359,109 +368,132 @@ export function BackupsTab(props: Props) {
       >
         {data.providers.length === 0 && (
           <Alert>
-            {t("No storage provider yet: add one in Settings.")}{" "}
-            <button type="button" className="rdp2-link" onClick={() => props.navigate("/p/settings")}>
-              {t("Settings")}
-            </button>
+            {t("No storage provider yet.")}{" "}
+            <NavLink to="/p/settings/backups" navigate={props.navigate}>
+              {t("Add one in Settings → Backups")}
+            </NavLink>
           </Alert>
         )}
         <ErrorNote error={error} />
+        {data.configs.length === 0 && data.providers.length > 0 && (
+          <EmptyState title={t("No backup scheduled")} hint={t("Create one to dump the database or archive a volume on a schedule.")} />
+        )}
         {data.configs.length > 0 && (
-          <table className="rdp2-table">
-            <thead>
-              <tr>
-                <th>{t("Backs up")}</th>
-                <th>{t("Schedule")}</th>
-                <th>{t("Storage provider")}</th>
-                <th>{t("Path")}</th>
-                <th>{t("Retention")}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {data.configs.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.volume ? `${t("Volume")} ${c.volume}` : c.database_name}</td>
-                  <td className="rdp2-mono">
-                    {c.schedule}
-                    {!c.enabled && <span className="rdp2-muted"> · {t("off")}</span>}
-                  </td>
-                  <td>{providerName(c.storage_provider_id)}</td>
-                  <td className="rdp2-mono rdp2-small">{c.path}</td>
-                  <td>{c.retention}</td>
-                  <td className="rdp2-row rdp2-end">
-                    {d.permissions.includes("backups.run") && (
-                      <Button size="sm" variant="outline" onClick={() => runNow(c)}>
-                        {t("Run now")}
-                      </Button>
-                    )}
-                    {d.permissions.includes("database_backups.update") && (
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(c)}>
-                        {t("Edit")}
-                      </Button>
-                    )}
-                    {d.permissions.includes("database_backups.delete") && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={async () => {
-                          if (!window.confirm(t("Delete this backup configuration? Its files stay in the provider."))) return;
-                          try {
-                            await resources.remove("database_backups", c.id);
-                            tab.refetch();
-                          } catch (err) {
-                            setError(err);
-                          }
-                        }}
-                      >
-                        {t("Delete")}
-                      </Button>
-                    )}
-                  </td>
+          <TableScroll>
+            <table className="rdp2-table">
+              <thead>
+                <tr>
+                  <th>{t("Backs up")}</th>
+                  <th>{t("Schedule")}</th>
+                  <th className="rdp2-hide-sm">{t("Storage provider")}</th>
+                  <th className="rdp2-hide-sm">{t("Path")}</th>
+                  <th className="rdp2-right">{t("Retention")}</th>
+                  <th className="rdp2-right">
+                    <span className="rdp2-sr">{t("Actions")}</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.configs.map((c) => {
+                  const menu: MenuItem[] = [];
+                  if (d.permissions.includes("database_backups.update")) menu.push({ label: t("Edit"), onSelect: () => setEditing(c) });
+                  if (d.permissions.includes("database_backups.delete"))
+                    menu.push("separator", {
+                      label: t("Delete…"),
+                      destructive: true,
+                      onSelect: async () => {
+                        const ok = await ask({
+                          title: t("Delete this backup configuration?"),
+                          body: t("Its files stay in the provider."),
+                          action: t("Delete backup"),
+                          destructive: true,
+                        });
+                        if (!ok) return;
+                        try {
+                          await resources.remove("database_backups", c.id);
+                          tab.refetch();
+                        } catch (err) {
+                          setError(err);
+                        }
+                      },
+                    });
+                  return (
+                    <tr key={c.id}>
+                      <td className="rdp2-strong-cell">{c.volume ? `${t("Volume")} ${c.volume}` : c.database_name}</td>
+                      <td className="rdp2-mono rdp2-nowrap">
+                        {c.schedule}
+                        {!c.enabled && <span className="rdp2-muted"> · {t("off")}</span>}
+                      </td>
+                      <td className="rdp2-hide-sm">{providerName(c.storage_provider_id)}</td>
+                      <td className="rdp2-hide-sm rdp2-mono">{c.path}</td>
+                      <td className="rdp2-right rdp2-num">{c.retention}</td>
+                      <td>
+                        <RowActions label={t("Actions for {host}").replace("{host}", c.volume ?? c.database_name ?? "")} menu={menu}>
+                          {d.permissions.includes("backups.run") && (
+                            <Button size="sm" variant="ghost" onClick={() => runNow(c)}>
+                              {t("Run now")}
+                            </Button>
+                          )}
+                        </RowActions>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableScroll>
         )}
       </Section>
-      <Section title={t("Backups log")}>
+      <Section title={t("Backups log")} flush>
         {data.runs.length === 0 ? (
-          <p className="rdp2-muted">{t("No backup yet.")}</p>
+          <EmptyState title={t("No backup yet.")} />
         ) : (
-          <table className="rdp2-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>{t("Action")}</th>
-                <th>{t("Status")}</th>
-                <th>{t("File")}</th>
-                <th>{t("Size")}</th>
-                <th>{t("Started")}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {data.runs.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.id}</td>
-                  <td>
-                    {t(r.kind)} · {t(r.trigger)}
-                  </td>
-                  <td>
-                    <StatusBadge status={r.status} label={t(r.status)} />
-                  </td>
-                  <td className="rdp2-mono rdp2-small rdp2-ellipsis">{r.file?.split("/").pop() ?? ""}</td>
-                  <td className="rdp2-small">{r.size != null ? bytes(r.size) : ""}</td>
-                  <td className="rdp2-small">{when(r.created_at, props.locale)}</td>
-                  <td className="rdp2-row rdp2-end">
-                    <Button size="sm" variant="ghost" onClick={() => setLog(r.id)}>
-                      {t("Log")}
-                    </Button>
-                  </td>
+          <TableScroll>
+            <table className="rdp2-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>{t("Action")}</th>
+                  <th>{t("State")}</th>
+                  <th className="rdp2-hide-sm">{t("File")}</th>
+                  <th className="rdp2-right">{t("Size")}</th>
+                  <th className="rdp2-hide-sm">{t("Started")}</th>
+                  <th className="rdp2-right">
+                    <span className="rdp2-sr">{t("Actions")}</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.runs.map((r) => (
+                  <tr key={r.id}>
+                    <td className="rdp2-num">{r.id}</td>
+                    <td className="rdp2-nowrap">
+                      {t(r.kind)} · {t(r.trigger)}
+                    </td>
+                    <td>
+                      <Status kind="action" status={r.status} t={t} />
+                    </td>
+                    <td className="rdp2-hide-sm">
+                      <span className="rdp2-mono rdp2-ellipsis rdp2-cell-clip" title={r.file ?? ""}>
+                        {r.file?.split("/").pop() ?? ""}
+                      </span>
+                    </td>
+                    <td className="rdp2-right rdp2-num rdp2-nowrap">{r.size != null ? size(r.size, props.locale) : ""}</td>
+                    <td className="rdp2-hide-sm rdp2-nowrap" title={dateTime(r.created_at, props.locale)}>
+                      {relative(r.created_at, props.locale)}
+                    </td>
+                    <td>
+                      <RowActions label={t("Actions for {host}").replace("{host}", `#${r.id}`)}>
+                        <Button size="sm" variant="ghost" onClick={() => setLog(r.id)}>
+                          {t("Log")}
+                        </Button>
+                      </RowActions>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
         )}
       </Section>
       {editing && (

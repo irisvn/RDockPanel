@@ -3,7 +3,7 @@
 # panel's (docs/ui-guidelines.md §6): their count in the panel's sources may
 # only go down. Lower MAX here as pages move; it ends at 0.
 set -eu
-MAX=33
+MAX=7
 cd "$(dirname "$0")/../resources/admin"
 # The panel's own sources: React pages and the plain scripts, not the built
 # bundle (js/rdockpanel/dashboard.js) nor vendored libraries.

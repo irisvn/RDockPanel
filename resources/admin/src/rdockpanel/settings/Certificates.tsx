@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section } from "../lib/ui";
+import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 
 type Resolver = {
@@ -119,12 +119,12 @@ export function Certificates(props: PageProps<unknown>) {
   const [editing, setEditing] = useState<Resolver | "new" | null>(null);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const ask = useAsk();
   if (status.isLoading) return <Loading />;
   if (status.error || !status.data) return <ErrorState error={status.error} />;
   const s = status.data;
   return (
     <Section
-      level={2}
       title={t("Certificate resolvers")}
       description={t("Certificate resolvers of Traefik: a domain chooses one in its dialog (else the panel's default). A wildcard needs a DNS one.")}
       actions={<Button onClick={() => setEditing("new")}>{t("Add certificate resolver")}</Button>}
@@ -159,53 +159,65 @@ export function Certificates(props: PageProps<unknown>) {
         </Alert>
       )}
       <ErrorNote error={error} />
-      {s.resolvers.length === 0 && <p className="rdp2-muted">{t("No certificate resolver of the panel's yet.")}</p>}
-      {s.resolvers.length > 0 && (
-        <table className="rdp2-table">
-          <thead>
-            <tr>
-              <th>{t("Name")}</th>
-              <th>{t("Challenge")}</th>
-              <th>{t("Email")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {s.resolvers.map((r) => (
-              <tr key={r.id}>
-                <td className="rdp2-mono">{r.name}</td>
-                <td>
-                  {r.kind === "dns" ? `DNS · ${s.providers.find((p) => p.name === r.provider)?.label ?? r.provider}` : "HTTP"}
-                  {r.staging && <span className="rdp2-muted"> · {t("staging")}</span>}
-                </td>
-                <td className="rdp2-small rdp2-ellipsis">{r.email}</td>
-                <td className="rdp2-row rdp2-end">
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(r)}>
-                    {t("Edit")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={r.in_use}
-                    title={r.in_use ? t("A domain uses it") : undefined}
-                    onClick={async () => {
-                      if (!window.confirm(t("Delete this certificate resolver? Apply afterwards."))) return;
-                      setError(null);
-                      try {
-                        await resources.remove("cert_resolvers", r.id);
-                        status.refetch();
-                      } catch (err) {
-                        setError(err);
-                      }
-                    }}
-                  >
-                    {t("Delete")}
-                  </Button>
-                </td>
+      {s.resolvers.length === 0 ? (
+        <EmptyState title={t("No certificate resolver of the panel's yet.")} hint={t("Add Let's Encrypt over HTTP, or over DNS for wildcards.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Name")}</th>
+                <th>{t("Challenge")}</th>
+                <th className="rdp2-hide-sm">{t("Email")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {s.resolvers.map((r) => (
+                <tr key={r.id}>
+                  <td className="rdp2-mono">{r.name}</td>
+                  <td>
+                    {r.kind === "dns" ? `DNS · ${s.providers.find((p) => p.name === r.provider)?.label ?? r.provider}` : "HTTP"}
+                    {r.staging && <span className="rdp2-muted"> · {t("staging")}</span>}
+                  </td>
+                  <td className="rdp2-hide-sm rdp2-small rdp2-ellipsis">{r.email}</td>
+                  <td>
+                    <RowActions
+                      label={t("Actions for {host}").replace("{host}", r.name)}
+                      menu={[
+                        { label: t("Edit"), onSelect: () => setEditing(r) },
+                        "separator",
+                        {
+                          label: r.in_use ? t("Delete (a domain uses it)") : t("Delete…"),
+                          destructive: true,
+                          disabled: r.in_use,
+                          onSelect: async () => {
+                            const ok = await ask({
+                              title: t("Delete the resolver {name}?").replace("{name}", r.name),
+                              body: t("Apply afterwards for Traefik to drop it."),
+                              action: t("Delete resolver"),
+                              destructive: true,
+                            });
+                            if (!ok) return;
+                            setError(null);
+                            try {
+                              await resources.remove("cert_resolvers", r.id);
+                              status.refetch();
+                            } catch (err) {
+                              setError(err);
+                            }
+                          },
+                        },
+                      ]}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       )}
       {editing && (
         <ResolverForm

@@ -5,7 +5,8 @@
 import { useState } from "react";
 import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section, bytes } from "../lib/ui";
+import { ColorField, ErrorNote, Field, FilePicker, RowActions, Section, TableScroll } from "../lib/ui";
+import { size } from "../lib/format";
 
 type Image = { mime: string; size: number; url: string };
 type Current = { name: string | null; primary: string | null; images: Record<string, Image>; kinds: string[] };
@@ -58,77 +59,98 @@ export function BrandingSettings(props: PageProps<unknown>) {
     }
   };
   return (
-    <Section
-      level={2}
-      title={t("Branding")}
-      description={t("The panel's name, color, logos and favicon, on every page and the sign-in page. Left empty: RDockPanel's own.")}
-    >
-      <form
-        className="rdp2-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run(async () => {
-            await props.api.put("/apps/branding", { name: nameValue, primary: primaryValue });
-            setName(null);
-            setPrimary(null);
-          });
-        }}
+    <>
+      <Section
+        title={t("Name and color")}
+        description={t("The panel's name and primary color, on every page and the sign-in page. Left empty: RDockPanel's own.")}
       >
-        <Field label={t("Name")} error={fields.name}>
-          <Input value={nameValue} maxLength={64} placeholder="RDockPanel" onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label={t("Primary color")} error={fields.primary}>
-          <div className="rdp2-row">
-            <input
-              type="color"
-              aria-label={t("Primary color")}
-              value={/^#[0-9a-f]{6}$/i.test(primaryValue) ? primaryValue : "#2563eb"}
-              onChange={(e) => setPrimary(e.target.value)}
-            />
-            <Input className="rdp2-mono" value={primaryValue} placeholder="#2563eb" onChange={(e) => setPrimary(e.target.value)} />
+        <form
+          className="rdp2-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(async () => {
+              await props.api.put("/apps/branding", { name: nameValue, primary: primaryValue });
+              setName(null);
+              setPrimary(null);
+            });
+          }}
+        >
+          <div className="rdp2-grid2">
+            <Field label={t("Name")} error={fields.name}>
+              <Input value={nameValue} maxLength={64} placeholder="RDockPanel" onChange={(e) => setName(e.target.value)} />
+            </Field>
+            <Field label={t("Primary color")} error={fields.primary}>
+              <ColorField label={t("Primary color")} value={primaryValue} placeholder="#2563eb" onChange={setPrimary} />
+            </Field>
           </div>
-        </Field>
-        <div className="rdp2-row rdp2-end">
-          <Button type="submit" disabled={busy}>
-            {t("Save")}
-          </Button>
-        </div>
-      </form>
-      {c.kinds.map((kind) => {
-        const image = c.images[kind];
-        return (
-          <Field key={kind} label={t(KIND_LABELS[kind] ?? kind)} error={undefined}>
-            <div className="rdp2-row">
-              {image ? (
-                <img src={image.url} alt="" className="rdp2-brand-preview" />
-              ) : (
-                <span className="rdp2-small rdp2-muted">{t("RDockPanel's own")}</span>
-              )}
-              {image && <span className="rdp2-small rdp2-muted">{bytes(image.size)}</span>}
-              <input
-                type="file"
-                accept={ACCEPT}
-                aria-label={t(KIND_LABELS[kind] ?? kind)}
-                disabled={busy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!file) return;
-                  void run(async () => props.api.put(`/apps/branding/images/${kind}`, { mime: mimeOf(file), data: await base64(file) }));
-                }}
-              />
-              {image && (
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => props.api.delete(`/apps/branding/images/${kind}`))}>
-                  {t("Remove")}
-                </Button>
-              )}
-            </div>
-          </Field>
-        );
-      })}
-      <p className="rdp2-small rdp2-muted">{t("PNG, WebP or ICO, at most 512 KB each (no SVG).")}</p>
-      {saved && <p className="rdp2-small">{t("Saved: reload the page to see it.")}</p>}
-      <ErrorNote error={fields.data ? new Error(fields.data.join(" ")) : Object.keys(fields).length ? null : error} />
-    </Section>
+          {!fields.data && Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+          <div className="rdp2-dialog-foot">
+            <Button type="submit" disabled={busy}>
+              {t("Save")}
+            </Button>
+          </div>
+        </form>
+      </Section>
+      <Section title={t("Logos and favicon")} description={t("PNG, WebP or ICO, at most 512 KB each (no SVG).")} flush>
+        {fields.data && (
+          <div className="rdp2-flush-note">
+            <ErrorNote error={new Error(fields.data.join(" "))} />
+          </div>
+        )}
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Image")}</th>
+                <th>{t("Now")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {c.kinds.map((kind) => {
+                const image = c.images[kind];
+                const label = t(KIND_LABELS[kind] ?? kind);
+                return (
+                  <tr key={kind}>
+                    <td className="rdp2-strong-cell">{label}</td>
+                    <td>
+                      {image ? (
+                        <div className="rdp2-row">
+                          <img src={image.url} alt="" className="rdp2-brand-preview" />
+                          <span className="rdp2-small rdp2-muted">{size(image.size, props.locale)}</span>
+                        </div>
+                      ) : (
+                        <span className="rdp2-muted">{t("RDockPanel's own")}</span>
+                      )}
+                    </td>
+                    <td>
+                      <RowActions
+                        label={t("Actions for {host}").replace("{host}", label)}
+                        menu={
+                          image
+                            ? [{ label: t("Remove…"), destructive: true, disabled: busy, onSelect: () => void run(() => props.api.delete(`/apps/branding/images/${kind}`)) }]
+                            : []
+                        }
+                      >
+                        <FilePicker
+                          label={image ? t("Replace") : t("Upload")}
+                          ariaLabel={`${image ? t("Replace") : t("Upload")}: ${label}`}
+                          accept={ACCEPT}
+                          disabled={busy}
+                          onFile={(file) => void run(async () => props.api.put(`/apps/branding/images/${kind}`, { mime: mimeOf(file), data: await base64(file) }))}
+                        />
+                      </RowActions>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
+      </Section>
+      {saved && <p className="rdp2-versions">{t("Saved: reload the page to see it.")}</p>}
+    </>
   );
 }

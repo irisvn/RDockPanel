@@ -5,13 +5,14 @@
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, Dialog, ErrorState, Input, Loading, NativeSelect } from "@rustcms/admin-sdk/ui";
-import { ErrorNote } from "../lib/ui";
+import { ErrorNote, RowActions, useAsk } from "../lib/ui";
 import type { Project } from "./types";
 
 type Member = { user_id: number; name: string | null; email: string | null; role: string };
 type List = { members: Member[]; roles: string[] };
 
 export function Members(props: PageProps<unknown> & { project: Project; onClose: () => void }) {
+  const ask = useAsk();
   const t = props.t;
   const base = `/apps/projects/${props.project.id}/members`;
   const list = useAdminQuery<List>(props, base);
@@ -49,15 +50,24 @@ export function Members(props: PageProps<unknown> & { project: Project; onClose:
                   </option>
                 ))}
               </NativeSelect>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  if (window.confirm(t("Remove this member?"))) void call(() => props.api.delete(`${base}/${m.user_id}`));
-                }}
-              >
-                {t("Remove")}
-              </Button>
+              <RowActions
+                label={t("Actions for {host}").replace("{host}", m.email ?? "")}
+                menu={[
+                  {
+                    label: t("Remove…"),
+                    destructive: true,
+                    onSelect: async () => {
+                      const ok = await ask({
+                        title: t("Remove {name} from this project?").replace("{name}", m.name ?? m.email ?? ""),
+                        body: t("They lose what their role gave them in this project."),
+                        action: t("Remove member"),
+                        destructive: true,
+                      });
+                      if (ok) void call(() => props.api.delete(`${base}/${m.user_id}`));
+                    },
+                  },
+                ]}
+              />
             </span>
           </li>
         ))}

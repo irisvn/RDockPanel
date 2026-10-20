@@ -4,7 +4,8 @@
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Dialog, ErrorState, Loading, NativeSelect } from "@rustcms/admin-sdk/ui";
-import { StatusBadge, when } from "../lib/ui";
+import { EmptyState, Page, Pager, RowActions, Section, Status, TableScroll, usePaged } from "../lib/ui";
+import { dateTime, relative } from "../lib/format";
 
 type Item = {
   type: "deployment" | "backup" | "docker";
@@ -37,62 +38,100 @@ export function Actions(props: PageProps<unknown>) {
   const feed = useAdminQuery<{ actions: Item[] }>(props, "/apps/actions", { refetchInterval: 3000 });
   const [kind, setKind] = useState("all");
   const [open, setOpen] = useState<number | null>(null);
+  const items = (feed.data?.actions ?? []).filter((i) => kind === "all" || i.type === kind);
+  const paged = usePaged(items, kind);
+  const header = {
+    title: props.title,
+    eyebrow: t("Workspace"),
+    heading: t("Actions"),
+    description: t("Deployments, backups and Docker actions, newest first."),
+  };
   if (feed.isLoading) return <Loading />;
   if (feed.error || !feed.data) return <ErrorState error={feed.error} />;
-  const items = feed.data.actions.filter((i) => kind === "all" || i.type === kind);
-  const go = (i: Item) => {
-    if (i.type === "docker") return setOpen(i.id);
-    if (!i.target) return;
-    props.navigate(`/p/dashboard/${i.target.project}/${i.target.service}/${i.type === "backup" ? "backups" : "deployments"}`);
-  };
+  const where = (i: Item) => (i.target ? `/p/dashboard/${i.target.project}/${i.target.service}/${i.type === "backup" ? "backups" : "deployments"}` : null);
   return (
-    <div className="rdp2-page">
-      <div className="rdp2-head">
-        <p className="rdp2-muted">{t("Deployments, backups and Docker actions, newest first.")}</p>
-        <NativeSelect className="rdp2-narrow" value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="all">{t("All")}</option>
-          <option value="deployment">{t("Deployments")}</option>
-          <option value="backup">{t("Backups")}</option>
-          <option value="docker">Docker</option>
-        </NativeSelect>
-      </div>
-      {items.length === 0 ? (
-        <p className="rdp2-muted">{t("Nothing yet.")}</p>
-      ) : (
-        <table className="rdp2-table">
-          <thead>
-            <tr>
-              <th>{t("Action")}</th>
-              <th>{t("Where")}</th>
-              <th>{t("Status")}</th>
-              <th>{t("Started")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((i) => (
-              <tr key={`${i.type}-${i.id}`}>
-                <td>
-                  {t(i.what)}
-                  {i.detail && <span className="rdp2-muted rdp2-small"> · {i.detail}</span>}
-                </td>
-                <td className="rdp2-small">{i.target ? `${i.target.project}/${i.target.service}` : ""}</td>
-                <td>
-                  <StatusBadge status={i.status} label={t(i.status)} />
-                  {i.error && <div className="rdp2-error rdp2-small rdp2-clamp">{i.error}</div>}
-                </td>
-                <td className="rdp2-small">{when(i.created_at, props.locale)}</td>
-                <td className="rdp2-row rdp2-end">
-                  <Button size="sm" variant="ghost" onClick={() => go(i)} disabled={i.type !== "docker" && !i.target}>
-                    {i.type === "docker" ? t("Log") : t("Open")}
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+    <Page {...header}>
+      <Section
+        title={t("Latest actions")}
+        description={t("The latest 100: older ones stay in each service's history.")}
+        flush
+        actions={
+          <NativeSelect value={kind} onChange={(e) => setKind(e.target.value)} aria-label={t("Kind")}>
+            <option value="all">{t("All")}</option>
+            <option value="deployment">{t("Deployments")}</option>
+            <option value="backup">{t("Backups")}</option>
+            <option value="docker">Docker</option>
+          </NativeSelect>
+        }
+      >
+        {items.length === 0 ? (
+          <EmptyState
+            title={kind === "all" ? t("Nothing yet") : t("Nothing of this kind")}
+            hint={t("Deployments, backups and Docker actions appear here as they run.")}
+            action={kind !== "all" && <Button size="sm" variant="outline" onClick={() => setKind("all")}>{t("Show all")}</Button>}
+          />
+        ) : (
+          <>
+            <TableScroll>
+              <table className="rdp2-table">
+                <thead>
+                  <tr>
+                    <th>{t("Action")}</th>
+                    <th>{t("Where")}</th>
+                    <th>{t("State")}</th>
+                    <th className="rdp2-hide-sm">{t("Started")}</th>
+                    <th className="rdp2-right">
+                      <span className="rdp2-sr">{t("Actions")}</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paged.page.map((i) => {
+                    const path = where(i);
+                    return (
+                      <tr key={`${i.type}-${i.id}`}>
+                        <td>
+                          <div className="rdp2-strong-cell">{t(i.what)}</div>
+                          {i.detail && (
+                            <div className="rdp2-muted rdp2-small rdp2-ellipsis rdp2-cell-clip" title={i.detail}>
+                              {i.detail}
+                            </div>
+                          )}
+                        </td>
+                        <td className="rdp2-nowrap">{i.target ? `${i.target.project} / ${i.target.service}` : <span className="rdp2-muted">–</span>}</td>
+                        <td>
+                          <Status kind={i.type === "deployment" ? "deployment" : "action"} status={i.status} t={t} detail={i.error ?? undefined} />
+                          {i.error && <div className="rdp2-error rdp2-small rdp2-clamp">{i.error}</div>}
+                        </td>
+                        <td className="rdp2-hide-sm" title={dateTime(i.created_at, props.locale)}>
+                          {relative(i.created_at, props.locale)}
+                        </td>
+                        <td>
+                          <RowActions label={t("Actions for {host}").replace("{host}", t(i.what))}>
+                            {i.type === "docker" ? (
+                              <Button size="sm" variant="ghost" onClick={() => setOpen(i.id)}>
+                                {t("Log")}
+                              </Button>
+                            ) : (
+                              path && (
+                                <Button size="sm" variant="ghost" onClick={() => props.navigate(path)}>
+                                  {t("Open")}
+                                </Button>
+                              )
+                            )}
+                          </RowActions>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableScroll>
+            <Pager total={items.length} at={paged.at} onPage={paged.set} t={t} />
+          </>
+        )}
+      </Section>
       {open !== null && <DockerLog {...props} id={open} onClose={() => setOpen(null)} />}
-    </div>
+    </Page>
   );
 }

@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, Checkbox, Dialog, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section, when } from "../lib/ui";
+import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk, when } from "../lib/ui";
 
 type Provider = { id: number; name: string; kind: string; account: string | null; projects: number[]; used_by: number; updated_at: string };
 type List = { providers: Provider[]; projects: Array<{ id: number; name: string }> };
@@ -86,71 +86,97 @@ export function Git(props: PageProps<unknown>) {
   const list = useAdminQuery<List>(props, "/apps/git/providers");
   const [editing, setEditing] = useState<Provider | "new" | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const ask = useAsk();
   if (list.isLoading) return <Loading />;
   if (list.error || !list.data) return <ErrorState error={list.error} />;
   const data = list.data;
   const names = (ids: number[]) => data.projects.filter((p) => ids.includes(p.id)).map((p) => p.name).join(", ");
   return (
     <Section
-      level={2}
       title="GitHub"
       description={t("Tokens that clone private repositories, each for the projects you give it. Never shown again once saved.")}
-      actions={<Button onClick={() => setEditing("new")}>+ {t("Add a GitHub token")}</Button>}
+      flush
+      actions={<Button onClick={() => setEditing("new")}>{t("Add GitHub token")}</Button>}
     >
-      <ErrorNote error={error} />
-      {data.providers.length === 0 && <p className="rdp2-muted">{t("No token: services clone public repositories, or private ones with a deploy key.")}</p>}
-      <ul className="rdp2-list">
-        {data.providers.map((p) => (
-          <li key={p.id} className="rdp2-list-row">
-            <span className="rdp2-form">
-              <strong>{p.name}</strong>
-              <span className="rdp2-small rdp2-muted">
-                {p.account ? `@${p.account}` : t("account unknown")} · {p.projects.length ? names(p.projects) : t("no project")} · {p.used_by} {t("service(s)")} ·{" "}
-                {when(p.updated_at, props.locale)}
-              </span>
-            </span>
-            <span className="rdp2-row">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={async () => {
-                  setError(null);
-                  try {
-                    const r = await props.api.post<{ account: string; scopes: string | null }>(`/apps/git/providers/${p.id}/test`, {});
-                    props.toast.success(`${t("GitHub accepts it")}: @${r.account}${r.scopes ? ` (${r.scopes})` : ""}`);
-                    list.refetch();
-                  } catch (err) {
-                    setError(err);
-                  }
-                }}
-              >
-                {t("Test")}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEditing(p)}>
-                {t("Edit")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={p.used_by > 0}
-                title={p.used_by > 0 ? t("Services clone with it") : undefined}
-                onClick={async () => {
-                  if (!window.confirm(t("Remove this token?"))) return;
-                  setError(null);
-                  try {
-                    await props.api.delete(`/apps/git/providers/${p.id}`);
-                    list.refetch();
-                  } catch (err) {
-                    setError(err);
-                  }
-                }}
-              >
-                {t("Remove")}
-              </Button>
-            </span>
-          </li>
-        ))}
-      </ul>
+      {error != null && (
+        <div className="rdp2-flush-note">
+          <ErrorNote error={error} />
+        </div>
+      )}
+      {data.providers.length === 0 ? (
+        <EmptyState title={t("No GitHub token yet")} hint={t("Services clone public repositories, or private ones with a deploy key.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Name")}</th>
+                <th>{t("Projects")}</th>
+                <th className="rdp2-hide-sm">{t("Used by")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.providers.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    <div className="rdp2-strong-cell">{p.name}</div>
+                    <div className="rdp2-muted rdp2-small">{p.account ? `@${p.account}` : t("account unknown")}</div>
+                  </td>
+                  <td>{p.projects.length ? names(p.projects) : <span className="rdp2-muted">{t("no project")}</span>}</td>
+                  <td className="rdp2-hide-sm rdp2-num">
+                    {p.used_by} {t("service(s)")}
+                  </td>
+                  <td>
+                    <RowActions
+                      label={t("Actions for {host}").replace("{host}", p.name)}
+                      menu={[
+                        { label: t("Edit"), onSelect: () => setEditing(p) },
+                        "separator",
+                        {
+                          label: p.used_by > 0 ? t("Remove (services clone with it)") : t("Remove…"),
+                          destructive: true,
+                          disabled: p.used_by > 0,
+                          onSelect: async () => {
+                            const ok = await ask({ title: t("Remove the GitHub token {name}?").replace("{name}", p.name), action: t("Remove token"), destructive: true });
+                            if (!ok) return;
+                            setError(null);
+                            try {
+                              await props.api.delete(`/apps/git/providers/${p.id}`);
+                              list.refetch();
+                            } catch (err) {
+                              setError(err);
+                            }
+                          },
+                        },
+                      ]}
+                    >
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={async () => {
+                          setError(null);
+                          try {
+                            const r = await props.api.post<{ account: string; scopes: string | null }>(`/apps/git/providers/${p.id}/test`, {});
+                            props.toast.success(`${t("GitHub accepts it")}: @${r.account}${r.scopes ? ` (${r.scopes})` : ""}`);
+                            list.refetch();
+                          } catch (err) {
+                            setError(err);
+                          }
+                        }}
+                      >
+                        {t("Test")}
+                      </Button>
+                    </RowActions>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
       {editing && (
         <ProviderForm
           {...props}

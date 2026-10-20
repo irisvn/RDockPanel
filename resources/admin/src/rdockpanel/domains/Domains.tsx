@@ -5,7 +5,22 @@
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, ErrorState, Loading, NativeSelect } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, StatusDot } from "../lib/ui";
+import {
+  EmptyState,
+  ErrorNote,
+  IconButton,
+  type MenuItem,
+  NavLink,
+  Page,
+  Pager,
+  RowActions,
+  Section,
+  StatusBadge,
+  TableScroll,
+  useConfirm,
+  usePaged,
+} from "../lib/ui";
+import type { Tone } from "../lib/status";
 import { resources } from "../lib/resources";
 import { DomainForm, type ServiceChoice, plainDomain } from "../apps/DomainForm";
 import type { Domain } from "../apps/types";
@@ -35,11 +50,11 @@ type List = {
   can: { create: boolean; update: boolean; delete: boolean; system: boolean };
 };
 
-const STATUS: Record<Row["status"], { tone: string; label: string }> = {
-  live: { tone: "running", label: "Live" },
-  pending: { tone: "deploying", label: "Waiting for Deploy" },
-  removed: { tone: "failed", label: "Removed, served until Deploy" },
-  stopped: { tone: "stopped", label: "Service not running" },
+const STATUS: Record<Row["status"], { tone: Tone; label: string; hint: string }> = {
+  live: { tone: "ok", label: "Live", hint: "Traefik serves it as configured." },
+  pending: { tone: "busy", label: "Waiting for deploy", hint: "Changed: the service's next deployment applies it." },
+  removed: { tone: "bad", label: "Removed", hint: "Still served until the service's next deployment." },
+  stopped: { tone: "off", label: "Not running", hint: "The service is stopped." },
 };
 
 export function Domains(props: PageProps<unknown>) {
@@ -49,11 +64,19 @@ export function Domains(props: PageProps<unknown>) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [confirm, confirmDialog] = useConfirm(t);
+  const rows = (list.data?.domains ?? []).filter((d) => !project || d.project === project);
+  const paged = usePaged(rows, project);
+  const header = {
+    title: props.title,
+    eyebrow: t("Workspace"),
+    heading: t("Domains"),
+    description: t("Every service's domains and where Traefik sends them. A change is applied by the service's next deployment."),
+  };
   if (list.isLoading) return <Loading />;
   if (list.error || !list.data) return <ErrorState error={list.error} />;
   const data = list.data;
   const projects = [...new Set(data.services.map((s) => s.project))].sort();
-  const rows = data.domains.filter((d) => !project || d.project === project);
   const url = (d: { https: boolean; host: string; path?: string }) => `${d.https ? "https" : "http"}://${d.host}${d.path ?? "/"}`;
   const mayChange = (d: Row) => d.id !== null && d.writable && (data.can.system || plainDomain(d));
   // A service's page reads the dashboard's overview.
@@ -64,13 +87,33 @@ export function Domains(props: PageProps<unknown>) {
     setEditing(null);
     list.refetch();
   };
+  const remove = async (d: Row) => {
+    const ok = await confirm({
+      title: t("Remove {host}?").replace("{host}", d.host + (d.path !== "/" ? d.path : "")),
+      body: t("It stops being served at the service's next deployment."),
+      action: t("Remove domain"),
+      destructive: true,
+    });
+    if (!ok) return;
+    setError(null);
+    try {
+      await resources.remove("service_domains", d.id as number);
+      props.toast.success(t("Domain removed"));
+      list.refetch();
+    } catch (err) {
+      setError(err);
+    }
+  };
+  const empty = rows.length === 0 && !(data.panel && !project);
   return (
-    <div className="rdp2-page">
-      <div className="rdp2-head">
-        <p className="rdp2-muted">{t("Every service's domains and where Traefik sends them. A change is applied by the service's next deployment.")}</p>
-        <div className="rdp2-row">
-          {projects.length > 1 && (
-            <NativeSelect className="rdp2-narrow" value={project} onChange={(e) => setProject(e.target.value)} aria-label={t("Project")}>
+    <Page {...header} actions={addable && <Button onClick={() => setAdding(true)}>{t("Add domain")}</Button>}>
+      <ErrorNote error={error} />
+      <Section
+        title={t("All domains")}
+        flush
+        actions={
+          projects.length > 1 && (
+            <NativeSelect value={project} onChange={(e) => setProject(e.target.value)} aria-label={t("Project")}>
               <option value="">{t("All projects")}</option>
               {projects.map((p) => (
                 <option key={p} value={p}>
@@ -78,89 +121,94 @@ export function Domains(props: PageProps<unknown>) {
                 </option>
               ))}
             </NativeSelect>
-          )}
-          {addable && <Button onClick={() => setAdding(true)}>+ {t("Add domain")}</Button>}
-        </div>
-      </div>
-      <ErrorNote error={error} />
-      <div className="rdp2-domains">
-        {data.panel && !project && (
-          <div className="rdp2-domain">
-            <span className="rdp2-domain-box rdp2-mono">{data.panel.url}</span>
-            <span className="rdp2-muted" aria-hidden>
-              →
-            </span>
-            <span className="rdp2-domain-box rdp2-muted">{t("RDockPanel (Settings → Panel)")}</span>
-            <span className="rdp2-domain-tools">
-              <a className="rdp2-icon-button" href={data.panel.url} target="_blank" rel="noreferrer" title={t("Open")} aria-label={t("Open")}>
-                ↗
-              </a>
-            </span>
-          </div>
+          )
+        }
+      >
+        {empty ? (
+          <EmptyState
+            title={project ? t("No domain in this project") : t("No domain yet")}
+            hint={t("Add one to reach a service from the internet.")}
+            action={project && <Button size="sm" variant="outline" onClick={() => setProject("")}>{t("Show all projects")}</Button>}
+          />
+        ) : (
+          <>
+            <TableScroll>
+              <table className="rdp2-table">
+                <thead>
+                  <tr>
+                    <th>{t("Domain")}</th>
+                    <th>{t("Goes to")}</th>
+                    <th className="rdp2-hide-sm">{t("Service")}</th>
+                    <th>{t("State")}</th>
+                    <th className="rdp2-right">
+                      <span className="rdp2-sr">{t("Actions")}</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.panel && !project && paged.at === 0 && (
+                    <tr>
+                      <td>
+                        <span className="rdp2-mono">{data.panel.url}</span>
+                      </td>
+                      <td className="rdp2-muted">{t("RDockPanel (Settings → Panel)")}</td>
+                      <td className="rdp2-hide-sm rdp2-muted">–</td>
+                      <td>
+                        <StatusBadge tone="ok" label={t("Live")} />
+                      </td>
+                      <td>
+                        <RowActions label={t("Actions for {host}").replace("{host}", data.panel.host)}>
+                          <IconButton icon="externalLink" label={t("Open {url}").replace("{url}", data.panel.url)} href={data.panel.url} />
+                        </RowActions>
+                      </td>
+                    </tr>
+                  )}
+                  {paged.page.map((d) => {
+                    const state = STATUS[d.status];
+                    const menu: MenuItem[] = [];
+                    if (data.can.update && mayChange(d)) menu.push({ label: t("Edit"), onSelect: () => setEditing(d) });
+                    if (canOpen) menu.push({ label: t("Open the service"), onSelect: () => props.navigate(`/p/dashboard/${d.project}/${d.service}/domains`) });
+                    if (data.can.delete && mayChange(d)) menu.push("separator", { label: t("Remove…"), destructive: true, onSelect: () => void remove(d) });
+                    return (
+                      <tr key={`${d.id ?? "gone"}-${d.host}${d.path}`}>
+                        <td>
+                          <div className="rdp2-row">
+                            <span className={d.status === "removed" ? "rdp2-mono rdp2-ellipsis rdp2-gone" : "rdp2-mono rdp2-ellipsis"}>{url(d)}</span>
+                            {d.primary && <span className="rdp2-badge">{t("Primary")}</span>}
+                          </div>
+                        </td>
+                        <td>
+                          <span className="rdp2-mono rdp2-ellipsis">{d.maintenance ? t("Maintenance page") : d.target}</span>
+                        </td>
+                        <td className="rdp2-hide-sm">
+                          {canOpen ? (
+                            <NavLink to={`/p/dashboard/${d.project}/${d.service}/domains`} navigate={props.navigate}>
+                              {d.project} / {d.service}
+                            </NavLink>
+                          ) : (
+                            <span>
+                              {d.project} / {d.service}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <StatusBadge tone={state.tone} label={t(state.label)} title={t(state.hint)} />
+                        </td>
+                        <td>
+                          <RowActions label={t("Actions for {host}").replace("{host}", d.host)} menu={menu}>
+                            <IconButton icon="externalLink" label={t("Open {url}").replace("{url}", url(d))} href={url(d)} />
+                          </RowActions>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableScroll>
+            <Pager total={rows.length} at={paged.at} onPage={paged.set} t={t} />
+          </>
         )}
-        {rows.map((d) => (
-          <div key={`${d.id ?? "gone"}-${d.host}${d.path}`} className={d.status === "removed" ? "rdp2-domain rdp2-domain-gone" : "rdp2-domain"}>
-            <span className="rdp2-domain-box rdp2-mono" title={t(STATUS[d.status].label)}>
-              <StatusDot status={STATUS[d.status].tone} title={t(STATUS[d.status].label)} />
-              <span className="rdp2-ellipsis">
-                {d.primary && <span title={t("Primary domain")}>★ </span>}
-                {url(d)}
-              </span>
-            </span>
-            <span className="rdp2-muted" aria-hidden>
-              →
-            </span>
-            <span className="rdp2-domain-box">
-              <span className="rdp2-mono rdp2-ellipsis">{d.maintenance ? t("Maintenance page") : d.target}</span>
-              {canOpen ? (
-                <button type="button" className="rdp2-link rdp2-muted rdp2-domain-service" onClick={() => props.navigate(`/p/dashboard/${d.project}/${d.service}/domains`)}>
-                  {d.project} / {d.service}
-                </button>
-              ) : (
-                <span className="rdp2-muted rdp2-domain-service">
-                  {d.project} / {d.service}
-                </span>
-              )}
-            </span>
-            <span className="rdp2-domain-tools">
-              <a className="rdp2-icon-button" href={url(d)} target="_blank" rel="noreferrer" title={t("Open")} aria-label={t("Open")}>
-                ↗
-              </a>
-              {data.can.update && mayChange(d) && (
-                <button type="button" className="rdp2-icon-button" title={t("Edit")} aria-label={t("Edit")} onClick={() => setEditing(d)}>
-                  ✎
-                </button>
-              )}
-              {data.can.delete && mayChange(d) && (
-                <button
-                  type="button"
-                  className="rdp2-icon-button"
-                  title={t("Remove")}
-                  aria-label={t("Remove")}
-                  onClick={async () => {
-                    if (!window.confirm(t("Remove this domain?"))) return;
-                    setError(null);
-                    try {
-                      await resources.remove("service_domains", d.id as number);
-                      list.refetch();
-                    } catch (err) {
-                      setError(err);
-                    }
-                  }}
-                >
-                  🗑
-                </button>
-              )}
-            </span>
-          </div>
-        ))}
-        {rows.length === 0 && !data.panel && <p className="rdp2-muted">{t("No domain yet: add one to a service.")}</p>}
-        {addable && (
-          <Button variant="outline" className="rdp2-domain-add" onClick={() => setAdding(true)}>
-            {t("Add domain")}
-          </Button>
-        )}
-      </div>
+      </Section>
       {(adding || editing) && (
         <DomainForm
           t={t}
@@ -178,6 +226,7 @@ export function Domains(props: PageProps<unknown>) {
           onSaved={done}
         />
       )}
-    </div>
+      {confirmDialog}
+    </Page>
   );
 }

@@ -4,7 +4,31 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
 import { Alert, Button, Checkbox, Dialog, ErrorState, Input, Loading, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
-import { CopyButton, ErrorNote, Facts, Field, Section, Sparkline, StatusBadge, Tabs, bytes, when } from "../lib/ui";
+import {
+  CopyButton,
+  EmptyState,
+  ErrorNote,
+  IconButton,
+  Facts,
+  Field,
+  LinkButton,
+  Metric,
+  type MenuItem,
+  NavLink,
+  Page,
+  RowActions,
+  Section,
+  Sparkline,
+  Status,
+  TableScroll,
+  Tabs,
+  bytes,
+  useAsk,
+  useNarrow,
+  when,
+} from "../lib/ui";
+import { Icon } from "../lib/icons";
+import { dateTime, percent, relative, size } from "../lib/format";
 import { ResourceError, resources } from "../lib/resources";
 import { BackupsTab } from "./Backups";
 import { MaintenanceTab, RedirectsTab, ScriptsTab, SecurityTab } from "./Access";
@@ -21,6 +45,8 @@ export function ServicePage(props: Props) {
   const t = props.t;
   const detail = useAdminQuery<ServiceDetail>(props, `/apps/services/${props.serviceId}`, { refetchInterval: 3000 });
   const [error, setError] = useState<unknown>(null);
+  const ask = useAsk();
+  const narrow = useNarrow();
   if (detail.isLoading) return <Loading />;
   if (detail.error || !detail.data) return <ErrorState error={detail.error} />;
   const d = detail.data;
@@ -29,11 +55,12 @@ export function ServicePage(props: Props) {
   const base = `/p/dashboard/${props.project}/${s.name}`;
   const refresh = () => detail.refetch();
 
-  const run = async (name: string, question?: string) => {
-    if (question && !window.confirm(t(question))) return;
+  const run = async (name: string, question?: { title: string; body: string; action: string }) => {
+    if (question && !(await ask({ title: t(question.title).replace("{name}", s.name), body: t(question.body), action: t(question.action), destructive: true }))) return;
     setError(null);
     try {
       await resources.action("services", name, [s.id]);
+      if (name === "deploy" || name === "rebuild") props.toast.success(t("Deployment queued"));
       if (name !== "republish") props.navigate(`${base}/overview`);
       refresh();
     } catch (err) {
@@ -47,54 +74,88 @@ export function ServicePage(props: Props) {
   const primary = d.domains[0];
   const running = s.status === "running";
 
+  const openUrl = primary && running ? `${primary.https ? "https" : "http"}://${primary.host}${primary.path}` : null;
+  const more: MenuItem[] = [];
+  if (d.can.deploy && s.status !== "stopped")
+    more.push({
+      label: t("Stop"),
+      disabled: s.busy || s.status === "new",
+      onSelect: () => void run("stop", { title: "Stop {name}?", body: "Its tasks are removed; Start brings it back.", action: "Stop service" }),
+    });
+  if (d.can.deploy)
+    more.push({
+      label: t("Force rebuild"),
+      disabled: s.busy,
+      onSelect: () =>
+        void run("rebuild", {
+          title: "Force rebuild {name}?",
+          body: "It builds from scratch (or pulls the image again) and replaces every task.",
+          action: "Force rebuild",
+        }),
+    });
+
   return (
-    <div className="rdp2-page">
-      <nav className="rdp2-crumbs">
-        <button type="button" className="rdp2-link" onClick={() => props.navigate("/p/dashboard")}>
-          {t("Dashboard")}
-        </button>
-        <span>/</span>
-        <button type="button" className="rdp2-link" onClick={() => props.navigate(`/p/dashboard/${props.project}`)}>
-          {d.project.name}
-        </button>
-        <span>/</span>
-        <strong>{s.name}</strong>
-        <StatusBadge status={s.status} busy={s.busy} label={t(s.busy ? "deploying" : s.status)} />
-      </nav>
-      <div className="rdp2-actions">
-        {d.can.deploy && (
-          <>
-            <Button disabled={s.busy} onClick={() => run("deploy")}>
-              {t("Deploy")}
-            </Button>
-            {s.status === "stopped" ? (
+    <Page
+      title={props.title}
+      eyebrow={
+        <>
+          <NavLink to="/p/dashboard" navigate={props.navigate}>
+            {t("Dashboard")}
+          </NavLink>
+          {" / "}
+          <NavLink to={`/p/dashboard/${props.project}`} navigate={props.navigate}>
+            {d.project.name}
+          </NavLink>
+          {" · "}
+          {t(s.kind)}
+        </>
+      }
+      heading={
+        <span className="rdp2-heading">
+          {s.name}
+          <Status kind="service" status={s.status} busy={s.busy} t={t} />
+        </span>
+      }
+      actions={
+        <>
+          {openUrl && (
+            <span className="rdp2-phone-hide">
+              <LinkButton href={openUrl} external>
+                {t("Open")}
+              </LinkButton>
+            </span>
+          )}
+          {d.can.deploy &&
+            (s.status === "stopped" ? (
               <Button variant="outline" disabled={s.busy} onClick={() => run("start")}>
                 {t("Start")}
               </Button>
             ) : (
-              <Button variant="outline" disabled={s.busy || s.status === "new"} onClick={() => run("stop", "Stop this service? Its tasks are removed.")}>
-                {t("Stop")}
+              <Button variant="outline" className="rdp2-phone-hide" disabled={s.busy || !running} onClick={() => run("restart")}>
+                <Icon name="refresh" />
+                {t("Restart")}
               </Button>
-            )}
-            <Button variant="outline" disabled={s.busy || !running} onClick={() => run("restart")}>
-              {t("Restart")}
+            ))}
+          <RowActions
+            label={t("More actions for {name}").replace("{name}", s.name)}
+            menu={[
+              // On a phone the header keeps Deploy and this menu: the rest moves here.
+              ...(narrow && openUrl ? [{ label: t("Open"), onSelect: () => void window.open(openUrl, "_blank", "noopener") }] : []),
+              ...(narrow && d.can.deploy && s.status !== "stopped"
+                ? [{ label: t("Restart"), disabled: s.busy || !running, onSelect: () => void run("restart") }]
+                : []),
+              ...more,
+            ]}
+            header
+          />
+          {d.can.deploy && (
+            <Button disabled={s.busy} onClick={() => run("deploy")}>
+              {s.busy ? t("Deploying…") : t("Deploy")}
             </Button>
-            <Button
-              variant="outline"
-              disabled={s.busy}
-              title={t("Build again without the build cache (an image: pull it again), then replace every task")}
-              onClick={() => run("rebuild", "Force rebuild? It builds from scratch (or pulls the image again) and replaces every task.")}
-            >
-              {t("Force rebuild")}
-            </Button>
-          </>
-        )}
-        {primary && running && (
-          <a className="rdp2-button-link" href={`${primary.https ? "https" : "http"}://${primary.host}${primary.path}`} target="_blank" rel="noreferrer">
-            {t("Open")} ↗
-          </a>
-        )}
-      </div>
+          )}
+        </>
+      }
+    >
       {d.pending && s.status !== "new" && <Alert variant="warning">{t("The configuration changed since the last deployment: deploy to apply it.")}</Alert>}
       <ErrorNote error={error} />
       <Tabs
@@ -140,12 +201,14 @@ export function ServicePage(props: Props) {
             d={d}
             onSaved={saved}
             onError={setError}
-            onDestroy={() => run("destroy", "Remove this service from Docker? Its volumes are kept.")}
+            onDestroy={() =>
+              run("destroy", { title: "Remove {name} from Docker?", body: "Its volumes are kept; Deploy creates it again.", action: "Remove from Docker" })
+            }
             onDeleted={() => props.navigate(`/p/dashboard/${props.project}`)}
           />
         )}
       </Tabs>
-    </div>
+    </Page>
   );
 }
 
@@ -209,7 +272,8 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
       {d.latest && (
         <Section
           title={`${t("Deployment")} #${d.latest.id} · ${t(d.latest.rebuild ? "force rebuild" : d.latest.trigger)}`}
-          actions={<StatusBadge status={d.latest.status} label={t(d.latest.status)} />}
+          description={relative(d.latest.created_at, props.locale)}
+          actions={<Status kind="deployment" status={d.latest.status} t={t} />}
         >
           {d.latest.error && <Alert variant="destructive">{d.latest.error}</Alert>}
           <DeploymentLog {...props} deployment={d.latest} onFinished={() => undefined} />
@@ -339,7 +403,6 @@ function Monitor(props: Props & { d: ServiceDetail }) {
         <ErrorNote error={stats.error} />
       </Section>
     );
-  if (!data) return null;
   return (
     <Section
       title={t("Monitor")}
@@ -347,12 +410,14 @@ function Monitor(props: Props & { d: ServiceDetail }) {
         container && (
           <>
             {d.can.logs && (
-              <Button variant="outline" onClick={() => setOpen("logs")}>
+              <Button size="sm" variant="outline" onClick={() => setOpen("logs")}>
+                <Icon name="logs" size={14} />
                 {t("Logs")}
               </Button>
             )}
             {d.can.exec && (
-              <Button variant="outline" onClick={() => setOpen("shell")}>
+              <Button size="sm" variant="outline" onClick={() => setOpen("shell")}>
+                <Icon name="terminal" size={14} />
                 {t("Shell")}
               </Button>
             )}
@@ -362,20 +427,14 @@ function Monitor(props: Props & { d: ServiceDetail }) {
     >
       {open === "logs" && <ServiceLogs {...props} serviceId={d.service.id} onClose={() => setOpen(null)} />}
       {open === "shell" && container && <ServiceTerminal {...props} serviceId={d.service.id} container={container} onClose={() => setOpen(null)} />}
-      <div className="rdp2-tiles">
-        <div className="rdp2-tile">
-          <span className="rdp2-muted rdp2-small">{t("CPU")}</span>
-          <strong>{data.cpu_percent.toFixed(1)}%</strong>
-          <Sparkline values={cpu} />
-        </div>
-        <div className="rdp2-tile">
-          <span className="rdp2-muted rdp2-small">{t("Memory")}</span>
-          <strong>{bytes(data.mem_used)}</strong>
-          <Sparkline values={mem} />
-        </div>
+      {/* Drawn before the first figures come (no jump): a dash meanwhile. */}
+      <div className="rdp2-metrics">
+        {/* 100% a core, summed over replicas: the line scales to what it saw. */}
+        <Metric plain label={t("CPU")} value={data ? percent(data.cpu_percent, props.locale) : "–"} values={cpu} />
+        <Metric plain label={t("Memory")} value={data ? size(data.mem_used, props.locale) : "–"} values={mem} />
       </div>
-      {data.missing > 0 && <p className="rdp2-muted rdp2-small">{t("Some tasks gave no figures: the totals leave them out.")}</p>}
-      {data.tasks.length > 1 && (
+      {data && data.missing > 0 && <p className="rdp2-muted rdp2-small">{t("Some tasks gave no figures: the totals leave them out.")}</p>}
+      {data && data.tasks.length > 1 && (
         <p className="rdp2-muted rdp2-small">
           {data.tasks.map((task) => `#${task.slot}: ${task.cpu_percent.toFixed(1)}% · ${bytes(task.mem_used)}`).join("  ·  ")}
         </p>
@@ -434,57 +493,77 @@ function CredentialsTab(props: Props & { d: ServiceDetail }) {
 function DeploymentsTab(props: Props & { d: ServiceDetail; onError: (e: unknown) => void; refresh: () => void }) {
   const { d, t } = props;
   const [open, setOpen] = useState<Deployment | null>(null);
-  if (!d.can.deployments) return <p className="rdp2-muted">{t("You may not see deployments.")}</p>;
+  const ask = useAsk();
+  if (!d.can.deployments) return <EmptyState title={t("You may not see deployments.")} />;
+  const rollBack = async (row: Deployment) => {
+    const ok = await ask({
+      title: t("Roll back to deployment #{id}?").replace("{id}", String(row.id)),
+      body: t("Its configuration and image are deployed again."),
+      action: t("Roll back"),
+    });
+    if (!ok) return;
+    try {
+      await resources.action("deployments", "rollback", [row.id]);
+      props.toast.success(t("Deployment queued"));
+      props.refresh();
+    } catch (err) {
+      props.onError(err);
+    }
+  };
   return (
-    <Section title={t("Deployments")}>
-      <table className="rdp2-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>{t("Action")}</th>
-            <th>{t("Status")}</th>
-            <th>{t("Started")}</th>
-            <th>{t("Image")}</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {d.deployments.map((row) => (
-            <tr key={row.id}>
-              <td>{row.id}</td>
-              <td>{t(row.rebuild ? "force rebuild" : row.trigger)}</td>
-              <td>
-                <StatusBadge status={row.status} label={t(row.status)} />
-              </td>
-              <td className="rdp2-small">{when(row.created_at, props.locale)}</td>
-              <td className="rdp2-small rdp2-ellipsis rdp2-mono">{row.image ?? ""}</td>
-              <td className="rdp2-row rdp2-end">
-                <Button size="sm" variant="ghost" onClick={() => setOpen(row)}>
-                  {t("Log")}
-                </Button>
-                {d.can.deploy && row.status === "succeeded" && row.image && !["stop", "destroy"].includes(row.trigger) && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={d.service.busy}
-                    onClick={async () => {
-                      if (!window.confirm(t("Deploy this configuration and image again?"))) return;
-                      try {
-                        await resources.action("deployments", "rollback", [row.id]);
-                        props.refresh();
-                      } catch (err) {
-                        props.onError(err);
-                      }
-                    }}
-                  >
-                    {t("Roll back to this")}
-                  </Button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <Section title={t("Deployments")} description={t("Newest first; a row's log shows what it did.")} flush>
+      {d.deployments.length === 0 ? (
+        <EmptyState title={t("Not deployed yet")} hint={t("Deploy builds or pulls the image and starts the service.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>{t("Action")}</th>
+                <th>{t("State")}</th>
+                <th className="rdp2-hide-sm">{t("Started")}</th>
+                <th className="rdp2-hide-sm">{t("Image")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.deployments.map((row) => {
+                const canRollBack = d.can.deploy && row.status === "succeeded" && row.image && !["stop", "destroy"].includes(row.trigger);
+                return (
+                  <tr key={row.id}>
+                    <td className="rdp2-num">{row.id}</td>
+                    <td>{t(row.rebuild ? "force rebuild" : row.trigger)}</td>
+                    <td>
+                      <Status kind="deployment" status={row.status} t={t} detail={row.error ?? undefined} />
+                    </td>
+                    <td className="rdp2-hide-sm rdp2-nowrap" title={dateTime(row.created_at, props.locale)}>
+                      {relative(row.created_at, props.locale)}
+                    </td>
+                    <td className="rdp2-hide-sm">
+                      <span className="rdp2-mono rdp2-ellipsis rdp2-cell-clip" title={row.image ?? ""}>
+                        {row.image ?? ""}
+                      </span>
+                    </td>
+                    <td>
+                      <RowActions
+                        label={t("Actions for deployment #{id}").replace("{id}", String(row.id))}
+                        menu={canRollBack ? [{ label: t("Roll back to this"), disabled: d.service.busy, onSelect: () => void rollBack(row) }] : []}
+                      >
+                        <Button size="sm" variant="ghost" onClick={() => setOpen(row)}>
+                          {t("Log")}
+                        </Button>
+                      </RowActions>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
       {open && (
         <Dialog open onClose={() => setOpen(null)} title={`${t("Deployment")} #${open.id}`} className="rdp2-wide">
           {open.error && <Alert variant="destructive">{open.error}</Alert>}
@@ -579,70 +658,99 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
   // Adding (with a host to start with), or changing one.
   const [adding, setAdding] = useState<string | null>(null);
   const [editing, setEditing] = useState<Domain | null>(null);
+  const ask = useAsk();
   const resolverName = (id: number | null) => d.cert_resolvers.find((r) => r.id === id)?.name;
   const certificateName = (id: number | null) => d.certificates.find((c) => c.id === id)?.name;
   const mayChange = (domain: Domain) => d.can.system || plainDomain(domain);
+  const url = (domain: Domain) => `${domain.https ? "https" : "http"}://${domain.host}${domain.path}`;
+  const remove = async (domain: Domain) => {
+    const ok = await ask({
+      title: t("Remove {host}?").replace("{host}", domain.host + (domain.path !== "/" ? domain.path : "")),
+      body: t("It stops being served at the service's next deployment."),
+      action: t("Remove domain"),
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await resources.remove("service_domains", domain.id);
+      props.onSaved();
+    } catch (err) {
+      props.onError(err);
+    }
+  };
+  const certificate = (domain: Domain) =>
+    !domain.https
+      ? t("HTTP only")
+      : domain.certificate_id !== null
+        ? (certificateName(domain.certificate_id) ?? t("uploaded certificate"))
+        : domain.cert_resolver_id !== null
+          ? (resolverName(domain.cert_resolver_id) ?? t("own resolver"))
+          : t("Default");
   return (
     <Section
       title={t("Domains")}
       description={t("Traefik routes these to the service's port. HTTPS redirects HTTP to it.")}
+      flush
       actions={
         d.can.domains.create && (
           <>
             {d.auto_domain && !d.domains.some((x) => x.host === d.auto_domain) && (
-              <Button variant="outline" onClick={() => setAdding(d.auto_domain ?? "")}>
-                + {t("Generated domain")}
+              <Button size="sm" variant="outline" onClick={() => setAdding(d.auto_domain ?? "")}>
+                {t("Add generated domain")}
               </Button>
             )}
-            <Button onClick={() => setAdding("")}>+ {t("Add domain")}</Button>
+            <Button size="sm" onClick={() => setAdding("")}>
+              {t("Add domain")}
+            </Button>
           </>
         )
       }
     >
-      {d.domains.length === 0 && <p className="rdp2-muted">{t("No domain: the service is only reachable inside its project.")}</p>}
-      <ul className="rdp2-list">
-        {d.domains.map((domain, i) => (
-          <li key={domain.id} className="rdp2-list-row">
-            <span>
-              {i === 0 && <span title={t("Primary domain")}>★ </span>}
-              <code>
-                {domain.https ? "https" : "http"}://{domain.host}
-                {domain.path}
-              </code>{" "}
-              <span className="rdp2-muted">
-                → {domain.compose_service ? `${domain.compose_service}:` : ":"}
-                {domain.port}
-                {domain.https && domain.cert_resolver_id !== null && ` · 🔒 ${resolverName(domain.cert_resolver_id) ?? t("own resolver")}`}
-                {domain.https && domain.certificate_id !== null && ` · 🔒 ${certificateName(domain.certificate_id) ?? t("uploaded certificate")}`}
-              </span>
-            </span>
-            <span className="rdp2-row">
-              {d.can.domains.update && mayChange(domain) && (
-                <Button size="sm" variant="ghost" onClick={() => setEditing(domain)}>
-                  {t("Edit")}
-                </Button>
-              )}
-              {d.can.domains.delete && mayChange(domain) && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={async () => {
-                    if (!window.confirm(t("Remove this domain?"))) return;
-                    try {
-                      await resources.remove("service_domains", domain.id);
-                      props.onSaved();
-                    } catch (err) {
-                      props.onError(err);
-                    }
-                  }}
-                >
-                  {t("Remove")}
-                </Button>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {d.domains.length === 0 ? (
+        <EmptyState title={t("No domain yet")} hint={t("Without one, the service is only reachable inside its project.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Domain")}</th>
+                <th>{t("Goes to")}</th>
+                <th className="rdp2-hide-sm">{t("Certificate")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.domains.map((domain, i) => {
+                const menu: MenuItem[] = [];
+                if (d.can.domains.update && mayChange(domain)) menu.push({ label: t("Edit"), onSelect: () => setEditing(domain) });
+                if (d.can.domains.delete && mayChange(domain)) menu.push("separator", { label: t("Remove…"), destructive: true, onSelect: () => void remove(domain) });
+                return (
+                  <tr key={domain.id}>
+                    <td>
+                      <div className="rdp2-row">
+                        <span className="rdp2-mono rdp2-ellipsis">{url(domain)}</span>
+                        {i === 0 && <span className="rdp2-badge">{t("Primary")}</span>}
+                      </div>
+                    </td>
+                    <td className="rdp2-mono rdp2-nowrap">
+                      {domain.compose_service ? `${domain.compose_service}:` : ":"}
+                      {domain.port}
+                    </td>
+                    <td className="rdp2-hide-sm">{certificate(domain)}</td>
+                    <td>
+                      <RowActions label={t("Actions for {host}").replace("{host}", domain.host)} menu={menu}>
+                        <IconButton icon="externalLink" label={t("Open {url}").replace("{url}", url(domain))} href={url(domain)} />
+                      </RowActions>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
       {(adding !== null || editing) && (
         <DomainForm
           t={t}
@@ -808,6 +916,7 @@ function useServiceSave(id: number, onSaved: () => void) {
 function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: () => void }) {
   const { d, t } = props;
   const s = d.service;
+  const ask = useAsk();
   const [source, setSource] = useState(s.source);
   const [image, setImage] = useState(s.image);
   const [user, setUser] = useState(s.registry_username ?? "");
@@ -996,7 +1105,11 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
             <Button
               variant="outline"
               onClick={async () => {
-                if (s.deploy_key_public && !window.confirm(t("Replace the deploy key? The old one stops working."))) return;
+                if (
+                  s.deploy_key_public &&
+                  !(await ask({ title: t("Replace the deploy key?"), body: t("The old one stops working: add the new one to the repository."), action: t("Replace key"), destructive: true }))
+                )
+                  return;
                 try {
                   await props.api.post(`/apps/services/${s.id}/deploy-key`);
                   props.onSaved();
@@ -1025,7 +1138,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
             <Button
               variant="outline"
               onClick={async () => {
-                if (s.trigger_set && !window.confirm(t("Make a new URL? The old one stops working."))) return;
+                if (s.trigger_set && !(await ask({ title: t("Make a new URL?"), body: t("The old one stops working."), action: t("Make a new URL"), destructive: true }))) return;
                 try {
                   const r = await props.api.post<{ url: string }>(`/apps/services/${s.id}/trigger`);
                   setTrigger(r.url);
@@ -1056,7 +1169,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
             <Button
               variant="outline"
               onClick={async () => {
-                if (s.webhook_set && !window.confirm(t("Make a new secret? The old one stops working."))) return;
+                if (s.webhook_set && !(await ask({ title: t("Make a new secret?"), body: t("The old one stops working."), action: t("Make a new secret"), destructive: true }))) return;
                 try {
                   setWebhook(await props.api.post<{ url: string; secret: string }>(`/apps/services/${s.id}/github-webhook`));
                   props.onSaved();
@@ -1091,6 +1204,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
 
 function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onError: (e: unknown) => void }) {
   const { d, t } = props;
+  const ask = useAsk();
   const [adding, setAdding] = useState(false);
   const [kind, setKind] = useState("volume");
   const [name, setName] = useState("");
@@ -1103,37 +1217,75 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
     <Section
       title={t("Mounts")}
       description={t("Volumes keep data across deploys. A host directory needs the system permission.")}
-      actions={d.can.mounts.create && <Button onClick={() => setAdding(true)}>+ {t("Add mount")}</Button>}
+      flush
+      actions={
+        d.can.mounts.create && (
+          <Button size="sm" onClick={() => setAdding(true)}>
+            {t("Add mount")}
+          </Button>
+        )
+      }
     >
-      {d.mounts.length === 0 && <p className="rdp2-muted">{t("No mount: the container's files are lost when it is replaced.")}</p>}
-      <ul className="rdp2-list">
-        {d.mounts.map((m) => (
-          <li key={m.id} className="rdp2-list-row">
-            <span>
-              <span className="rdp2-muted">{t(m.kind)}</span>{" "}
-              {m.kind === "file" ? <code>{m.target}</code> : <><code>{m.kind === "bind" ? m.source : m.name}</code> → <code>{m.target}</code></>}
-              {m.read_only && <span className="rdp2-muted"> ({t("read-only")})</span>}
-            </span>
-            {d.can.mounts.delete && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={async () => {
-                  if (!window.confirm(t("Remove this mount? A volume's data stays in Docker."))) return;
-                  try {
-                    await resources.remove("service_mounts", m.id);
-                    props.onSaved();
-                  } catch (err) {
-                    props.onError(err);
-                  }
-                }}
-              >
-                {t("Remove")}
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
+      {d.mounts.length === 0 ? (
+        <EmptyState title={t("No mount yet")} hint={t("Without one, the container's files are lost when it is replaced.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Type")}</th>
+                <th>{t("Source")}</th>
+                <th>{t("Path in the container")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.mounts.map((m) => (
+                <tr key={m.id}>
+                  <td>
+                    {t(m.kind)}
+                    {m.read_only && <div className="rdp2-muted rdp2-small">{t("read-only")}</div>}
+                  </td>
+                  <td className="rdp2-mono">{m.kind === "file" ? <span className="rdp2-muted">–</span> : m.kind === "bind" ? m.source : m.name}</td>
+                  <td className="rdp2-mono">{m.target}</td>
+                  <td>
+                    <RowActions
+                      label={t("Actions for {host}").replace("{host}", m.target)}
+                      menu={
+                        d.can.mounts.delete
+                          ? [
+                              {
+                                label: t("Remove…"),
+                                destructive: true,
+                                onSelect: async () => {
+                                  const ok = await ask({
+                                    title: t("Remove the mount {path}?").replace("{path}", m.target),
+                                    body: t("A volume's data stays in Docker; the next deployment no longer mounts it."),
+                                    action: t("Remove mount"),
+                                    destructive: true,
+                                  });
+                                  if (!ok) return;
+                                  try {
+                                    await resources.remove("service_mounts", m.id);
+                                    props.onSaved();
+                                  } catch (err) {
+                                    props.onError(err);
+                                  }
+                                },
+                              },
+                            ]
+                          : []
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
       {adding && (
         <Dialog open onClose={() => setAdding(false)} title={t("Add mount")}>
           <form
@@ -1213,6 +1365,7 @@ function AdvancedTab(props: {
 }) {
   const { d, t } = props;
   const s = d.service;
+  const ask = useAsk();
   const [replicas, setReplicas] = useState(String(s.replicas));
   const [command, setCommand] = useState(s.command ?? "");
   const [zero, setZero] = useState(s.zero_downtime);
@@ -1289,7 +1442,7 @@ function AdvancedTab(props: {
               <Input type="number" value={retries} onChange={(e) => setRetries(e.target.value)} disabled={disabled} placeholder="3" />
             </Field>
           </div>
-          <h4 className="rdp2-subtitle">{t("Resources")}</h4>
+          <h3 className="rdp2-subtitle">{t("Resources")}</h3>
           <div className="rdp2-grid2">
             <Field label={t("CPU limit (1000 = one core)")} error={fields.cpu_limit_millis}>
               <Input type="number" value={cpu} onChange={(e) => setCpu(e.target.value)} disabled={disabled} placeholder={t("no limit")} />
@@ -1306,7 +1459,7 @@ function AdvancedTab(props: {
           </div>
           {s.kind !== "compose" && (
             <>
-              <h4 className="rdp2-subtitle">{t("Linux")}</h4>
+              <h3 className="rdp2-subtitle">{t("Linux")}</h3>
               <p className="rdp2-muted rdp2-small">{t("Tini runs as the containers' init. Adding capabilities, groups or sysctls needs system.manage.")}</p>
               <div className="rdp2-grid2">
                 <Field label={t("Add capabilities")} help="NET_ADMIN, SYS_TIME" error={fields.cap_add}>
@@ -1389,8 +1542,8 @@ function AdvancedTab(props: {
               <option value="tcp">TCP</option>
               <option value="udp">UDP</option>
             </NativeSelect>
-            <Button type="submit" variant="outline" disabled={!published || !targetPort}>
-              + {t("Add port")}
+            <Button type="submit" size="sm" disabled={!published || !targetPort}>
+              {t("Add port")}
             </Button>
           </form>
         )}
@@ -1403,7 +1556,14 @@ function AdvancedTab(props: {
       </Section>}
 
       {(d.can.destroy || d.can.delete) && (
-        <Section title={t("Danger zone")}>
+        <Section
+          title={t("Danger zone")}
+          description={
+            s.status === "new"
+              ? t("Not on Docker: deleting removes its settings.")
+              : t("Remove it from Docker first (volumes are kept), then it can be deleted.")
+          }
+        >
           <div className="rdp2-row rdp2-wrap">
             {d.can.destroy && s.status !== "new" && (
               <Button variant="destructive" disabled={s.busy} onClick={props.onDestroy}>
@@ -1414,7 +1574,14 @@ function AdvancedTab(props: {
               <Button
                 variant="destructive"
                 onClick={async () => {
-                  if (!window.confirm(t("Delete this service and its settings?"))) return;
+                  const ok = await ask({
+                    title: t("Delete the service {name}?").replace("{name}", s.name),
+                    body: t("Its settings, domains and history are deleted."),
+                    action: t("Delete service"),
+                    destructive: true,
+                    typed: s.name,
+                  });
+                  if (!ok) return;
                   try {
                     await resources.remove("services", s.id);
                     props.onDeleted();
@@ -1427,11 +1594,6 @@ function AdvancedTab(props: {
               </Button>
             )}
           </div>
-          <p className="rdp2-muted rdp2-small">
-            {s.status === "new"
-              ? t("Not on Docker: deleting removes its settings.")
-              : t("Remove it from Docker first (volumes are kept), then it can be deleted.")}
-          </p>
         </Section>
       )}
     </div>

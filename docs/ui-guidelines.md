@@ -73,7 +73,9 @@ Nothing sits between the header and the tabs, or between the tabs and the first 
 ### Sections
 - A section is a `Section`: a card with a header (title 16px/600, optional description, actions
   on the right) and a body.
-- A section holds one topic. A long form is several sections, not one.
+- A section holds one topic. A long form is several sections, not one; a form that must save in
+  one go (a service's Advanced settings) groups its fields under `h3` sub-headings (14px/600,
+  after a divider) inside its one section.
 - A page with a single table may use the table's card as its only section.
 
 ## 3. Buttons

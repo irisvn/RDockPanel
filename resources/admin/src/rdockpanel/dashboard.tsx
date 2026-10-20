@@ -6,7 +6,7 @@
 import { type PageProps, registerPage, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, ErrorState, Loading } from "@rustcms/admin-sdk/ui";
 import { useEffect, useState } from "react";
-import { Dashboard, NewService } from "./apps/Dashboard";
+import { Dashboard, NewService, ServiceCards, templateWarnings } from "./apps/Dashboard";
 import { ServicePage } from "./apps/ServicePage";
 import { Templates } from "./apps/Templates";
 import { Settings } from "./settings/Settings";
@@ -15,7 +15,7 @@ import { Domains } from "./domains/Domains";
 import { Palette } from "./lib/Palette";
 import { Members } from "./apps/Members";
 import type { Overview } from "./apps/types";
-import { StatusDot } from "./lib/ui";
+import { ConfirmProvider, EmptyState, NavLink, Page, Section, useAsk } from "./lib/ui";
 import { bindResources } from "./lib/resources";
 import "./lib/i18n";
 import "./dashboard.css";
@@ -26,54 +26,43 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
   const [adding, setAdding] = useState(false);
   const [templating, setTemplating] = useState(false);
   const [members, setMembers] = useState(false);
+  const ask = useAsk();
   if (overview.isLoading) return <Loading />;
   if (overview.error) return <ErrorState error={overview.error} />;
   const project = overview.data?.projects.find((p) => p.name === props.project);
-  if (!project) return <p className="rdp2-muted">{t("This project does not exist.")}</p>;
+  if (!project) return <EmptyState title={t("This project does not exist.")} />;
   return (
-    <div className="rdp2-page">
-      <nav className="rdp2-crumbs">
-        <button type="button" className="rdp2-link" onClick={() => props.navigate("/p/dashboard")}>
+    <Page
+      title={props.title}
+      eyebrow={
+        <NavLink to="/p/dashboard" navigate={props.navigate}>
           {t("Dashboard")}
-        </button>
-        <span>/</span>
-        <strong>{project.name}</strong>
-      </nav>
-      <div className="rdp2-head">
-        <h2 className="rdp2-title">{project.name}</h2>
-        {(project.can.create_service || project.can.members) && (
-          <div className="rdp2-row">
-            {project.can.members && (
-              <Button variant="outline" onClick={() => setMembers(true)}>
-                {t("Members")}
+        </NavLink>
+      }
+      heading={project.name}
+      description={project.description || undefined}
+      actions={
+        <>
+          {project.can.members && (
+            <Button variant="outline" onClick={() => setMembers(true)}>
+              {t("Members")}
+            </Button>
+          )}
+          {project.can.create_service && (
+            <>
+              <Button variant="outline" onClick={() => setTemplating(true)}>
+                {t("Templates")}
               </Button>
-            )}
-            {project.can.create_service && (
-              <>
-                <Button variant="outline" onClick={() => setTemplating(true)}>
-                  {t("Templates")}
-                </Button>
-                <Button onClick={() => setAdding(true)}>+ {t("Service")}</Button>
-              </>
-            )}
-          </div>
-        )}
+              <Button onClick={() => setAdding(true)}>{t("Add service")}</Button>
+            </>
+          )}
+        </>
+      }
+    >
+      <Section title={t("Services")} description={project.role ? t(project.role) : undefined}>
+        <ServiceCards t={t} navigate={props.navigate} project={project} />
+      </Section>
       {members && <Members {...props} project={project} onClose={() => setMembers(false)} />}
-      </div>
-      {project.description && <p className="rdp2-muted">{project.description}</p>}
-      <div className="rdp2-cards">
-        {project.services.map((s) => (
-          <button key={s.id} type="button" className="rdp2-card" onClick={() => props.navigate(`/p/dashboard/${project.name}/${s.name}`)}>
-            <span className="rdp2-row">
-              <StatusDot status={s.status} busy={s.busy} />
-              <strong>{s.name}</strong>
-            </span>
-            <span className="rdp2-muted rdp2-small">{t(s.kind)}</span>
-            <span className="rdp2-muted rdp2-small rdp2-ellipsis">{s.domain ?? s.image}</span>
-          </button>
-        ))}
-      </div>
-      {project.services.length === 0 && <p className="rdp2-muted">{t("No service: add one with + Service.")}</p>}
       {templating && (
         <Templates
           {...props}
@@ -81,7 +70,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
           onClose={() => setTemplating(false)}
           onDone={(made) => {
             setTemplating(false);
-            if (made.warnings.length) window.alert(made.warnings.join("\n"));
+            templateWarnings(props, made.warnings, ask);
             overview.refetch();
           }}
         />
@@ -99,7 +88,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
           }}
         />
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -112,7 +101,7 @@ function ServiceRoute(props: PageProps<unknown> & { project: string; service: st
     .find((p) => p.name === props.project)
     ?.services.find((s) => s.name === props.service);
   if (!service && overview.isFetching) return <Loading />;
-  if (!service) return <p className="rdp2-muted">{props.t("This service does not exist.")}</p>;
+  if (!service) return <EmptyState title={props.t("This service does not exist.")} />;
   // Keyed: another service gets fresh forms.
   return <ServicePage key={service.id} {...props} serviceId={service.id} />;
 }
@@ -135,10 +124,10 @@ function Apps(props: PageProps<{ user?: string | number }>) {
       <Dashboard {...props} />
     );
   return (
-    <>
+    <ConfirmProvider t={props.t} path={props.path}>
       {page}
       <Palette {...props} />
-    </>
+    </ConfirmProvider>
   );
 }
 
@@ -147,10 +136,10 @@ registerPage("rdockpanel/dashboard", Apps as (p: PageProps<unknown>) => ReturnTy
 function SettingsRoute(props: PageProps<{ user?: string | number }>) {
   bindResources(props.resources);
   return (
-    <>
+    <ConfirmProvider t={props.t} path={props.path}>
       <Settings {...props} />
       <Palette {...props} />
-    </>
+    </ConfirmProvider>
   );
 }
 
@@ -159,10 +148,10 @@ registerPage("rdockpanel/settings", SettingsRoute as (p: PageProps<unknown>) => 
 function ActionsRoute(props: PageProps<{ user?: string | number }>) {
   bindResources(props.resources);
   return (
-    <>
+    <ConfirmProvider t={props.t} path={props.path}>
       <Actions {...props} />
       <Palette {...props} />
-    </>
+    </ConfirmProvider>
   );
 }
 
@@ -171,10 +160,10 @@ registerPage("rdockpanel/actions", ActionsRoute as (p: PageProps<unknown>) => Re
 function DomainsRoute(props: PageProps<{ user?: string | number }>) {
   bindResources(props.resources);
   return (
-    <>
+    <ConfirmProvider t={props.t} path={props.path}>
       <Domains {...props} />
       <Palette {...props} />
-    </>
+    </ConfirmProvider>
   );
 }
 

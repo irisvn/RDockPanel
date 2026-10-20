@@ -5,7 +5,8 @@
 import { useState } from "react";
 import { fieldErrors, type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
 import { Button, ErrorState, Loading, Textarea } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Facts, Field, Section, StatusBadge, when } from "../lib/ui";
+import { ErrorNote, Facts, Field, Section, StatusBadge, useAsk, when } from "../lib/ui";
+import { LogViewer } from "../lib/viewers";
 
 type Status = {
   traefik: {
@@ -30,31 +31,11 @@ custom-security:
 `;
 
 /** A service's live log (`url`: an SSE route sending `lines`). */
+/** Logs at `url` (its line count at the end: `/apps/traefik/logs/200`),
+ * followed live by the shared viewer, with the line choice. */
 export function Logs(props: PageProps<unknown> & { url?: string }) {
-  const t = props.t;
-  const [lines, setLines] = useState<Array<{ text: string; err: boolean }>>([]);
-  useEvents(props, props.url ?? "/apps/traefik/logs/200", {
-    onEvent(name, data) {
-      if (name !== "lines") return;
-      const batch = (data as { lines: Array<{ stream: string; text: string }> }).lines;
-      // Coloured output (ANSI escapes): shown plain.
-      const plain = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, "");
-      setLines((old) => [...old, ...batch.map((l) => ({ text: plain(l.text), err: l.stream === "stderr" }))].slice(-1000));
-    },
-    onState(state) {
-      // The server sends the last lines again after a reconnect.
-      if (state.state === "open") setLines([]);
-    },
-  });
-  return (
-    <pre className="rdp2-log rdp2-mono rdp2-small">
-      {lines.length === 0 ? <span className="rdp2-muted">{t("No output.")}</span> : lines.map((l, i) => (
-        <span key={i} className={l.err ? "rdp2-error" : undefined}>
-          {l.text.endsWith("\n") ? l.text : `${l.text}\n`}
-        </span>
-      ))}
-    </pre>
-  );
+  const base = (props.url ?? "/apps/traefik/logs/200").replace(/\/\d+$/, "");
+  return <LogViewer {...props} url={(n) => `${base}/${n}`} />;
 }
 
 export function Traefik(props: PageProps<unknown>) {
@@ -65,6 +46,7 @@ export function Traefik(props: PageProps<unknown>) {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const ask = useAsk();
   if (status.isLoading) return <Loading />;
   if (status.error || !status.data) return <ErrorState error={status.error} />;
   const s = status.data.traefik;
@@ -72,7 +54,6 @@ export function Traefik(props: PageProps<unknown>) {
   const running = (s.tasks ?? []).filter((task) => task.state === "running").length;
   return (
     <Section
-      level={2}
       title="Traefik"
       description={t("The proxy in front of every domain: its state, a restart, its logs, and middlewares of your own.")}
       actions={
@@ -85,7 +66,8 @@ export function Traefik(props: PageProps<unknown>) {
               variant="outline"
               disabled={busy}
               onClick={async () => {
-                if (!window.confirm(t("Restart Traefik? Domains stop answering for a few seconds."))) return;
+                const ok = await ask({ title: t("Restart Traefik?"), body: t("Domains stop answering for a few seconds."), action: t("Restart Traefik"), destructive: true });
+                if (!ok) return;
                 setBusy(true);
                 setError(null);
                 try {

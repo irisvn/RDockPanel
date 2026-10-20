@@ -7,7 +7,8 @@
 import { useState } from "react";
 import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, Textarea } from "@rustcms/admin-sdk/ui";
-import { ErrorNote, Field, Section, when } from "../lib/ui";
+import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk, when } from "../lib/ui";
+import { dateTime } from "../lib/format";
 
 type Certificate = {
   id: number;
@@ -88,65 +89,76 @@ export function UploadedCertificates(props: PageProps<unknown>) {
   const list = useAdminQuery<{ certificates: Certificate[] }>(props, "/apps/certificates");
   const [editing, setEditing] = useState<Certificate | "new" | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const ask = useAsk();
   if (list.isLoading) return <Loading />;
   if (list.error || !list.data) return <ErrorState error={list.error} />;
   return (
     <Section
-      level={2}
       title={t("Uploaded certificates")}
       description={t("Certificates of your own (a CA's, or a wildcard), served for the names they cover; a domain chooses one in its dialog.")}
       actions={<Button onClick={() => setEditing("new")}>{t("Upload certificate")}</Button>}
     >
       <ErrorNote error={error} />
-      {list.data.certificates.length === 0 && <p className="rdp2-muted">{t("No certificate uploaded.")}</p>}
-      {list.data.certificates.length > 0 && (
-        <table className="rdp2-table">
-          <thead>
-            <tr>
-              <th>{t("Name")}</th>
-              <th>{t("Covers")}</th>
-              <th>{t("Expires")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {list.data.certificates.map((c) => (
-              <tr key={c.id}>
-                <td>{c.name}</td>
-                <td className="rdp2-mono rdp2-small rdp2-ellipsis" title={c.names.join(", ")}>
-                  {c.names.join(", ")}
-                </td>
-                <td className={c.days_left < 14 ? "rdp2-error rdp2-small" : "rdp2-small"}>
-                  {when(c.not_after, props.locale)}
-                  {c.days_left < 14 && ` · ${c.days_left <= 0 ? t("expired") : `${c.days_left} ${t("days left")}`}`}
-                </td>
-                <td className="rdp2-row rdp2-end">
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(c)}>
-                    {t("Replace")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={c.in_use}
-                    title={c.in_use ? t("A domain uses it") : undefined}
-                    onClick={async () => {
-                      if (!window.confirm(t("Delete this certificate?"))) return;
-                      setError(null);
-                      try {
-                        await props.api.delete(`/apps/certificates/${c.id}`);
-                        list.refetch();
-                      } catch (err) {
-                        setError(err);
-                      }
-                    }}
-                  >
-                    {t("Delete")}
-                  </Button>
-                </td>
+      {list.data.certificates.length === 0 ? (
+        <EmptyState title={t("No certificate uploaded.")} hint={t("The notification channels hear 14, 7 and 1 days before one expires.")} />
+      ) : (
+        <TableScroll>
+          <table className="rdp2-table">
+            <thead>
+              <tr>
+                <th>{t("Name")}</th>
+                <th>{t("Covers")}</th>
+                <th>{t("Expires")}</th>
+                <th className="rdp2-right">
+                  <span className="rdp2-sr">{t("Actions")}</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {list.data.certificates.map((c) => (
+                <tr key={c.id}>
+                  <td className="rdp2-strong-cell">{c.name}</td>
+                  <td>
+                    <span className="rdp2-mono rdp2-ellipsis rdp2-cell-clip" title={c.names.join(", ")}>
+                      {c.names.join(", ")}
+                    </span>
+                  </td>
+                  <td className={c.days_left < 14 ? "rdp2-error rdp2-nowrap" : "rdp2-nowrap"} title={dateTime(c.not_after, props.locale)}>
+                    {when(c.not_after, props.locale)}
+                    {c.days_left < 14 && ` · ${c.days_left <= 0 ? t("expired") : `${c.days_left} ${t("days left")}`}`}
+                  </td>
+                  <td>
+                    <RowActions
+                      label={t("Actions for {host}").replace("{host}", c.name)}
+                      menu={[
+                        {
+                          label: c.in_use ? t("Delete (a domain uses it)") : t("Delete…"),
+                          destructive: true,
+                          disabled: c.in_use,
+                          onSelect: async () => {
+                            const ok = await ask({ title: t("Delete the certificate {name}?").replace("{name}", c.name), action: t("Delete certificate"), destructive: true });
+                            if (!ok) return;
+                            setError(null);
+                            try {
+                              await props.api.delete(`/apps/certificates/${c.id}`);
+                              list.refetch();
+                            } catch (err) {
+                              setError(err);
+                            }
+                          },
+                        },
+                      ]}
+                    >
+                      <Button size="sm" variant="ghost" onClick={() => setEditing(c)}>
+                        {t("Replace")}
+                      </Button>
+                    </RowActions>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
       )}
       {editing && (
         <UploadForm
@@ -161,7 +173,6 @@ export function UploadedCertificates(props: PageProps<unknown>) {
           }}
         />
       )}
-      <Alert className="rdp2-small">{t("The notification channels hear 14, 7 and 1 days before one expires.")}</Alert>
     </Section>
   );
 }
