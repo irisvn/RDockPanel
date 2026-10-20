@@ -77,12 +77,12 @@ impl ServiceProvider for AppServiceProvider {
                 "database-backups",
                 std::time::Duration::from_secs(60),
             )
-            .run(|state| async move {
-                let n = crate::services::backup_service::tick(&state).await?;
+            .task(|ctx| async move {
+                let n = crate::services::backup_service::tick(&ctx.state).await?;
                 if n > 0 {
                     tracing::info!(n, "scheduled backups queued");
                 }
-                Ok(())
+                Ok((n > 0).then(|| format!("{n} backups queued")))
             }),
         );
         // Deployments whose run stopped renewing its lease (`serve` only;
@@ -92,7 +92,8 @@ impl ServiceProvider for AppServiceProvider {
                 "reap-deployments",
                 std::time::Duration::from_secs(60),
             )
-            .run(|state| async move {
+            .task(|ctx| async move {
+                let state = ctx.state;
                 let n =
                     crate::services::deployment_service::recover_interrupted(state.db()).await?;
                 if n > 0 {
@@ -132,7 +133,7 @@ impl ServiceProvider for AppServiceProvider {
                         Err(err) => tracing::warn!(%err, "an abandoned script not killed yet"),
                     }
                 }
-                Ok(())
+                Ok((n > 0).then(|| format!("{n} deployments interrupted")))
             }),
         );
         // The networks of deleted projects: Traefik detached, then removed.
@@ -141,14 +142,16 @@ impl ServiceProvider for AppServiceProvider {
                 "orphan-networks",
                 std::time::Duration::from_secs(300),
             )
-            .run(|state| async move {
+            .task(|ctx| async move {
                 use crate::services::docker_service::Docker;
                 use crate::services::traefik_service::{Traefik, remove_orphan_networks};
-                if let Some(docker) = state.service::<Docker>() {
-                    let traefik = state.service::<Traefik>();
-                    remove_orphan_networks(state.db(), &docker, traefik.as_deref()).await?;
-                }
-                Ok(())
+                let state = ctx.state;
+                let Some(docker) = state.service::<Docker>() else {
+                    return Ok(None);
+                };
+                let traefik = state.service::<Traefik>();
+                let n = remove_orphan_networks(state.db(), &docker, traefik.as_deref()).await?;
+                Ok((n > 0).then(|| format!("{n} networks removed")))
             }),
         );
         // Traefik's certificate resolvers, given again when an installer run
@@ -158,14 +161,15 @@ impl ServiceProvider for AppServiceProvider {
                 "traefik-resolvers",
                 std::time::Duration::from_secs(120),
             )
-            .run(|state| async move {
+            .task(|ctx| async move {
                 use crate::services::cert_service::{plan, plan_key, reconcile, resolvers};
+                let state = ctx.state;
                 use crate::services::docker_service::Docker;
                 use crate::services::traefik_service::Traefik;
                 let (Some(docker), Some(traefik)) =
                     (state.service::<Docker>(), state.service::<Traefik>())
                 else {
-                    return Ok(());
+                    return Ok(None);
                 };
                 let resolvers = resolvers(state.db(), state.keyring())
                     .await
@@ -173,8 +177,11 @@ impl ServiceProvider for AppServiceProvider {
                 let plan = plan(&resolvers, &plan_key(state.keyring()));
                 if reconcile(&docker, &traefik, &plan).await? {
                     tracing::info!("Traefik's certificate resolvers given again");
+                    return Ok(Some(
+                        "certificate resolvers given to Traefik again".to_owned(),
+                    ));
                 }
-                Ok(())
+                Ok(None)
             }),
         );
         // Uploaded certificates expiring: said to the channels (each warning once).
@@ -183,16 +190,17 @@ impl ServiceProvider for AppServiceProvider {
                 "certificate-expiry",
                 std::time::Duration::from_secs(6 * 60 * 60),
             )
-            .run(|state| async move {
-                crate::services::certificate_service::check_expiry(&state).await
+            .task(|ctx| async move {
+                crate::services::certificate_service::check_expiry(&ctx.state).await?;
+                Ok(None)
             }),
         );
         // A full disk, said to the channels that asked (each at most every 6 h).
         app.schedule(
             rustcms::schedule::Schedule::every("disk-check", std::time::Duration::from_secs(300))
-                .run(|state| async move {
-                    crate::services::notify_service::check_disk(&state);
-                    Ok(())
+                .task(|ctx| async move {
+                    crate::services::notify_service::check_disk(&ctx.state);
+                    Ok(None)
                 }),
         );
         // Running services and Traefik failing or back; a newer panel; a
@@ -202,18 +210,27 @@ impl ServiceProvider for AppServiceProvider {
                 "health-alerts",
                 std::time::Duration::from_secs(120),
             )
-            .run(|state| async move { crate::services::alert_service::check_health(&state).await }),
+            .task(|ctx| async move {
+                crate::services::alert_service::check_health(&ctx.state).await?;
+                Ok(None)
+            }),
         );
         app.schedule(
             rustcms::schedule::Schedule::every(
                 "update-alerts",
                 std::time::Duration::from_secs(6 * 60 * 60),
             )
-            .run(|state| async move { crate::services::alert_service::check_update(&state).await }),
+            .task(|ctx| async move {
+                crate::services::alert_service::check_update(&ctx.state).await?;
+                Ok(None)
+            }),
         );
         app.schedule(
             rustcms::schedule::Schedule::every("login-alerts", std::time::Duration::from_secs(60))
-                .run(|state| async move { crate::services::alert_service::check_logins(&state).await }),
+                .task(|ctx| async move {
+                    crate::services::alert_service::check_logins(&ctx.state).await?;
+                    Ok(None)
+                }),
         );
         // rustcms:jobs
         // rustcms:commands

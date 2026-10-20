@@ -141,8 +141,6 @@ export function RedirectsTab(props: Props) {
                                   if (!ok) return;
                                   try {
                                     await resources.remove("service_redirects", r.id);
-                                    // A delete has no hook to write the routes (RustCMS): asked here.
-                                    await props.api.post(`/apps/services/${d.service.id}/routes`, {});
                                     props.onSaved();
                                   } catch (err) {
                                     setError(err);

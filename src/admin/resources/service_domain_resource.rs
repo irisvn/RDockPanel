@@ -155,6 +155,23 @@ impl Resource for ServiceDomainResource {
         .await?;
         Ok(())
     }
+
+    /// Removed: the service's routes written again without it (once this
+    /// commits).
+    async fn after_delete(
+        ctx: &Ctx,
+        txn: &DatabaseTransaction,
+        record: &service_domain::Model,
+    ) -> AppResult<()> {
+        ctx.dispatch(
+            txn,
+            &crate::jobs::publish_routes::PublishRoutes {
+                service_id: record.service_id,
+            },
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 /// The certificate a domain's HTTPS gets: choosing a resolver, and changing

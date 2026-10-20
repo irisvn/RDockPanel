@@ -180,7 +180,7 @@ export function ServicePage(props: Props) {
         {tab === "deployments" && <DeploymentsTab {...props} d={d} onError={setError} refresh={refresh} />}
         {tab === "environment" && <EnvironmentTab {...props} d={d} onSaved={saved} />}
         {tab === "domains" && !d.can.domains.view && <p className="rdp2-muted">{t("You may not see domains.")}</p>}
-        {tab === "domains" && d.can.domains.view && <DomainsTab t={t} d={d} api={props.api} onSaved={s.kind === "compose" ? saved : applied} onError={setError} />}
+        {tab === "domains" && d.can.domains.view && <DomainsTab t={t} d={d} onSaved={s.kind === "compose" ? saved : applied} onError={setError} />}
         {tab === "redirects" && <RedirectsTab {...props} d={d} onSaved={applied} />}
         {tab === "security" && <SecurityTab {...props} d={d} onSaved={applied} />}
         {tab === "maintenance" && <MaintenanceTab {...props} d={d} onSaved={applied} />}
@@ -646,7 +646,7 @@ function EnvironmentTab(props: Props & { d: ServiceDetail; onSaved: () => void }
   );
 }
 
-function DomainsTab(props: { t: T; d: ServiceDetail; api: PageProps<unknown>["api"]; onSaved: () => void; onError: (e: unknown) => void }) {
+function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onError: (e: unknown) => void }) {
   const { d, t } = props;
   // Adding (with a host to start with), or changing one.
   const [adding, setAdding] = useState<string | null>(null);
@@ -666,8 +666,6 @@ function DomainsTab(props: { t: T; d: ServiceDetail; api: PageProps<unknown>["ap
     if (!ok) return;
     try {
       await resources.remove("service_domains", domain.id);
-      // A delete has no hook to write the routes (RustCMS): asked here.
-      await props.api.post(`/apps/services/${d.service.id}/routes`, {});
       props.onSaved();
     } catch (err) {
       props.onError(err);

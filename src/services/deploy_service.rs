@@ -1278,14 +1278,27 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                 router.tls = None;
                 // An HTTPS domain's visitor over plain HTTP (Cloudflare's
                 // `Cf-Visitor`): redirected, as on Traefik's own port 80.
+                // A visitor over HTTPS (Cloudflare's) is told so to the
+                // service (`X-Forwarded-Proto`): its links and redirects to
+                // HTTPS stay right.
+                let proto = format!("{base}-tunnel-proto");
+                http.middlewares.entry(proto.clone()).or_insert_with(
+                    || json!({"headers": {"customRequestHeaders": {"X-Forwarded-Proto": "https"}}}),
+                );
+                if !snapshot.domains[index].https {
+                    // An HTTP domain (Cloudflare holds TLS: no certificate
+                    // here): its HTTPS visitors told so, the others not.
+                    let mut secure = router.clone();
+                    secure.rule = format!(
+                        "{} && {}",
+                        router.rule,
+                        crate::services::tunnel_service::SECURE_VISITOR
+                    );
+                    secure.middlewares.insert(0, proto.clone());
+                    http.routers
+                        .insert(format!("{base}-{index}-tunnel-secure"), secure);
+                }
                 if snapshot.domains[index].https {
-                    // The others came over HTTPS (Cloudflare's), as the
-                    // service is told (`X-Forwarded-Proto`): its links and
-                    // redirects to HTTPS stay right.
-                    let proto = format!("{base}-tunnel-proto");
-                    http.middlewares.entry(proto.clone()).or_insert_with(|| {
-                        json!({"headers": {"customRequestHeaders": {"X-Forwarded-Proto": "https"}}})
-                    });
                     router.middlewares.insert(0, proto);
                     let redirect = format!("{base}-tunnel-https");
                     http.middlewares
@@ -1322,11 +1335,11 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
     let names: Vec<String> = http
         .routers
         .keys()
-        .filter(|k| k.ends_with("-tunnel-http"))
+        .filter(|k| k.ends_with("-tunnel-http") || k.ends_with("-tunnel-secure"))
         .cloned()
         .collect();
     for name in names {
-        let serving = name.trim_end_matches("-http");
+        let serving = name.trim_end_matches("-http").trim_end_matches("-secure");
         if let Some(priority) = http.routers.get(serving).and_then(|r| r.priority) {
             http.routers.get_mut(&name).unwrap().priority = Some(priority + 1);
         }
@@ -1563,13 +1576,31 @@ mod tests {
             assert!(tunnel.tls.is_none());
             // The serving router's middlewares (never the HTTPS redirect).
             assert!(!tunnel.middlewares.contains(&format!("{base}-https")));
-            // Told the visitor came over HTTPS (Cloudflare's), for an
-            // HTTPS domain only.
+            // Told the visitor came over HTTPS (Cloudflare's): an HTTPS
+            // domain's serving router; an HTTP domain's, when Cloudflare says.
             assert_eq!(
                 tunnel.middlewares.first() == Some(&format!("{base}-tunnel-proto")),
                 *https,
                 "{index}"
             );
+            let secure = routes
+                .http
+                .routers
+                .get(&format!("{base}-{index}-tunnel-secure"));
+            assert_eq!(secure.is_some(), !*https, "{index}");
+            if let Some(secure) = secure {
+                assert!(
+                    secure
+                        .rule
+                        .ends_with(crate::services::tunnel_service::SECURE_VISITOR)
+                );
+                assert_eq!(
+                    secure.middlewares.first(),
+                    Some(&format!("{base}-tunnel-proto"))
+                );
+                assert_eq!(secure.priority, tunnel.priority.map(|p| p + 1));
+                assert_eq!(secure.service, tunnel.service);
+            }
             // A visitor over plain HTTP: redirected, for an HTTPS domain only.
             let plain = routes
                 .http

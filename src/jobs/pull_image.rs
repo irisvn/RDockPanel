@@ -25,6 +25,10 @@ impl Job for PullImage {
     const KIND: &'static str = "docker.image_pull";
     const QUEUE: &'static str = "docker";
 
+    fn describe(&self) -> Option<String> {
+        Some(format!("pull {} (action #{})", self.image, self.action_id))
+    }
+
     /// A failed pull is reported on its row; pulling again is the user's call.
     fn max_attempts() -> u32 {
         1

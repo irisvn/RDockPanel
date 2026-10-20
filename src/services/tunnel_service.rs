@@ -40,6 +40,8 @@ const TRAEFIK_ALIAS_ARG: &str = "--entrypoints.tunnel.http.aliasHeadersStrategy=
 /// Cloudflare's header for a visitor who came over plain HTTP (routed to
 /// a redirect to HTTPS: no loop, the ones over HTTPS do not carry it).
 pub const PLAIN_VISITOR: &str = r#"Header(`Cf-Visitor`, `{"scheme":"http"}`)"#;
+/// Cloudflare's header for a visitor who came over HTTPS (Cloudflare's).
+pub const SECURE_VISITOR: &str = r#"Header(`Cf-Visitor`, `{"scheme":"https"}`)"#;
 /// Why a tunnel does not connect, as Settings says it.
 const UNHEALTHY: &str =
     "Cloudflare does not accept the connection: is the tunnel's token still valid?";

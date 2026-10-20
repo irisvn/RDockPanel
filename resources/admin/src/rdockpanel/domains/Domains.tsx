@@ -98,8 +98,6 @@ export function Domains(props: PageProps<unknown>) {
     setError(null);
     try {
       await resources.remove("service_domains", d.id as number);
-      // A delete has no hook to write the routes (RustCMS): asked here.
-      await props.api.post(`/apps/services/${d.service_id}/routes`, {});
       props.toast.success(t("Domain removed"));
       list.refetch();
     } catch (err) {

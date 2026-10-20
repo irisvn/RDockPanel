@@ -16,7 +16,8 @@ export declare const CardHeader: React.FC<Props<"div">>;
 export declare const CardTitle: React.FC<Props<"h3">>;
 export declare const Checkbox: React.FC<Omit<Props<"input">, "type" | "ref"> & { indeterminate?: boolean }>;
 export declare const Switch: React.FC<Omit<Props<"button">, "onChange"> & { checked: boolean; onCheckedChange: (checked: boolean) => void }>;
-export declare const Dialog: React.FC<{ open: boolean; onClose: () => void; title: React.ReactNode; children?: React.ReactNode; className?: string }>;
+/** A modal; a close button (×) is shown unless `closeButton={false}`; `closeDisabled` blocks it and Escape. */
+export declare const Dialog: React.FC<{ open: boolean; onClose: () => void; title: React.ReactNode; children?: React.ReactNode; className?: string; closeButton?: boolean; closeDisabled?: boolean }>;
 export declare const Input: React.FC<Props<"input">>;
 export declare const Label: React.FC<Props<"label">>;
 export declare const NativeSelect: React.FC<Props<"select">>;

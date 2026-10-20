@@ -21,6 +21,10 @@ impl Job for RunBackup {
     const KIND: &'static str = "backup.run";
     const QUEUE: &'static str = "backup";
 
+    fn describe(&self) -> Option<String> {
+        Some(format!("backup run #{}", self.run_id))
+    }
+
     fn max_attempts() -> u32 {
         1
     }

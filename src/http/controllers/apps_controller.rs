@@ -1046,26 +1046,6 @@ pub async fn add_basic_auth(
     Ok(Json(json!({ "username": username })))
 }
 
-/// Writes the service's routes again, as saved (a job): after a domain or a
-/// redirect was deleted, which its resource cannot follow yet (RustCMS has
-/// no hook after a delete). For whoever may delete either.
-pub async fn publish_routes(
-    State(app): State<AppState>,
-    auth: Auth,
-    Path(id): Path<i64>,
-) -> AppResult<StatusCode> {
-    let row = match service_for(&app, &auth, id, "service_domains.delete").await {
-        Ok(row) => row,
-        Err(_) => service_for(&app, &auth, id, "service_redirects.delete").await?,
-    };
-    rustcms::queue::enqueue(
-        app.db(),
-        &crate::jobs::publish_routes::PublishRoutes { service_id: row.id },
-    )
-    .await?;
-    Ok(StatusCode::ACCEPTED)
-}
-
 /// Removes a user of the service's basic authentication. Audited.
 pub async fn remove_basic_auth(
     State(app): State<AppState>,

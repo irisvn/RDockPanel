@@ -5,6 +5,16 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
 
 ## Unreleased
 
+On RustCMS Core 0.8.0 (run `rustcms migrate` and `rustcms permission:sync`: the installer does).
+
+- **Every dialog has a close button (×)** (Core 0.7.1).
+- **System → Queue** keeps a history of finished jobs, each described ("deployment #12", "pull
+  nginx:1.27"); **System → Schedules** shows the panel's nine schedules, their last runs with a
+  summary ("2 backups queued") and a Run now (`schedules.manage`). A deployment cut by a stop is
+  never run again behind the user's back (it is marked interrupted).
+- Deleting a domain or a redirect writes the routes again at once (Core's `after_delete`).
+- A domain reached only through Cloudflare Tunnel can have HTTPS off (Cloudflare holds TLS, no
+  certificate is asked for): its visitors over HTTPS are still said so to the service.
 - **Applied when saved:** a service's domains, redirects, basic authentication and maintenance are
   written to Traefik at once, without a deployment (the running containers are untouched); they no
   longer count as changes waiting for Deploy. What is in the Swarm service (image, environment,

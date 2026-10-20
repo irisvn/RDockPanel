@@ -69,14 +69,7 @@ db_test!(
             )
             .await;
         assert!(removed.status.is_success(), "{}", removed.text());
-        // The page asks for the routes after a delete (no hook follows it).
-        admin
-            .post_json(
-                &app.admin_api(&format!("x/apps/services/{id}/routes")),
-                &json!({}),
-            )
-            .await
-            .assert_status(StatusCode::ACCEPTED);
+        // Its routes written again without it (the delete's job).
         publish_routes(&app, id).await;
         let routes =
             std::fs::read_to_string(support::traefik_dir(&app).join("shop_web.yml")).unwrap();

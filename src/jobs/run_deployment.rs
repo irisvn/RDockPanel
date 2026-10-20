@@ -20,6 +20,13 @@ pub struct RunDeployment {
 impl Job for RunDeployment {
     const KIND: &'static str = "deploy.run";
     const QUEUE: &'static str = "deploy";
+    /// A run cut by a stop is the panel's "interrupted" (at its start): never
+    /// run again behind the user's back.
+    const AT_MOST_ONCE: bool = true;
+
+    fn describe(&self) -> Option<String> {
+        Some(format!("deployment #{}", self.deployment_id))
+    }
 
     fn max_attempts() -> u32 {
         1

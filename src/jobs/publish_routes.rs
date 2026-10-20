@@ -22,6 +22,10 @@ impl Job for PublishRoutes {
     const KIND: &'static str = "deploy.publish";
     const QUEUE: &'static str = "default";
 
+    fn describe(&self) -> Option<String> {
+        Some(format!("routes of service #{}", self.service_id))
+    }
+
     async fn handle(self, ctx: JobCtx) -> anyhow::Result<()> {
         let Some(traefik) = ctx.state.service::<Traefik>() else {
             return Ok(());

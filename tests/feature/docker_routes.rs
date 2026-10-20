@@ -292,9 +292,6 @@ db_test!(
                 Case::new(Method::GET, "/apps/services/1/stats")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
-                Case::new(Method::POST, "/apps/services/1/routes")
-                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
-                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
                 Case::new(Method::POST, "/apps/services/1/basic-auth")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

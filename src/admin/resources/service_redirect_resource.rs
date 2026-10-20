@@ -132,6 +132,23 @@ impl Resource for ServiceRedirectResource {
         .await?;
         Ok(())
     }
+
+    /// Removed: the service's routes written again without it (once this
+    /// commits).
+    async fn after_delete(
+        ctx: &Ctx,
+        txn: &DatabaseTransaction,
+        record: &service_redirect::Model,
+    ) -> AppResult<()> {
+        ctx.dispatch(
+            txn,
+            &crate::jobs::publish_routes::PublishRoutes {
+                service_id: record.service_id,
+            },
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 fn check(ctx: &Ctx, data: &Data) -> AppResult<()> {
