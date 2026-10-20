@@ -3,53 +3,21 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.5.1 — 2026-10-20
+
+- Release notes in Settings → Version are shown formatted (bold, code, lists, links).
+
 ## 0.5.0 — 2026-10-20
 
-On RustCMS Core 0.8.1 (the image runs `migrate --allow-newer` and `permission:sync` at its start).
-
-- **Settings → Version**: what the panel runs (version, commit, image) and with what (Core,
-  Traefik, MySQL, cloudflared, Docker, the OS); whether a newer release is out (the registry's
-  `X.Y.Z` tags, checked every 6 hours or by hand), its notes and the installer command for it; the
-  history of version changes, updates and restarts. The Dashboard says a newer release to the
-  panel's administrators (each can hide it until the next).
-- **Update button** (Settings → Version, `system.manage`): the panel never updates by itself; an
-  administrator's Update moves it to the newest release. New deployments, backups and restores
-  wait while those running end; the panel's database is dumped to
-  `/var/lib/rdockpanel/backups/panel/`; Swarm replaces the panel (pinned to the registry's
-  digest) and rolls back if the new version does not become healthy — the version rolled back to
-  starts on the database as the new one left it (`migrate --allow-newer`); the next panel records
-  how it ended. A plain installer run keeps a newer release the panel updated to.
-- **Old versions removed** (Settings → Version): the stopped containers of the panel's services'
-  old tasks and their images, the running and previous versions kept. The Images page says which
-  images run, which only stopped containers keep, and which none uses.
-- Releases now publish their GitHub Release (this file's section) once their image is named.
-- **Every dialog has a close button (×)** (Core 0.7.1).
-- **System → Queue** keeps a history of finished jobs, each described ("deployment #12", "pull
-  nginx:1.27"); **System → Schedules** shows the panel's nine schedules, their last runs with a
-  summary ("2 backups queued") and a Run now (`schedules.manage`). A deployment cut by a stop is
-  never run again behind the user's back (it is marked interrupted).
-- Deleting a domain or a redirect writes the routes again at once (Core's `after_delete`).
-- A domain reached only through Cloudflare Tunnel can have HTTPS off (Cloudflare holds TLS, no
-  certificate is asked for): its visitors over HTTPS are still said so to the service.
-- **Applied when saved:** a service's domains, redirects, basic authentication and maintenance are
-  written to Traefik at once, without a deployment (the running containers are untouched); they no
-  longer count as changes waiting for Deploy. What is in the Swarm service (image, environment,
-  ports, mounts, resources, command…) still needs a Deploy. A first domain added to a running
-  service makes Traefik join its project's network (Traefik restarts, as a deployment did). A
-  Compose service's domains still apply by deploying (they are checked against its file then).
-  Upgrading applies the route changes that were waiting for a Deploy.
-- **Traefik v3.7** (from v3.5): the installer moves it at the next upgrade (one restart of
-  Traefik). Header names that alias others (`X_Forwarded_For`) are dropped on every entrypoint:
-  some backends (PHP, WSGI) read them as the real ones.
-- The tunnel's entrypoint is always in Traefik (never published, routed only while the tunnel is
-  on): turning the tunnel on no longer logs "EntryPoint doesn't exist" while Traefik restarts.
-- **Cloudflare Tunnel** (tested with a real tunnel): cloudflared 2026.10.2 (2025.9.1 was no longer
-  supported by Cloudflare; an older one is run again as pinned at the panel's start). A visitor over
-  HTTPS at Cloudflare is told so to the service (`X-Forwarded-Proto: https`: links and HTTPS
-  redirects stay right), and Let's Encrypt's HTTP challenges are answered through the tunnel (a
-  domain reached only through it gets its certificate).
-- A console command (`schedule:list`, `migrate`) run beside the panel no longer ends its open
-  terminals or writes its route files: that is the server's work at start.
+- **Settings → Version**: see what the panel runs, whether a newer release is out, what changed,
+  and update with one button (the database is backed up first; a failed update goes back by
+  itself). The Dashboard says when a new release is out.
+- **Old versions** of the panel can be removed to free disk space.
+- **Domains, redirects, basic auth and maintenance apply at once** when saved, without a Deploy.
+- **Every dialog has a close button.** The Queue keeps a history; a new Schedules page.
+- **Cloudflare Tunnel** fixed and tested for real; cloudflared updated.
+- **Traefik 3.7.**
+- Running a console command no longer closes open terminals.
 
 ## 0.4.2 — 2026-10-20
 

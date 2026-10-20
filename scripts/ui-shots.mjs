@@ -60,6 +60,7 @@ const PAGES = [
   ["domains", "/p/domains"],
   ["actions", "/p/actions"],
   ["settings-panel", "/p/settings/panel"],
+  ["settings-version", "/p/settings/version"],
   ["settings-traefik", "/p/settings/traefik"],
   ["settings-certificates", "/p/settings/certificates"],
   ["settings-tunnel", "/p/settings/tunnel"],

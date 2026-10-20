@@ -230,7 +230,12 @@
 .rdp2-wide { max-width: min(55rem, calc(100vw - 2rem)); width: 100%; }
 .rdp2-dialog-body { color: var(--muted-foreground); }
 /* A release's notes (Markdown, shown as its text). */
-.rdp2-notes { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--rdp-text-sm); line-height: 1.375rem; max-height: 24rem; overflow-y: auto; padding: 0.75rem 1rem; border-radius: calc(var(--radius) - 2px); background: var(--muted); }
+.rdp2-notes { overflow-wrap: anywhere; font-size: var(--rdp-text-sm); line-height: 1.375rem; max-height: 24rem; overflow-y: auto; padding: 0.75rem 1rem; border-radius: calc(var(--radius) - 2px); background: var(--muted); }
+.rdp2-markdown { display: flex; flex-direction: column; gap: 0.5rem; }
+.rdp2-markdown p { margin: 0; }
+.rdp2-markdown ul { margin: 0; padding-left: 1.25rem; list-style-type: disc; display: flex; flex-direction: column; gap: 0.25rem; }
+.rdp2-markdown code { font-family: var(--rdp-mono); font-size: 0.8125rem; }
+.rdp2-markdown a { text-decoration: underline; }
 .rdp2-dialog-foot { display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; }
 
 /* Service kinds (New service) */

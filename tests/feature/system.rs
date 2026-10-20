@@ -550,12 +550,15 @@ async fn an_update_that_never_becomes_healthy_is_rolled_back() {
     let docker = Docker::new(BollardDocker::connect().expect("docker client"));
     let api = docker.engine();
     let name = format!("t{}_update", std::process::id());
-    let good = "nginx:1.27-alpine";
+    // A small web server (busybox's httpd), then the same image that serves
+    // nothing (no Nginx in tests).
+    let good = "busybox:1.36";
     let spec = json!({
         "Name": name,
         "Labels": {"rdockpanel.managed": "true"},
         "TaskTemplate": {"ContainerSpec": {
             "Image": good,
+            "Args": ["sh", "-c", "mkdir -p /www && echo ok > /www/index.html && exec httpd -f -p 80 -h /www"],
             "HealthCheck": {
                 "Test": ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"],
                 "Interval": 2_000_000_000i64, "Retries": 3, "StartPeriod": 2_000_000_000i64,
@@ -605,7 +608,7 @@ async fn an_update_that_never_becomes_healthy_is_rolled_back() {
             start_period: 2,
             monitor: 20,
         };
-        let mut next = update_spec_with(current, "busybox:1.36", &timing);
+        let mut next = update_spec_with(current, "busybox:1.37", &timing);
         next["TaskTemplate"]["ContainerSpec"]["Args"] = json!(["sleep", "600"]);
         api.update_service(&name, version, serde_json::from_value(next).unwrap(), None)
             .await

@@ -9,6 +9,7 @@ import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, CodeBlock, ErrorState, Loading } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Facts, Section, StatusBadge, TableScroll, useAsk } from "../lib/ui";
 import { dateTime, relative, size } from "../lib/format";
+import { Markdown } from "../lib/markdown";
 
 type Release = { version: string; name: string | null; notes: string | null; published_at: string | null; url: string | null };
 type VersionStatus = {
@@ -230,7 +231,11 @@ export function Version(props: PageProps<unknown>) {
                   </a>
                 )}
               </div>
-              {r.notes && <div className="rdp2-notes">{r.notes}</div>}
+              {r.notes && (
+                <div className="rdp2-notes">
+                  <Markdown text={r.notes} />
+                </div>
+              )}
             </div>
           ))}
         </Section>
