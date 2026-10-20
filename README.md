@@ -25,6 +25,9 @@ feature is free: no project limits, no paid tiers.
 - **Actions** lists deployments, backups and Docker actions; **Settings** holds storage providers and
   notification channels; **⌘K** finds a project or a service. Light by default, with a Light / Dark /
   System switch per user; in English and Vietnamese.
+- Every page follows one set of design rules ([docs/ui-guidelines.md](docs/ui-guidelines.md)): the
+  same button sizes, extra row actions in a ⋯ menu, the same status words and colors, the panel's own dialogs,
+  tables that work on a phone.
 
 **Server and Docker**
 
@@ -179,7 +182,7 @@ rolling updates under load, and checks HTTPS and project isolation.
 - **Docker Swarm** runs the apps; **[Traefik](https://traefik.io)** v3 routes their domains, from
   files the panel writes.
 - The apps interface is React pages on RustCMS's extension host (the built files are committed:
-  Node is needed only to change them); the Docker pages are scripts; the terminal uses
+  Node is needed only to change them), the Docker pages included; the terminal uses
   [xterm.js](https://xtermjs.org) (vendored, MIT).
 
 More in [docs/architecture.md](docs/architecture.md).
@@ -195,6 +198,7 @@ More in [docs/architecture.md](docs/architecture.md).
 | [Install](docs/install.md) | the installer, upgrades, backups |
 | [EasyPanel comparison](docs/easypanel-comparison.md) | what RDockPanel has of EasyPanel, feature by feature |
 | [Development](docs/development.md) | environment, tests, conventions |
+| [UI guidelines](docs/ui-guidelines.md) | the design rules every page follows |
 | [Roadmap](docs/roadmap.md) | phases and what they depend on |
 
 ## License

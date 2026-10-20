@@ -16,11 +16,11 @@ src/
                     deployment_service (running deployments), traefik_service (route files)
   models/           action (the actions log); project, service, service_domain/port/mount, deployment
   jobs/             pull_image, run_deployment, publish_routes
-  admin/pages/      Dashboard, Actions, Settings (React); Containers, Images, Volumes, Networks (script pages)
+  admin/pages/      Dashboard, Domains, Actions, Settings, Containers, Images, Volumes, Networks (React)
   admin/resources/  Projects, Services, Domains, Ports, Mounts, Deployments (schema-driven resources)
   admin/slots/      the service page's aside (state, actions, live deployment log)
-resources/admin/    src/: the React apps interface (built to js/, css/); js/: the Docker pages'
-                    plain JavaScript (+ vendored xterm.js), css/
+resources/admin/    src/: every page in React (built to js/rdockpanel/dashboard.js), css/rdockpanel/
+                    (dashboard.css, xterm.css), js/rdockpanel/vendor/ (xterm.js)
 scripts/            dev-swarm.sh (a development Swarm with Traefik)
 tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER and
                     PANEL_TEST_SWARM
@@ -43,8 +43,8 @@ read by handlers and jobs with `app.service::<T>()`. Tests bind fakes over them 
 
 ## A request
 
-1. The browser loads `/admin` (the RustCMS SPA). The panel's scripts register their pages
-   (`window.rustcms.registerPage("rdockpanel/containers", …)`).
+1. The browser loads `/admin` (the RustCMS SPA). The panel's bundle registers its React pages
+   (`registerPage("rdockpanel/containers", …)`).
 2. A page calls `/admin/api/x/docker/...` with the session cookie (and the CSRF token on writes).
 3. `AdminRoutes` checks the route's permission **before** any extractor runs (401/403).
 4. The handler asks `Docker` for the caller's scope (`system.manage` or not), acts, and records an

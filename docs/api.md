@@ -80,6 +80,7 @@ the token goes to the panel only.
 | GET | `/images` | docker.view | images with tags, size, use |
 | POST | `/images/pull` | docker.manage | `{"image": "nginx:1.27"}` → 202 with the queued action |
 | DELETE | `/images/{tag or id}?force=` | docker.manage | remove (force needs system.manage) |
+| DELETE | `/images?image=&force=` | docker.manage | the same, any name in the query (`registry:5000/app:1.2`: a path segment takes no `:` or `/`) |
 | POST | `/prune` | docker.manage | stopped containers and dangling images, never the panel's own |
 | GET | `/actions/{id}` | docker.view | one action (own actions; all with system.manage) |
 | GET / POST | `/volumes` | docker.view / docker.manage | list / create `{"name"}` |

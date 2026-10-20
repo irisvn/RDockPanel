@@ -23,6 +23,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Settings → Panel** có các menu như EasyPanel: log, khởi động lại và kiểm tra cập nhật của panel; Refresh IP và Reboot server; log và khởi động lại Traefik; dọn Docker mà không đụng tới dữ liệu của service.
 - **Trang Domains** liệt kê domain của mọi service, nơi chúng trỏ tới và domain nào đang chờ Deploy.
 - **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** chứa nơi lưu backup và kênh thông báo; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
+- Mọi trang theo chung một bộ quy tắc thiết kế ([docs/ui-guidelines.md](docs/ui-guidelines.md)): nút cùng cỡ, thao tác phụ của từng dòng gom vào menu ⋯, trạng thái cùng chữ và màu, hộp thoại của panel thay cho của trình duyệt, bảng dùng được trên điện thoại.
 
 **Server và Docker**
 
@@ -142,7 +143,7 @@ CI kiểm tra format, `clippy -D warnings` và chạy test trên MySQL 8.4 khi p
   - **Docker Swarm** chạy các app; **[Traefik](https://traefik.io)** v3 route domain cho chúng, từ các file do panel ghi;
   - **sysinfo** và `/proc` cho số liệu máy;
   - **MySQL 8.4** lưu dữ liệu của panel.
-- **Giao diện:** các trang admin là script do panel RustCMS nạp. Terminal dùng [xterm.js](https://xtermjs.org) (đi kèm trong repo, license MIT).
+- **Giao diện:** các trang admin viết bằng React, chạy trên extension host của RustCMS (file build được commit sẵn, chỉ cần Node khi sửa giao diện). Terminal dùng [xterm.js](https://xtermjs.org) (đi kèm trong repo, license MIT).
 
 Chi tiết xem [docs/architecture.md](docs/architecture.md).
 
@@ -155,6 +156,7 @@ Chi tiết xem [docs/architecture.md](docs/architecture.md).
 | [Bảo mật](docs/security.md) | Docker socket, object được bảo vệ, terminal, CSP |
 | [API](docs/api.md) | các route JSON, event stream và WebSocket của panel |
 | [Phát triển](docs/development.md) | môi trường, test, quy ước |
+| [Quy tắc giao diện](docs/ui-guidelines.md) | bộ quy tắc thiết kế mọi trang phải theo |
 | [Lộ trình](docs/roadmap.md) | các phase và phụ thuộc |
 
 ## License
