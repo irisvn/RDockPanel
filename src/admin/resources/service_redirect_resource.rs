@@ -115,6 +115,23 @@ impl Resource for ServiceRedirectResource {
         check(ctx, &data)?;
         Ok(data)
     }
+
+    /// Applied without a deployment: the service's routes written again
+    /// (once this commits).
+    async fn after_save(
+        ctx: &Ctx,
+        txn: &DatabaseTransaction,
+        record: &service_redirect::Model,
+    ) -> AppResult<()> {
+        ctx.dispatch(
+            txn,
+            &crate::jobs::publish_routes::PublishRoutes {
+                service_id: record.service_id,
+            },
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 fn check(ctx: &Ctx, data: &Data) -> AppResult<()> {

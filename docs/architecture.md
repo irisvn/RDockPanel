@@ -204,11 +204,9 @@ panel does not write), applied after the panel's (redirects, authentication).
 As EasyPanel's Redirects and Security tabs. A service's redirects (`service_redirects`: a regular
 expression over the request's URL, its replacement, permanent or not, on or off) and the users of
 its HTTP basic authentication (`service_basic_auth`: bcrypt hashes, never shown) become Traefik
-middlewares (`redirectRegex`, then `basicAuth`) on every router of its domains. They are part of
-the deployment's snapshot (users as a digest of their hash: the hashes are read from their table
-when the routes are written, never kept in a deployment) and apply on the next deployment: the
-routes written again (a republish, a restart) keep the users as deployed, a changed password
-signs in from the next deployment.
+middlewares (`redirectRegex`, then `basicAuth`) on every router of its domains. They apply when
+saved (the routes written again, no deployment): a user added, removed or given a new password signs
+in so at once. A deployment's snapshot records them (users as a digest of their hash, never the hash).
 Regular expressions are checked as Go's (inline flags `i`, `m`, `s`, `U` only), and no value
 written to Traefik's files may contain `{{` or `}}` (Traefik reads them as Go templates). EasyPanel templates' `basicAuth` and `redirects` are created with the service.
 
@@ -309,11 +307,11 @@ each run is audited (its name, never its output). Not for Compose services.
 
 ### Maintenance mode
 
-As EasyPanel's Maintenance tab. A service in maintenance (applied by its next deployment) has its
+As EasyPanel's Maintenance tab. A service in maintenance (applied when saved) has its
 domains routed to the panel (`[panel] internal_url`, `http://rdockpanel:3000` installed; empty: no
 maintenance mode) at `/api/v1/maintenance/<project>_<service>`, a public page of its title and
-subtitle (escaped), answered 503 with `Retry-After`, while the deployment Traefik routes is one in
-maintenance (saving it off changes nothing before a deployment). Its notes (Overview) are for the team only and
+subtitle (escaped), answered 503 with `Retry-After`, while it is in maintenance (turned off: its
+domains lead to the service again at once). Its notes (Overview) are for the team only and
 never deployed.
 
 ### Auto deploy from GitHub
@@ -381,16 +379,22 @@ action buttons and the latest deployment, its log followed live over SSE.
 
 `services/traefik_service.rs`. Traefik reads one file per service, `<project>_<service>.yml`, from
 `[panel] traefik_dir` (its file provider; `storage/traefik/dynamic` in development). The panel
-writes it whole (a hidden temporary file, then renamed) after each deployment, from the deployment
-that made the service what it is (its configuration hash): a new domain is routed once deployed, a
-failed deployment leaves the routes of what still runs, Stop and Destroy remove the file before the
-tasks go (if that fails, the deployment goes on with a warning in its log).
+writes it whole (a hidden temporary file, then renamed) after each deployment and whenever a route's
+own setting is saved: the containers of the deployment that made the service what it is (its
+configuration hash; a failed deployment leaves what still runs), with its domains, redirects, basic
+authentication and maintenance **as saved**. Saving one of those queues a `deploy.publish` job (from
+the resources' `after_save` and the basic authentication routes, in the same transaction): it is
+applied without a deployment, the containers untouched, and does not count as a pending change (only
+what is in the Swarm service does: image, environment, ports, mounts, resources…). A Compose
+service's domains are the exception: they name its file's services, checked as it deploys, so they
+still change by deploying. Stop and Destroy
+remove the file before the tasks go (if that fails, the deployment goes on with a warning in its log).
 Whether the write worked is the deployment's `published`; the service's **Republish routes** action
-(a `deploy.publish` job) writes it again. At boot every file is written again from the database, and
+(the same job) writes it again. At boot every file is written again from the database, and
 files of services that no longer exist are removed.
 
 Traefik reaches a service as `http://<project>_<service>:<port>` on the project's network: before
-the first deployment with a domain, the panel attaches `[panel] traefik_service` (`rdp-traefik`) to
+the first deployment with a domain (or the routes' job, for a domain added since), the panel attaches `[panel] traefik_service` (`rdp-traefik`) to
 `rdp_<project>` (Swarm restarts Traefik then: a few seconds without routing); when it cannot, the
 deployment fails rather than publish domains that lead nowhere. Writes are serialized (one lock in
 the panel's process, workers included), each reading the database at that moment, so the last one

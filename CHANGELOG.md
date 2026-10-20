@@ -5,6 +5,13 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
 
 ## Unreleased
 
+- **Applied when saved:** a service's domains, redirects, basic authentication and maintenance are
+  written to Traefik at once, without a deployment (the running containers are untouched); they no
+  longer count as changes waiting for Deploy. What is in the Swarm service (image, environment,
+  ports, mounts, resources, command…) still needs a Deploy. A first domain added to a running
+  service makes Traefik join its project's network (Traefik restarts, as a deployment did). A
+  Compose service's domains still apply by deploying (they are checked against its file then).
+  Upgrading applies the route changes that were waiting for a Deploy.
 - **Traefik v3.7** (from v3.5): the installer moves it at the next upgrade (one restart of
   Traefik). Header names that alias others (`X_Forwarded_For`) are dropped on every entrypoint:
   some backends (PHP, WSGI) read them as the real ones.

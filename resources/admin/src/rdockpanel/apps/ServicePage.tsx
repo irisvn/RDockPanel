@@ -70,6 +70,12 @@ export function ServicePage(props: Props) {
     props.toast.success(t("Saved. Deploy to apply it."));
     refresh();
   };
+  // Domains, redirects, basic authentication, maintenance: routes only,
+  // written when saved (no deployment, the containers untouched).
+  const applied = () => {
+    props.toast.success(s.status === "running" ? t("Saved and applied.") : t("Saved. It applies while the service runs."));
+    refresh();
+  };
   const primary = d.domains[0];
   const running = s.status === "running";
 
@@ -174,10 +180,10 @@ export function ServicePage(props: Props) {
         {tab === "deployments" && <DeploymentsTab {...props} d={d} onError={setError} refresh={refresh} />}
         {tab === "environment" && <EnvironmentTab {...props} d={d} onSaved={saved} />}
         {tab === "domains" && !d.can.domains.view && <p className="rdp2-muted">{t("You may not see domains.")}</p>}
-        {tab === "domains" && d.can.domains.view && <DomainsTab t={t} d={d} onSaved={saved} onError={setError} />}
-        {tab === "redirects" && <RedirectsTab {...props} d={d} onSaved={saved} />}
-        {tab === "security" && <SecurityTab {...props} d={d} onSaved={saved} />}
-        {tab === "maintenance" && <MaintenanceTab {...props} d={d} onSaved={saved} />}
+        {tab === "domains" && d.can.domains.view && <DomainsTab t={t} d={d} api={props.api} onSaved={s.kind === "compose" ? saved : applied} onError={setError} />}
+        {tab === "redirects" && <RedirectsTab {...props} d={d} onSaved={applied} />}
+        {tab === "security" && <SecurityTab {...props} d={d} onSaved={applied} />}
+        {tab === "maintenance" && <MaintenanceTab {...props} d={d} onSaved={applied} />}
         {tab === "scripts" && <ScriptsTab {...props} d={d} onSaved={saved} />}
         {tab === "source" && <SourceTab t={t} d={d} api={props.api} onSaved={saved} />}
         {tab === "storage" && !d.can.mounts.view && <p className="rdp2-muted">{t("You may not see mounts.")}</p>}
@@ -640,7 +646,7 @@ function EnvironmentTab(props: Props & { d: ServiceDetail; onSaved: () => void }
   );
 }
 
-function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onError: (e: unknown) => void }) {
+function DomainsTab(props: { t: T; d: ServiceDetail; api: PageProps<unknown>["api"]; onSaved: () => void; onError: (e: unknown) => void }) {
   const { d, t } = props;
   // Adding (with a host to start with), or changing one.
   const [adding, setAdding] = useState<string | null>(null);
@@ -653,13 +659,15 @@ function DomainsTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
   const remove = async (domain: Domain) => {
     const ok = await ask({
       title: t("Remove {host}?").replace("{host}", domain.host + (domain.path !== "/" ? domain.path : "")),
-      body: t("It stops being served at the service's next deployment."),
+      body: t("It stops being served at once."),
       action: t("Remove domain"),
       destructive: true,
     });
     if (!ok) return;
     try {
       await resources.remove("service_domains", domain.id);
+      // A delete has no hook to write the routes (RustCMS): asked here.
+      await props.api.post(`/apps/services/${d.service.id}/routes`, {});
       props.onSaved();
     } catch (err) {
       props.onError(err);

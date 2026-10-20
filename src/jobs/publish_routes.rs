@@ -1,5 +1,7 @@
 //! The `deploy.publish` job: writes a service's Traefik routes again, as it
-//! is deployed now (the service's Republish action, after a failed write).
+//! is deployed now with its routes' settings as saved: after a domain, a
+//! redirect, a basic authentication user or maintenance changed (applied
+//! without a deployment), and the service's Republish action.
 
 use rustcms::async_trait;
 use rustcms::queue::{Job, JobCtx};
@@ -34,8 +36,22 @@ impl Job for PublishRoutes {
         else {
             return Ok(());
         };
-        if !deployment_service::publish(db, &traefik, self.service_id, latest.id).await? {
+        let docker = ctx
+            .state
+            .service::<crate::services::docker_service::Docker>();
+        // Traefik joins below, retried by this job (not queued again).
+        if !deployment_service::publish(db, None, &traefik, self.service_id, latest.id).await? {
             anyhow::bail!("the routes of service {} were not written", self.service_id);
+        }
+        // Traefik off its network (Docker failing a moment): tried again.
+        if let Some(docker) = docker
+            && let Some(row) = crate::models::service::Entity::find_by_id(self.service_id)
+                .one(db)
+                .await?
+        {
+            deployment_service::traefik_reaches(db, &docker, &traefik, &row)
+                .await
+                .map_err(anyhow::Error::msg)?;
         }
         Ok(())
     }

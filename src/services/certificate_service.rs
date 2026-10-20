@@ -254,8 +254,9 @@ pub async fn locked<C: sea_orm::ConnectionTrait>(
     Ok(find.one(db).await?)
 }
 
-/// The hosts served with the certificate `id` over HTTPS: its domains', and
-/// those of deployed routes still using it (until their service deploys).
+/// The hosts served with the certificate `id` over HTTPS: its domains' (as
+/// saved), and a Compose service's deployed ones (its domains apply when it
+/// deploys).
 pub async fn hosts_using<C: sea_orm::ConnectionTrait>(
     db: &C,
     id: i64,
@@ -270,21 +271,11 @@ pub async fn hosts_using<C: sea_orm::ConnectionTrait>(
         .map(|d| d.host)
         .collect();
     let key = id.to_string();
-    for row in crate::models::service::Entity::find()
-        .filter(crate::models::service::Column::DeployedSpecHash.is_not_null())
-        .all(db)
-        .await?
-    {
-        if let Some(snapshot) =
-            crate::services::traefik_service::deployed_snapshot(db, &row).await?
-        {
-            for d in snapshot.domains {
-                if d.https
-                    && d.certificate.as_deref() == Some(key.as_str())
-                    && !hosts.contains(&d.host)
-                {
-                    hosts.push(d.host);
-                }
+    for snapshot in deployed_compose(db).await? {
+        for d in snapshot.domains {
+            if d.https && d.certificate.as_deref() == Some(key.as_str()) && !hosts.contains(&d.host)
+            {
+                hosts.push(d.host);
             }
         }
     }
@@ -305,7 +296,9 @@ pub async fn check_snapshot<C: sea_orm::ConnectionTrait>(
     else {
         return Ok(());
     };
-    if !snapshot.running {
+    // Routes carry the domains as saved (checked when saved), but a Compose
+    // service's: as deployed.
+    if !snapshot.running || snapshot.compose.is_none() {
         return Ok(());
     }
     for d in snapshot.domains.iter().filter(|d| d.https) {
@@ -351,8 +344,29 @@ pub async fn check_snapshot<C: sea_orm::ConnectionTrait>(
     Ok(())
 }
 
-/// Whether the certificate `id` is in use: by a domain, or by the routes of
-/// a deployed service.
+/// What Compose services run with (their domains change by deploying).
+async fn deployed_compose<C: sea_orm::ConnectionTrait>(
+    db: &C,
+) -> rustcms::AppResult<Vec<crate::services::deploy_service::Snapshot>> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    let mut found = vec![];
+    for row in crate::models::service::Entity::find()
+        .filter(crate::models::service::Column::Kind.eq("compose"))
+        .filter(crate::models::service::Column::DeployedSpecHash.is_not_null())
+        .all(db)
+        .await?
+    {
+        if let Some(snapshot) =
+            crate::services::traefik_service::deployed_snapshot(db, &row).await?
+        {
+            found.push(snapshot);
+        }
+    }
+    Ok(found)
+}
+
+/// Whether the certificate `id` is in use by a domain (as saved), or by a
+/// Compose service's deployed routes.
 pub async fn in_use<C: sea_orm::ConnectionTrait>(db: &C, id: i64) -> rustcms::AppResult<bool> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     if crate::models::service_domain::Entity::find()
@@ -364,17 +378,11 @@ pub async fn in_use<C: sea_orm::ConnectionTrait>(db: &C, id: i64) -> rustcms::Ap
         return Ok(true);
     }
     let id = id.to_string();
-    for row in crate::models::service::Entity::find()
-        .filter(crate::models::service::Column::DeployedSpecHash.is_not_null())
-        .all(db)
-        .await?
-    {
-        if let Some(snapshot) =
-            crate::services::traefik_service::deployed_snapshot(db, &row).await?
-            && snapshot
-                .domains
-                .iter()
-                .any(|d| d.certificate.as_deref() == Some(id.as_str()))
+    for snapshot in deployed_compose(db).await? {
+        if snapshot
+            .domains
+            .iter()
+            .any(|d| d.certificate.as_deref() == Some(id.as_str()))
         {
             return Ok(true);
         }

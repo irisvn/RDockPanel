@@ -656,8 +656,12 @@ db_test!(
         let renewed_store = std::fs::read_to_string(dir.join("rdp-certificates.yml")).unwrap();
         assert_ne!(store, renewed_store);
 
-        // A deployment asked with it, the certificate gone since: it fails.
-        let spec = serde_json::to_value(&snapshot).unwrap();
+        // A Compose service's deployment asked with it (its domains are
+        // routed as deployed), the certificate gone since: it fails. Any
+        // other's routes carry the domains as saved: not checked again.
+        let mut spec = serde_json::to_value(&snapshot).unwrap();
+        let plain = spec.clone();
+        spec["compose"] = json!({"inline": "services: {}"});
         assert!(
             rdockpanel::services::certificate_service::check_snapshot(app.state().db(), &spec)
                 .await
@@ -674,6 +678,20 @@ db_test!(
                 .await
                 .unwrap_err();
         assert!(why.contains("deleted"), "{why}");
+        let mut plain_gone = plain.clone();
+        for domain in plain_gone["domains"].as_array_mut().unwrap() {
+            if domain.get("certificate").is_some() {
+                domain["certificate"] = json!("999999");
+            }
+        }
+        assert!(
+            rdockpanel::services::certificate_service::check_snapshot(
+                app.state().db(),
+                &plain_gone
+            )
+            .await
+            .is_ok()
+        );
 
         // Not for a user managing domains.
         let operator = support::user_with(

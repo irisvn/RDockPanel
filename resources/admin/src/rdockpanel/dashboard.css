@@ -46,8 +46,8 @@
 .rdp2-muted { color: var(--muted-foreground); }
 .rdp2-small { font-size: var(--rdp-text-xs); line-height: 1rem; }
 .rdp2-error { color: var(--destructive); }
-.rdp2-gone { text-decoration: line-through; color: var(--muted-foreground); }
 .rdp2-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.rdp2-gone { text-decoration: line-through; color: var(--muted-foreground); }
 .rdp2-strong { font-weight: 600; }
 .rdp2-strong-cell { font-weight: 500; }
 .rdp2-mono, .rdp2-page code { font-family: var(--rdp-mono); font-size: 0.8125rem; }

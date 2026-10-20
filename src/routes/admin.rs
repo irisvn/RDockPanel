@@ -286,6 +286,7 @@ pub fn routes() -> AdminRoutes {
                 .get("/services/{id}/stats", member(), apps::stats)
                 .get("/services/{id}/errors", member(), apps::errors)
                 .post("/services/{id}/basic-auth", member(), apps::add_basic_auth)
+                .post("/services/{id}/routes", member(), apps::publish_routes)
                 .delete(
                     "/services/{id}/basic-auth/{user}",
                     member(),

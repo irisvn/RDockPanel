@@ -141,6 +141,8 @@ export function RedirectsTab(props: Props) {
                                   if (!ok) return;
                                   try {
                                     await resources.remove("service_redirects", r.id);
+                                    // A delete has no hook to write the routes (RustCMS): asked here.
+                                    await props.api.post(`/apps/services/${d.service.id}/routes`, {});
                                     props.onSaved();
                                   } catch (err) {
                                     setError(err);
@@ -246,7 +248,7 @@ export function SecurityTab(props: Props) {
                                 label: t("Remove…"),
                                 destructive: true,
                                 onSelect: async () => {
-                                  const ok = await ask({ title: t("Remove the user {name}?").replace("{name}", u.username), body: t("They can no longer sign in at the next deployment."), action: t("Remove user"), destructive: true });
+                                  const ok = await ask({ title: t("Remove the user {name}?").replace("{name}", u.username), body: t("They can no longer sign in, at once."), action: t("Remove user"), destructive: true });
                                   if (!ok) return;
                                   try {
                                     await props.api.delete(`${base}/${u.id}`);
@@ -313,7 +315,7 @@ export function MaintenanceTab(props: Props) {
   return (
     <Section
       title={t("Maintenance")}
-      description={t("While on, the service's domains show this page (503) instead of the service. Deploy to apply.")}
+      description={t("While on, the service's domains show this page (503) instead of the service. Applied when saved.")}
     >
       <form
         className="rdp2-form"

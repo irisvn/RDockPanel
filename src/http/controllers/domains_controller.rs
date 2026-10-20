@@ -1,8 +1,8 @@
 //! The Domains page (`/admin/api/x/apps/domains`), like EasyPanel's: every
 //! service's domains with where they lead, and whether Traefik serves them
-//! as configured — a domain added or changed is served from the service's
-//! next deployment, a removed one until then. Writes go through the
-//! domains' resource (its policy and validation).
+//! (a change is applied when saved, while the service runs; a Compose
+//! service's by its next deployment). Writes go through the domains'
+//! resource (its policy and validation).
 
 use std::collections::HashMap;
 
@@ -14,15 +14,15 @@ use serde_json::Value;
 use crate::http::controllers::apps_controller::forbid_privileged;
 use crate::http::controllers::docker_controller::SYSTEM_PERMISSION;
 use crate::models::{project, service, service_domain};
-use crate::services::deploy_service::{Domain, Snapshot, compose_alias};
+use crate::services::deploy_service::{Snapshot, compose_alias};
 use crate::services::deployment_service::snapshot_without_env;
 use crate::services::traefik_service::deployed_snapshot;
 
 /// Served as configured.
 const LIVE: &str = "live";
-/// Added or changed: served so from the next deployment.
+/// A Compose service's, added or changed: served so from its next deployment.
 const PENDING: &str = "pending";
-/// Removed, still served until the next deployment.
+/// A Compose service's, removed: served until its next deployment.
 const REMOVED: &str = "removed";
 /// Its service does not run (stopped, never deployed): not served.
 const STOPPED: &str = "stopped";
@@ -81,35 +81,29 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
         let own = rows.remove(&row.id).unwrap_or_default();
         let current = snapshot_without_env(db, row).await?;
         let deployed = deployed_snapshot(db, row).await?;
-        if own.is_empty() && deployed.as_ref().is_none_or(|d| d.domains.is_empty()) {
+        let running = deployed.as_ref().is_some_and(|d| d.running);
+        // A Compose service's domains are served as deployed.
+        let served: Vec<_> = deployed
+            .as_ref()
+            .filter(|d| d.running && d.compose.is_some())
+            .map(|d| d.domains.clone())
+            .unwrap_or_default();
+        if own.is_empty() && served.is_empty() {
             continue;
         }
         let base = current.service_name();
-        let at = |d: &Domain| (d.host.clone(), d.path.clone());
-        let configured: HashMap<(String, String), &Domain> =
-            current.domains.iter().map(|d| (at(d), d)).collect();
-        let served: HashMap<(String, String), &Domain> = deployed
-            .as_ref()
-            .filter(|d| d.running)
-            .map(|d| d.domains.iter().map(|x| (at(x), x)).collect())
-            .unwrap_or_default();
-        let running = deployed.as_ref().is_some_and(|d| d.running);
-        // What every route of the service carries: changed, each waits.
-        let access = deployed.as_ref().is_some_and(|d| {
-            d.maintenance == current.maintenance
-                && d.redirects == current.redirects
-                && d.basic_auth == current.basic_auth
-        });
         // In maintenance, Traefik sends its domains to the panel's page.
-        let maintenance = deployed
-            .as_ref()
-            .is_some_and(|d| d.running && d.maintenance);
+        let maintenance = running && current.maintenance;
+        let compose = row.kind == "compose";
         for (i, domain) in own.iter().enumerate() {
-            let key = (domain.host.clone(), domain.path.clone());
-            let status = match (configured.get(&key), served.get(&key)) {
+            let now = current
+                .domains
+                .iter()
+                .find(|c| c.host == domain.host && c.path == domain.path);
+            let status = match now {
                 _ if !running => STOPPED,
-                (Some(now), Some(then)) if now == then && access => LIVE,
-                _ => PENDING,
+                Some(now) if compose && !served.contains(now) => PENDING,
+                _ => LIVE,
             };
             domains.push(json!({
                 "id": domain.id,
@@ -132,12 +126,13 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
                 "writable": writable,
             }));
         }
-        // Removed since its deployment: Traefik serves them still.
-        for (key, gone) in &served {
-            if configured.contains_key(key) {
-                continue;
-            }
-            let deployed = deployed.as_ref().expect("served from a deployment");
+        // A Compose service's removed since it deployed: served still.
+        for gone in served.iter().filter(|d| {
+            !current
+                .domains
+                .iter()
+                .any(|c| c.host == d.host && c.path == d.path)
+        }) {
             domains.push(json!({
                 "id": Value::Null,
                 "project": project.name,
@@ -150,7 +145,7 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
                 "port": gone.port,
                 "https": gone.https,
                 "compose_service": gone.compose_service,
-                "target": target(&base, deployed, gone.compose_service.as_deref(), i32::from(gone.port)),
+                "target": target(&base, &current, gone.compose_service.as_deref(), i32::from(gone.port)),
                 "maintenance": maintenance,
                 "status": REMOVED,
                 "writable": false,

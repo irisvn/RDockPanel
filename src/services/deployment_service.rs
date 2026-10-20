@@ -233,7 +233,9 @@ pub async fn snapshot_without_env<C: ConnectionTrait>(
     .with_access(&redirects, &users))
 }
 
-/// Whether the configuration changed since the last successful deployment.
+/// Whether the configuration changed since the last successful deployment,
+/// in what only a deployment applies (domains, redirects, basic
+/// authentication and maintenance are applied when saved: not counted).
 /// An environment that cannot be opened counts as a change.
 pub async fn has_pending_changes<C: ConnectionTrait>(
     db: &C,
@@ -265,7 +267,13 @@ pub async fn has_pending_changes<C: ConnectionTrait>(
         return Ok(true);
     };
     // A snapshot from before `primary_domain` was recorded: as today's.
-    let legacy = deployed.spec.get("primary_domain").is_none();
+    // (Without a domain it is `None`, left out too: not legacy then.)
+    let legacy = deployed.spec.get("primary_domain").is_none()
+        && deployed
+            .spec
+            .get("domains")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|d| !d.is_empty());
     let Ok(mut then) = serde_json::from_value::<Snapshot>(deployed.spec) else {
         return Ok(true);
     };
@@ -287,11 +295,15 @@ pub async fn has_pending_changes<C: ConnectionTrait>(
         None => BTreeMap::new(),
     };
     let key = env_digest_key(keyring);
+    // The primary domain counts only where the environment names it.
+    let primary = service_env(service, keyring)
+        .map(|env| env.values().any(|v| v.contains("$(PRIMARY_DOMAIN)")))
+        .unwrap_or(true);
     Ok(then
         .with_env(&env_then, &key)
         .with_files(&files_then, &key)
-        .hash()
-        != current.hash())
+        .container_hash(primary)
+        != current.container_hash(primary))
 }
 
 /// [`request`] a Deploy as "Force rebuild": built without the builder's
@@ -681,7 +693,15 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
     // Traefik follows what the service is now (this deployment's routes if
     // it succeeded, the previous ones otherwise).
     let published = match traefik {
-        Some(traefik) => publish(db, &traefik, service.id, id).await.map(drop),
+        Some(traefik) => publish(
+            db,
+            state.service::<Docker>().as_deref(),
+            &traefik,
+            service.id,
+            id,
+        )
+        .await
+        .map(drop),
         None => Ok(()),
     };
     // A push came meanwhile: deployed again (claimed once).
@@ -756,6 +776,7 @@ pub async fn redeploy_if_pending(state: &AppState, service_id: i64) -> AppResult
 /// `id` whether that worked ([`deployment::Model::published`]).
 pub async fn publish(
     db: &DatabaseConnection,
+    docker: Option<&Docker>,
     traefik: &Traefik,
     service_id: i64,
     id: i64,
@@ -764,6 +785,15 @@ pub async fn publish(
         .one(db)
         .await?
         .ok_or(AppError::NotFound)?;
+    // Not joined: the routes are written still, and the `deploy.publish`
+    // job tries again (it retries until Traefik joins).
+    if let Some(docker) = docker
+        && traefik_reaches(db, docker, traefik, &service)
+            .await
+            .is_err()
+    {
+        retry_publication(db, service.id).await;
+    }
     let written = traefik_service::republish(db, traefik, &service, &deploy_options(0)).await?;
     deployment::Entity::update_many()
         .col_expr(deployment::Column::Published, Expr::value(written))
@@ -795,24 +825,7 @@ pub(crate) async fn project_network(
     log: &mut RunLog<'_>,
 ) -> Result<(), Outcome> {
     let fail = |err: DockerError| Outcome::Failed(err.to_string());
-    let network = NetworkRequest {
-        name: network_name(&snapshot.project),
-        driver: "overlay".to_owned(),
-        labels: [
-            (MANAGED_LABEL.to_owned(), "true".to_owned()),
-            ("rdockpanel.project".to_owned(), snapshot.project.clone()),
-            // This panel's: only its own networks are ever removed.
-            (
-                "rdockpanel.instance".to_owned(),
-                crate::services::deploy_service::instance()
-                    .unwrap_or_default()
-                    .to_owned(),
-            ),
-        ]
-        .into(),
-        attachable: true,
-        internal: false,
-    };
+    let network = network_request(&snapshot.project);
     log.hold().await?;
     let network = docker.ensure_network(network).await.map_err(fail)?;
     // Traefik reaches the service on its project's network.
@@ -839,6 +852,100 @@ pub(crate) async fn project_network(
         }
     }
     Ok(())
+}
+
+/// Traefik on the project's network when `service` routes (it runs, with
+/// a domain), as its routes are written: a domain added since its
+/// deployment, saved while one ran, or before an upgrade. Swarm restarts
+/// Traefik when it joins. Why it could not, as an error (logged too).
+pub async fn traefik_reaches(
+    db: &DatabaseConnection,
+    docker: &Docker,
+    traefik: &Traefik,
+    service: &service::Model,
+) -> Result<(), String> {
+    let routes = async {
+        let running = traefik_service::deployed_snapshot(db, service)
+            .await?
+            .is_some_and(|s| s.running);
+        let domain = service_domain::Entity::find()
+            .filter(service_domain::Column::ServiceId.eq(service.id))
+            .one(db)
+            .await?
+            .is_some();
+        let project = project::Entity::find_by_id(service.project_id)
+            .one(db)
+            .await?
+            .map(|p| p.name);
+        AppResult::Ok(project.filter(|_| running && domain))
+    };
+    let project = match routes.await {
+        Ok(Some(project)) => project,
+        Ok(None) => return Ok(()),
+        Err(err) => {
+            tracing::warn!(%err, service = service.id, "Traefik's network not checked");
+            return Err(err.to_string());
+        }
+    };
+    let joined = async {
+        let network = docker.ensure_network(network_request(&project)).await?;
+        traefik.attach(docker, &network.name, &network.id).await
+    };
+    match joined.await {
+        Ok(true) => {
+            tracing::info!(project, "Traefik joined the project's network");
+            Ok(())
+        }
+        Ok(false) => Ok(()),
+        Err(err) => {
+            tracing::warn!(%err, project, "Traefik could not join the project's network");
+            Err(format!("Traefik could not join {project}'s network: {err}"))
+        }
+    }
+}
+
+/// A `deploy.publish` job for `service_id`, unless one waits already.
+pub async fn retry_publication(db: &DatabaseConnection, service_id: i64) {
+    use crate::jobs::publish_routes::PublishRoutes;
+    let waiting = rustcms::models::job::Entity::find()
+        .filter(rustcms::models::job::Column::Kind.eq(<PublishRoutes as rustcms::queue::Job>::KIND))
+        .filter(rustcms::models::job::Column::FailedAt.is_null())
+        .filter(rustcms::models::job::Column::ReservedBy.is_null())
+        .all(db)
+        .await
+        .map(|jobs| {
+            jobs.iter()
+                .any(|j| j.payload["service_id"].as_i64() == Some(service_id))
+        })
+        .unwrap_or(false);
+    if waiting {
+        return;
+    }
+    if let Err(err) = rustcms::queue::enqueue(db, &PublishRoutes { service_id }).await {
+        tracing::warn!(%err, service = service_id, "the routes' publication not queued");
+    }
+}
+
+/// The project's network as the panel makes it.
+fn network_request(project: &str) -> NetworkRequest {
+    NetworkRequest {
+        name: network_name(project),
+        driver: "overlay".to_owned(),
+        labels: [
+            (MANAGED_LABEL.to_owned(), "true".to_owned()),
+            ("rdockpanel.project".to_owned(), project.to_owned()),
+            // This panel's: only its own networks are ever removed.
+            (
+                "rdockpanel.instance".to_owned(),
+                crate::services::deploy_service::instance()
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
+        ]
+        .into(),
+        attachable: true,
+        internal: false,
+    }
 }
 
 /// Applies `row` to Docker: the outcome and the image it ran, or how it failed.

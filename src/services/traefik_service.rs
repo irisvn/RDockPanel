@@ -339,9 +339,11 @@ pub async fn deployed_snapshot<C: sea_orm::ConnectionTrait>(
         .map_err(AppError::internal)
 }
 
-/// The routes a service has now: those of the deployment that made it what
-/// it is (its configuration hash, kept when a later deployment failed), when
-/// that one runs it. `None` when it does not route (never deployed, stopped,
+/// The routes a service has now: its domains, redirects, basic
+/// authentication and maintenance as saved (applied without a deployment),
+/// to the containers of the deployment that made it what it is (its
+/// configuration hash, kept when a later deployment failed), when that one
+/// runs it. `None` when it does not route (never deployed, stopped,
 /// destroyed, no domain).
 pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
     db: &C,
@@ -351,33 +353,24 @@ pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
     let Some(mut snapshot) = deployed_snapshot(db, row).await? else {
         return Ok(None);
     };
-    // Its basic authentication's users, with their hashes now (never kept
-    // in a deployment).
-    if !snapshot.basic_auth.is_empty() {
-        // Exactly the users deployed (name and password): one changed
-        // since signs in with the new password from the next deployment.
-        let deployed: std::collections::HashSet<String> =
-            snapshot.basic_auth.iter().cloned().collect();
-        let mut users: Vec<String> = crate::models::service_basic_auth::Entity::find()
-            .filter(crate::models::service_basic_auth::Column::ServiceId.eq(row.id))
-            .all(db)
-            .await?
-            .into_iter()
-            .filter(|u| {
-                deployed.contains(&crate::services::deploy_service::auth_digest(
-                    &u.username,
-                    &u.password_hash,
-                ))
-            })
-            .map(|u| format!("{}:{}", u.username, u.password_hash))
-            .collect();
-        users.sort();
-        // Every user removed since: nobody gets in (never open by accident).
-        if users.is_empty() {
-            users.push("nobody:!".to_owned());
-        }
-        snapshot.basic_auth = users;
+    let now = crate::services::deployment_service::snapshot_without_env(db, row).await?;
+    // A Compose service's domains name its file's services: checked as it
+    // deploys, so changed by deploying.
+    if snapshot.compose.is_none() {
+        snapshot.domains = now.domains;
     }
+    snapshot.redirects = now.redirects;
+    snapshot.maintenance = now.maintenance;
+    // Its users with their hashes (never kept in a snapshot).
+    let mut users: Vec<String> = crate::models::service_basic_auth::Entity::find()
+        .filter(crate::models::service_basic_auth::Column::ServiceId.eq(row.id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|u| format!("{}:{}", u.username, u.password_hash))
+        .collect();
+    users.sort();
+    snapshot.basic_auth = users;
     Ok(snapshot
         .running
         .then(|| routes(&snapshot, options))

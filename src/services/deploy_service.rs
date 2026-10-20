@@ -532,6 +532,26 @@ impl Snapshot {
         sha256_hex(&serde_json::to_vec(self).expect("a snapshot serializes"))
     }
 
+    /// [`Self::hash`] of what only a deployment applies: without the
+    /// routes' own settings (domains, redirects, basic authentication,
+    /// maintenance), applied when saved. The primary domain stays when the
+    /// environment names it (`$(PRIMARY_DOMAIN)`: `primary`). A Compose
+    /// service's domains stay: they name its file's services, checked as it
+    /// deploys.
+    pub fn container_hash(&self, primary: bool) -> String {
+        let mut container = self.clone();
+        if !primary {
+            container.primary_domain = None;
+        }
+        if container.compose.is_none() {
+            container.domains.clear();
+        }
+        container.redirects.clear();
+        container.basic_auth.clear();
+        container.maintenance = false;
+        container.hash()
+    }
+
     pub fn service_name(&self) -> String {
         service_name(&self.project, &self.service)
     }

@@ -285,6 +285,29 @@ impl ServiceProvider for AppServiceProvider {
                 Ok(n) => tracing::info!(n, dir = %traefik.dir.display(), "routes written"),
                 Err(err) => tracing::debug!(%err, "routes not written"),
             }
+            // Traefik on the networks of what routes now (a domain saved
+            // before an upgrade, without a deployment since).
+            if let Some(docker) = state.service::<crate::services::docker_service::Docker>()
+                && let Ok(services) = {
+                    use sea_orm::EntityTrait;
+                    crate::models::service::Entity::find().all(state.db()).await
+                }
+            {
+                for row in &services {
+                    if crate::services::deployment_service::traefik_reaches(
+                        state.db(),
+                        &docker,
+                        &traefik,
+                        row,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        crate::services::deployment_service::retry_publication(state.db(), row.id)
+                            .await;
+                    }
+                }
+            }
             // The administrators' middlewares, the uploaded certificates too.
             if let Err(err) =
                 crate::services::traefik_settings_service::sync_middlewares(state.db(), &traefik)

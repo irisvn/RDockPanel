@@ -1,7 +1,7 @@
 // The Domains page (`/admin/p/domains`), like EasyPanel's: every service's
 // domains, `https://host/path → http://<project>_<service>:<port>/`, each
-// with whether Traefik serves it as configured (a change waits for the
-// service's next deployment), opened, changed or removed here.
+// with whether Traefik serves it (a change is applied when saved, while the
+// service runs), opened, changed or removed here.
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Button, ErrorState, Loading, NativeSelect } from "@rustcms/admin-sdk/ui";
@@ -26,7 +26,7 @@ import { DomainForm, type ServiceChoice, plainDomain } from "../apps/DomainForm"
 import type { Domain } from "../apps/types";
 
 type Row = Omit<Domain, "id"> & {
-  /** None: removed, served until its service's next deployment. */
+  /** None: a Compose service's, removed, served until it deploys. */
   id: number | null;
   project: string;
   service: string;
@@ -52,8 +52,8 @@ type List = {
 
 const STATUS: Record<Row["status"], { tone: Tone; label: string; hint: string }> = {
   live: { tone: "ok", label: "Live", hint: "Traefik serves it as configured." },
-  pending: { tone: "busy", label: "Waiting for deploy", hint: "Changed: the service's next deployment applies it." },
-  removed: { tone: "bad", label: "Removed", hint: "Still served until the service's next deployment." },
+  pending: { tone: "busy", label: "Waiting for deploy", hint: "A Compose service's domain: its next deployment applies it." },
+  removed: { tone: "bad", label: "Removed", hint: "A Compose service's domain: served until its next deployment." },
   stopped: { tone: "off", label: "Not running", hint: "The service is stopped." },
 };
 
@@ -71,7 +71,7 @@ export function Domains(props: PageProps<unknown>) {
     title: props.title,
     eyebrow: t("Workspace"),
     heading: t("Domains"),
-    description: t("Every service's domains and where Traefik sends them. A change is applied by the service's next deployment."),
+    description: t("Every service's domains and where Traefik sends them. A change is applied when saved."),
   };
   if (list.isLoading) return <Loading />;
   if (list.error || !list.data) return <ErrorState error={list.error} />;
@@ -90,7 +90,7 @@ export function Domains(props: PageProps<unknown>) {
   const remove = async (d: Row) => {
     const ok = await confirm({
       title: t("Remove {host}?").replace("{host}", d.host + (d.path !== "/" ? d.path : "")),
-      body: t("It stops being served at the service's next deployment."),
+      body: t("It stops being served at once."),
       action: t("Remove domain"),
       destructive: true,
     });
@@ -98,6 +98,8 @@ export function Domains(props: PageProps<unknown>) {
     setError(null);
     try {
       await resources.remove("service_domains", d.id as number);
+      // A delete has no hook to write the routes (RustCMS): asked here.
+      await props.api.post(`/apps/services/${d.service_id}/routes`, {});
       props.toast.success(t("Domain removed"));
       list.refetch();
     } catch (err) {

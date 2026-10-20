@@ -270,21 +270,8 @@ pub async fn maintenance(
         .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
-    // As deployed (what Traefik routes), not as saved since.
-    let deployed = match row.deployed_spec_hash.as_deref() {
-        Some(hash) => crate::models::deployment::Entity::find()
-            .filter(crate::models::deployment::Column::ServiceId.eq(row.id))
-            .filter(crate::models::deployment::Column::SpecHash.eq(hash))
-            .filter(
-                crate::models::deployment::Column::Status
-                    .eq(crate::services::deployment_service::SUCCEEDED),
-            )
-            .one(app.db())
-            .await?
-            .is_some_and(|d| d.spec["maintenance"].as_bool() == Some(true)),
-        None => false,
-    };
-    if !deployed {
+    // In maintenance as saved: what Traefik routes (applied when saved).
+    if !row.maintenance {
         return Err(AppError::NotFound);
     }
     let title = escape(

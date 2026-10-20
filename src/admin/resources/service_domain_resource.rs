@@ -138,6 +138,23 @@ impl Resource for ServiceDomainResource {
         check_certificate(ctx, txn, &data, Some(record)).await?;
         Ok(data)
     }
+
+    /// Applied without a deployment: the service's routes written again
+    /// (once this commits).
+    async fn after_save(
+        ctx: &Ctx,
+        txn: &DatabaseTransaction,
+        record: &service_domain::Model,
+    ) -> AppResult<()> {
+        ctx.dispatch(
+            txn,
+            &crate::jobs::publish_routes::PublishRoutes {
+                service_id: record.service_id,
+            },
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 /// The certificate a domain's HTTPS gets: choosing a resolver, and changing

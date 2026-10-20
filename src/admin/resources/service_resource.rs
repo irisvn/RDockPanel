@@ -306,6 +306,23 @@ impl Resource for ServiceResource {
         check_git_provider(ctx, txn, &data, Some(&record)).await?;
         Ok(data)
     }
+
+    /// Its maintenance applied without a deployment: its routes written
+    /// again (once this commits).
+    async fn after_save(
+        ctx: &Ctx,
+        txn: &DatabaseTransaction,
+        record: &service::Model,
+    ) -> AppResult<()> {
+        ctx.dispatch(
+            txn,
+            &crate::jobs::publish_routes::PublishRoutes {
+                service_id: record.id,
+            },
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 /// A GitHub token (Settings → Git) clones a repository of GitHub, for the

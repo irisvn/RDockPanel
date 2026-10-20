@@ -158,7 +158,7 @@ export function DomainForm(props: {
           <Alert variant="destructive">{(fields.cert_resolver_id ?? fields.certificate_id ?? []).join(" ")}</Alert>
         )}
         {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
-        <p className="rdp2-small rdp2-muted">{t("Applied by the service's next deployment.")}</p>
+        <p className="rdp2-small rdp2-muted">{t("Applied when saved, while the service runs.")}</p>
         <div className="rdp2-row rdp2-end">
           <Button type="button" variant="ghost" onClick={props.onClose}>
             {t("Cancel")}

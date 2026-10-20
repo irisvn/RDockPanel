@@ -46,6 +46,16 @@ window.rustcms?.registerTranslations?.("vi", {
   "Stop this service? Its tasks are removed.": "Dừng service này? Các task sẽ bị gỡ.",
   "Remove this service from Docker? Its volumes are kept.": "Gỡ service khỏi Docker? Volume được giữ lại.",
   "Saved. Deploy to apply it.": "Đã lưu. Bấm Deploy để áp dụng.",
+  "Saved and applied.": "Đã lưu và áp dụng.",
+  "Waiting for deploy": "Chờ Deploy",
+  "A Compose service's domain: its next deployment applies it.": "Domain của service Compose: áp dụng ở lần Deploy tới.",
+  "A Compose service's domain: served until its next deployment.": "Domain của service Compose: vẫn phục vụ tới lần Deploy tới.",
+  "Every service's domains and where Traefik sends them. A change is applied when saved.":
+    "Domain của mọi service và nơi Traefik chuyển tới. Thay đổi được áp dụng ngay khi lưu.",
+  "It stops being served at once.": "Domain ngừng phục vụ ngay.",
+  "They can no longer sign in, at once.": "Người này không đăng nhập được nữa, có hiệu lực ngay.",
+  "Applied when saved, while the service runs.": "Áp dụng ngay khi lưu, khi service đang chạy.",
+  "Saved. It applies while the service runs.": "Đã lưu. Sẽ áp dụng khi service đang chạy.",
   "Saved.": "Đã lưu.",
   "This panel runs from source (development), not from install.sh: its address comes from APP_URL. The command below is for a server installed with install.sh.": "Panel này chạy từ mã nguồn (môi trường dev), không cài bằng install.sh: địa chỉ lấy từ APP_URL. Lệnh bên dưới dành cho server đã cài bằng install.sh.",
   "Empty: the installed panel answers at http://<server-ip>:3000. Point the domain's DNS (A record) to the server first.": "Để trống: panel đã cài sẽ chạy ở http://<ip-server>:3000. Trỏ DNS (bản ghi A) của domain về server trước.",
@@ -437,8 +447,8 @@ window.rustcms?.registerTranslations?.("vi", {
   // Maintenance.
   Maintenance: "Bảo trì",
   "Maintenance mode": "Chế độ bảo trì",
-  "While on, the service's domains show this page (503) instead of the service. Deploy to apply.":
-    "Khi bật, domain của service hiện trang này (503) thay cho service. Bấm Deploy để áp dụng.",
+  "While on, the service's domains show this page (503) instead of the service. Applied when saved.":
+    "Khi bật, domain của service hiện trang này (503) thay cho service. Áp dụng ngay khi lưu.",
   Title: "Tiêu đề",
   Subtitle: "Mô tả",
   "Under maintenance": "Đang bảo trì",
@@ -636,9 +646,6 @@ window.rustcms?.registerTranslations?.("vi", {
   // Domains page
   "Edit domain": "Sửa domain",
   "Choose a service": "Chọn service",
-  "Applied by the service's next deployment.": "Áp dụng ở lần deploy tiếp theo của service.",
-  "Every service's domains and where Traefik sends them. A change is applied by the service's next deployment.":
-    "Domain của mọi service và nơi Traefik chuyển tới. Thay đổi được áp dụng ở lần deploy tiếp theo của service.",
   "All projects": "Tất cả project",
   Live: "Đang chạy",
   "Waiting for Deploy": "Chờ Deploy",
@@ -683,14 +690,10 @@ window.rustcms?.registerTranslations?.("vi", {
   Unhealthy: "Không ổn định",
   // Domains page
   "All domains": "Tất cả domain",
-  "Waiting for deploy": "Chờ deploy",
   "Not running": "Không chạy",
   "Traefik serves it as configured.": "Traefik đang phục vụ đúng cấu hình.",
-  "Changed: the service's next deployment applies it.": "Đã sửa: lần deploy tới của service sẽ áp dụng.",
-  "Still served until the service's next deployment.": "Vẫn được phục vụ tới lần deploy tới của service.",
   "The service is stopped.": "Service đang dừng.",
   "Remove {host}?": "Xoá {host}?",
-  "It stops being served at the service's next deployment.": "Domain ngừng được phục vụ từ lần deploy tới của service.",
   "Remove domain": "Xoá domain",
   "Domain removed": "Đã xoá domain",
   "No domain in this project": "Project này chưa có domain",
@@ -781,7 +784,6 @@ window.rustcms?.registerTranslations?.("vi", {
   "Open to everyone": "Ai cũng vào được",
   "Add a user to ask visitors for a name and a password.": "Thêm user để khách phải nhập tên và mật khẩu.",
   "Remove the user {name}?": "Gỡ user {name}?",
-  "They can no longer sign in at the next deployment.": "Từ lần deploy tới, user này không đăng nhập được nữa.",
   "Remove user": "Gỡ user",
   "Add script": "Thêm script",
   "No script yet": "Chưa có script",

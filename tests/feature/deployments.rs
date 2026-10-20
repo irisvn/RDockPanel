@@ -24,6 +24,35 @@ pub(crate) const FAST: Timings = Timings {
     timeout: Duration::from_secs(2),
 };
 
+/// What the `deploy.publish` job a save queues does (no worker runs in
+/// tests): the service's routes written again, as saved.
+pub(crate) async fn publish_routes(app: &TestApp, id: i64) {
+    let db = app.state().db();
+    let jobs = rustcms::models::job::Entity::find()
+        .filter(rustcms::models::job::Column::Kind.eq("deploy.publish"))
+        .count(db)
+        .await
+        .unwrap();
+    assert!(jobs > 0, "a save queues the routes' publication");
+    let traefik = app
+        .state()
+        .service::<rdockpanel::services::traefik_service::Traefik>()
+        .unwrap();
+    let row = service::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .unwrap()
+        .unwrap();
+    rdockpanel::services::traefik_service::republish(
+        db,
+        &traefik,
+        &row,
+        &deployment_service::deploy_options(0),
+    )
+    .await
+    .unwrap();
+}
+
 pub(crate) fn records(app: &TestApp, slug: &str) -> String {
     app.admin_api(&format!("resources/{slug}/records"))
 }
@@ -1061,36 +1090,44 @@ db_test!(
         assert_eq!(run(&app, &admin, "restart", id).await.status, "succeeded");
         assert_eq!(traefik_updates(&fake), 1);
 
-        // A domain added: routed only once deployed.
+        // A domain added: routed when saved (its job), no deployment; the
+        // service has nothing to deploy.
         create(&app, &admin, "service_domains", json!({"service_id": id.to_string(), "host": "www.shop.localhost", "path": "/", "port": 80, "https": true})).await;
-        assert!(
-            !std::fs::read_to_string(&file)
-                .unwrap()
-                .contains("www.shop.localhost")
-        );
-        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        publish_routes(&app, id).await;
         let routes = std::fs::read_to_string(&file).unwrap();
         assert!(
             routes.contains("www.shop.localhost") && routes.contains("websecure"),
             "{routes}"
         );
+        assert_eq!(aside(&app, &admin, id).await["pending"], json!(false));
 
-        // A failed deployment (of another domain) leaves the routes of what
-        // still runs.
+        // A failed deployment (of a change of its image) leaves the routes,
+        // as saved, to what still runs.
         create(&app, &admin, "service_domains", json!({"service_id": id.to_string(), "host": "new.shop.localhost", "path": "/", "port": 80, "https": false})).await;
+        publish_routes(&app, id).await;
+        let changed = admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{}/{id}", records(&app, "services")),
+                Some(&json!({"image": "nginx:1.28"})),
+            )
+            .await;
+        assert!(changed.status.is_success(), "{}", changed.text());
+        assert_eq!(aside(&app, &admin, id).await["pending"], json!(true));
         *fake.task_state.lock().unwrap() = Some(TaskState::FAILED);
         assert_eq!(run(&app, &admin, "deploy", id).await.status, "failed");
         let routes = std::fs::read_to_string(&file).unwrap();
         assert!(
-            routes.contains("www.shop.localhost") && !routes.contains("new.shop.localhost"),
+            routes.contains("www.shop.localhost") && routes.contains("new.shop.localhost"),
             "{routes}"
         );
+        assert!(routes.contains("http://shop_web:80"), "{routes}");
         *fake.task_state.lock().unwrap() = None;
         // Swarm rolled it back: the same.
         *fake.update_state.lock().unwrap() = Some(ServiceUpdateStatusStateEnum::ROLLBACK_COMPLETED);
         assert_eq!(run(&app, &admin, "deploy", id).await.status, "rolled_back");
         assert!(
-            !std::fs::read_to_string(&file)
+            std::fs::read_to_string(&file)
                 .unwrap()
                 .contains("new.shop.localhost")
         );
@@ -1112,22 +1149,25 @@ db_test!(
         let aside = aside(&app, &admin, id).await;
         assert_eq!(aside["latest"]["published"], json!(false), "{aside}");
         std::fs::remove_file(&dir).unwrap();
+        let publications = || async {
+            rustcms::models::job::Entity::find()
+                .filter(rustcms::models::job::Column::Kind.eq("deploy.publish"))
+                .count(app.state().db())
+                .await
+                .unwrap()
+        };
+        let before = publications().await;
         action(&app, &admin, "services", "republish", &id.to_string())
             .await
             .assert_status(StatusCode::OK);
-        let jobs = rustcms::models::job::Entity::find()
-            .filter(rustcms::models::job::Column::Kind.eq("deploy.publish"))
-            .count(app.state().db())
-            .await
-            .unwrap();
-        assert_eq!(jobs, 1);
+        assert_eq!(publications().await, before + 1);
         let traefik = app
             .state()
             .service::<rdockpanel::services::traefik_service::Traefik>()
             .unwrap();
         // (The job's body.)
         assert!(
-            deployment_service::publish(app.state().db(), &traefik, id, unpublished.id)
+            deployment_service::publish(app.state().db(), None, &traefik, id, unpublished.id)
                 .await
                 .unwrap()
         );
@@ -1552,6 +1592,7 @@ db_test!(
         let fake = FakeDocker::default();
         let app = support::app_with_docker(db, fake.clone()).await;
         let (admin, id) = shop(&app).await;
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
         let auth = app.admin_api(&format!("x/apps/services/{id}/basic-auth"));
         admin
             .post_json(&auth, &json!({"username": "a b", "password": "short"}))
@@ -1578,8 +1619,9 @@ db_test!(
             json!({"service_id": id.to_string(), "regex": "^http://shop.localhost/old/(.*)", "replacement": "http://shop.localhost/new/${1}", "permanent": true, "enabled": true}),
         )
         .await;
-        // A change waiting for Deploy.
-        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        // Applied when saved (its job): no deployment, nothing to deploy.
+        publish_routes(&app, id).await;
+        assert_eq!(aside(&app, &admin, id).await["pending"], json!(false));
         let routes =
             std::fs::read_to_string(support::traefik_dir(&app).join("shop_web.yml")).unwrap();
         assert!(
@@ -1594,7 +1636,7 @@ db_test!(
             routes.contains("shop_web-redirect-0") && routes.contains("shop_web-auth"),
             "{routes}"
         );
-        // Removed: gone at the next deployment.
+        // Removed: gone at once.
         let page = admin
             .get(&app.admin_api(&format!("x/apps/services/{id}")))
             .await
@@ -1608,7 +1650,7 @@ db_test!(
             )
             .await
             .assert_status(StatusCode::NO_CONTENT);
-        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        publish_routes(&app, id).await;
         let routes =
             std::fs::read_to_string(support::traefik_dir(&app).join("shop_web.yml")).unwrap();
         assert!(!routes.contains("basicAuth"), "{routes}");
@@ -1709,11 +1751,7 @@ db_test!(
             )
             .await
             .assert_status(StatusCode::OK);
-        // Saved, not deployed yet: still the service.
-        app.get("/api/v1/maintenance/shop_web")
-            .await
-            .assert_status(StatusCode::NOT_FOUND);
-        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        // Applied when saved: the page, no deployment.
         let page = app.get("/api/v1/maintenance/shop_web").await;
         page.assert_status(StatusCode::SERVICE_UNAVAILABLE);
         let html = page.text();
@@ -2061,5 +2099,53 @@ db_test!(
             .await
             .assert_status(StatusCode::FORBIDDEN);
         admin.get(&errors).await.assert_status(StatusCode::OK);
+    }
+);
+
+db_test!(
+    a_first_domain_added_after_its_deployment_is_routed,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        let project = create(&app, &admin, "projects", json!({"name": "blog"})).await;
+        let service = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await;
+        let id: i64 = service.parse().unwrap();
+        let traefik_networks = |fake: &FakeDocker| -> Vec<String> {
+            fake.services.lock().unwrap()["rdp-traefik"]
+                .spec
+                .clone()
+                .unwrap()
+                .task_template
+                .unwrap()
+                .networks
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|n| n.target)
+                .collect()
+        };
+        // Deployed without a domain: Traefik stays off its project's network.
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        assert!(!traefik_networks(&fake).contains(&"rdp_blog".to_owned()));
+        create(&app, &admin, "service_domains", json!({"service_id": service, "host": "blog.localhost", "path": "/", "port": 80, "https": false})).await;
+        // The job the save queued: Traefik joins, the route is written.
+        rustcms::queue::run_until_idle(app.state(), None, 20)
+            .await
+            .unwrap();
+        assert!(traefik_networks(&fake).contains(&"rdp_blog".to_owned()));
+        let routes =
+            std::fs::read_to_string(support::traefik_dir(&app).join("blog_web.yml")).unwrap();
+        assert!(routes.contains("Host(`blog.localhost`)"), "{routes}");
+        assert!(routes.contains("http://blog_web:80"), "{routes}");
+        assert_eq!(aside(&app, &admin, id).await["pending"], json!(false));
     }
 );

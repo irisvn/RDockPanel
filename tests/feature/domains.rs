@@ -6,7 +6,7 @@ use rustcms::axum::http::StatusCode;
 use rustcms_testing::{TestDb, db_test};
 use serde_json::{Value, json};
 
-use crate::deployments::{create, records, run};
+use crate::deployments::{create, publish_routes, records, run};
 use crate::support::{self, fake_docker::FakeDocker};
 
 fn find<'a>(list: &'a Value, host: &str) -> &'a Value {
@@ -54,10 +54,12 @@ db_test!(
         let list = admin.get(&url).await.json();
         assert_eq!(find(&list, "shop.localhost")["status"], "live", "{list}");
 
-        // Added, changed, removed: as configured from the next deployment.
+        // Added, changed, removed: served as saved, without a deployment.
+        let id: i64 = service.parse().unwrap();
         create(&app, &admin, "service_domains", json!({"service_id": service, "host": "api.localhost", "path": "/", "port": 80, "https": false})).await;
+        publish_routes(&app, id).await;
         let list = admin.get(&url).await.json();
-        assert_eq!(find(&list, "api.localhost")["status"], "pending");
+        assert_eq!(find(&list, "api.localhost")["status"], "live");
         assert_eq!(find(&list, "shop.localhost")["status"], "live");
         let removed = admin
             .send(
@@ -67,50 +69,51 @@ db_test!(
             )
             .await;
         assert!(removed.status.is_success(), "{}", removed.text());
-        let list = admin.get(&url).await.json();
-        let gone = find(&list, "shop.localhost");
-        assert_eq!(gone["status"], "removed", "{list}");
-        assert_eq!(gone["id"], Value::Null);
-        assert_eq!(find(&list, "api.localhost")["primary"], true);
-
-        let deployed = run(&app, &admin, "deploy", service.parse().unwrap()).await;
-        assert_eq!(deployed.status, "succeeded", "{:?}", deployed.error);
+        // The page asks for the routes after a delete (no hook follows it).
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{id}/routes")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        publish_routes(&app, id).await;
+        let routes =
+            std::fs::read_to_string(support::traefik_dir(&app).join("shop_web.yml")).unwrap();
+        assert!(!routes.contains("Host(`shop.localhost`)"), "{routes}");
+        assert!(routes.contains("Host(`api.localhost`)"), "{routes}");
         let list = admin.get(&url).await.json();
         assert_eq!(list["domains"].as_array().unwrap().len(), 1, "{list}");
         let api = find(&list, "api.localhost");
         assert_eq!(api["status"], "live");
+        assert_eq!(api["primary"], true);
         assert_eq!(api["writable"], true);
         assert_eq!(list["services"][0]["writable"], true);
         assert_eq!(list["default_resolver"], Value::Null);
 
-        // Changed (as the form sends it, nullable fields too): waits.
-        let id = api["id"].as_i64().unwrap();
+        // Changed (as the form sends it, nullable fields too).
+        let domain = api["id"].as_i64().unwrap();
         let changed = admin
             .send(
                 rustcms::axum::http::Method::PATCH,
-                &format!("{}/{id}", records(&app, "service_domains")),
+                &format!("{}/{domain}", records(&app, "service_domains")),
                 Some(&json!({"host": "api.localhost", "path": "/", "port": 8081, "https": false, "middlewares": null, "cert_resolver_id": null, "certificate_id": null})),
             )
             .await;
         assert!(changed.status.is_success(), "{}", changed.text());
         let list = admin.get(&url).await.json();
-        assert_eq!(find(&list, "api.localhost")["status"], "pending");
+        assert_eq!(find(&list, "api.localhost")["status"], "live");
         assert_eq!(
             find(&list, "api.localhost")["target"],
             "http://shop_web:8081/"
         );
-        let deployed = run(&app, &admin, "deploy", service.parse().unwrap()).await;
-        assert_eq!(deployed.status, "succeeded", "{:?}", deployed.error);
-        assert_eq!(
-            find(&admin.get(&url).await.json(), "api.localhost")["status"],
-            "live"
-        );
 
-        // What every route carries (here a redirect): each domain waits.
-        create(&app, &admin, "service_redirects", json!({"service_id": service, "regex": "^/old", "replacement": "/new", "permanent": true, "enabled": true})).await;
+        // Stopped: not served.
+        let stopped = run(&app, &admin, "stop", id).await;
+        assert_eq!(stopped.status, "succeeded", "{:?}", stopped.error);
         assert_eq!(
             find(&admin.get(&url).await.json(), "api.localhost")["status"],
-            "pending"
+            "stopped"
         );
 
         // Without the services' names: refused; without system.manage: no
@@ -140,6 +143,6 @@ db_test!(
         assert_eq!(seen["can"]["system"], false);
         assert_eq!(seen["panel"], Value::Null);
         assert_eq!(seen["cert_resolvers"], json!([]));
-        assert_eq!(find(&seen, "api.localhost")["status"], "pending");
+        assert_eq!(find(&seen, "api.localhost")["status"], "stopped");
     }
 );
