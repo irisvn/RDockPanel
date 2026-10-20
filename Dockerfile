@@ -2,16 +2,26 @@
 # its configuration, and an entrypoint that migrates before serving.
 #   docker build -t rdockpanel .
 # The installer (install/install.sh) runs it as a Swarm service.
-FROM rust:1-bookworm AS build
-# What the binary says of itself (build.rs): the release, the commit.
+# The dependencies are built in a layer of their own (cargo-chef), cached
+# by CI between builds: a new commit rebuilds the panel's crate only.
+FROM rust:1-bookworm AS chef
+RUN cargo install cargo-chef --locked --version ^0.1
+WORKDIR /src
+
+FROM chef AS plan
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+COPY --from=plan /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json
+# What the binary says of itself (build.rs): the release, the commit
+# (declared after the dependencies: a new commit keeps their layer).
 ARG RDP_VERSION=""
 ARG RDP_COMMIT=""
 ENV RDP_VERSION=${RDP_VERSION} RDP_COMMIT=${RDP_COMMIT}
-WORKDIR /src
 COPY . .
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked \
+RUN cargo build --release --locked \
  && cp target/release/rdockpanel /rdockpanel \
  && strip /rdockpanel
 
