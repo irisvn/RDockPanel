@@ -7,7 +7,8 @@ import { Alert, Button, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui
 import { EmptyState, ErrorNote, type MenuItem, Page, Pager, RowActions, Section, StatusBadge, TableScroll, useAsk, usePaged } from "../lib/ui";
 import { dateTime, relative, size } from "../lib/format";
 
-type Image = { id: string; tags: string[]; size: number; created: number; containers: number };
+/** `running`/`stopped`: its containers by state (`null`: unknown). */
+type Image = { id: string; tags: string[]; size: number; created: number; containers: number; running: number | null; stopped: number | null };
 type Can = { "docker.manage"?: boolean; "system.manage"?: boolean };
 type Report = { containers_deleted: number; images_deleted: number; space_reclaimed: number };
 type Action = { status: string; log: string | null; error: string | null };
@@ -215,7 +216,17 @@ export function Images(props: PageProps<{ can?: Can }>) {
                         <td className="rdp2-hide-sm rdp2-nowrap" title={dateTime(image.created * 1000, props.locale)}>
                           {relative(image.created * 1000, props.locale)}
                         </td>
-                        <td>{image.containers > 0 ? <StatusBadge tone="ok" label={t("In use")} /> : <StatusBadge tone="off" label={t("Unused")} />}</td>
+                        <td>
+                          {image.running == null ? (
+                            <StatusBadge tone="off" label={t("Unknown")} />
+                          ) : image.running > 0 ? (
+                            <StatusBadge tone="ok" label={t("Running")} />
+                          ) : (image.stopped ?? 0) > 0 ? (
+                            <StatusBadge tone="off" label={t("Stopped containers only")} title={t("Kept by stopped containers (old tasks): not running.")} />
+                          ) : (
+                            <StatusBadge tone="off" label={t("Unused")} />
+                          )}
+                        </td>
                         <td>
                           <RowActions label={t("Actions for {host}").replace("{host}", tags[0])} menu={menu} />
                         </td>

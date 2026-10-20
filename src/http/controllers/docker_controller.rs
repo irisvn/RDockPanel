@@ -442,8 +442,21 @@ fn container_target(
     }
 }
 
+/// The images, each with its containers running and stopped (`null`:
+/// unknown).
 pub async fn images(State(app): State<AppState>) -> AppResult<Json<Value>> {
-    Ok(Json(json!({ "images": docker(&app)?.images().await? })))
+    let images: Vec<Value> = docker(&app)?
+        .images_with_use()
+        .await?
+        .into_iter()
+        .map(|(image, usage)| {
+            let mut value = serde_json::to_value(&image).unwrap_or_default();
+            value["running"] = json!(usage.map(|(running, _)| running));
+            value["stopped"] = json!(usage.map(|(_, stopped)| stopped));
+            value
+        })
+        .collect();
+    Ok(Json(json!({ "images": images })))
 }
 
 #[derive(Debug, Deserialize)]

@@ -93,6 +93,11 @@ jobs:
   release:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    # The GitHub Release (its notes: the CHANGELOG's section), after the
+    # image is named: what Settings → Version shows.
+    permissions:
+      contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -116,3 +121,20 @@ jobs:
           fi
           docker buildx imagetools create -t "$IMAGE:$GITHUB_REF_NAME" -t "$IMAGE:$version" \
             -t "$IMAGE:${version%.*}" -t "$IMAGE:latest" "$source"
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The CHANGELOG's section of this version (from its heading to the next).
+          awk -v v="$version" '
+            $0 ~ "^## " v "( |$)" { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md | sed '/./,$!d' > notes.md
+          # Run again (the image named, the release not): updated, not doubled.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "RDockPanel $version" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "RDockPanel $version" --notes-file notes.md --verify-tag --latest
+          fi

@@ -164,6 +164,15 @@ Traefik drops request headers whose names alias others (`X_Forwarded_For` beside
 `X-Forwarded-For`: `aliasHeadersStrategy=delete` on every entrypoint), so an app whose runtime reads
 both alike (PHP, WSGI) never takes a client's forged one for Traefik's.
 
+## Version checks
+
+Settings → Version asks, every 6 hours (by hand at most once a minute), the registry
+(`ghcr.io/irisvn/rdockpanel`, anonymously, as `docker pull` does) for its `X.Y.Z` tags and GitHub
+for the release notes; nothing about the server is sent (a user agent with the panel's version).
+The panel trusts the registry: images are not signed. It never updates itself: it shows the
+installer command for the newer version, run on the server by its administrator. Release notes
+are shown as text, never as HTML.
+
 ## GitHub tokens
 
 A token of Settings → Git is sealed with `APP_KEY`, never shown again, and usable only by the

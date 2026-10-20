@@ -1,5 +1,5 @@
 //! Settings → Panel's controls (`/admin/api/x/apps/system/...`), like
-//! EasyPanel's: the panel's logs, restart and update check, the server's
+//! EasyPanel's: the panel's logs, restart and version (Settings → Version), the server's
 //! address and reboot, Docker's prunes. `system.manage` (the routes).
 
 use futures_util::StreamExt;
@@ -107,11 +107,84 @@ pub async fn reboot(
     Ok(Json(json!({ "rebooting": true })))
 }
 
-pub async fn check_update(State(app): State<AppState>) -> AppResult<Json<Value>> {
+/// What cleaning the panel's own old versions would remove.
+pub async fn cleanup_preview(State(app): State<AppState>) -> AppResult<Json<Value>> {
     let docker = docker(&app)?;
     Ok(Json(
-        system_service::check_update(&docker, installed()).await?,
+        json!({ "cleanup": docker.system_cleanup(false).await? }),
     ))
+}
+
+/// Removes the panel's own old versions (logged as an action).
+pub async fn cleanup(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+) -> AppResult<Json<Value>> {
+    let docker = docker(&app)?;
+    let by = Initiator::user(auth.principal(), request);
+    let report = action_service::run(
+        app.db(),
+        &by,
+        "system.cleanup",
+        "old versions",
+        docker.system_cleanup(true),
+    )
+    .await?;
+    Ok(Json(json!({ "cleanup": report })))
+}
+
+/// Settings → Version.
+pub async fn version(State(app): State<AppState>) -> AppResult<Json<Value>> {
+    Ok(Json(
+        crate::services::version_service::status(&app, installed()).await?,
+    ))
+}
+
+/// Checks for a newer release now (at most once a minute), then Settings →
+/// Version as it is then.
+pub async fn check_version(State(app): State<AppState>) -> AppResult<Json<Value>> {
+    use crate::services::version_service::{self, Refused};
+    if let Err(Refused::TooSoon(wait)) = version_service::check(&app, true).await? {
+        return Err(AppError::TooManyRequests {
+            retry_after: wait.as_secs().max(1),
+        });
+    }
+    Ok(Json(version_service::status(&app, installed()).await?))
+}
+
+/// The Dashboard's notice for the caller (a panel administrator): the
+/// update they did not dismiss, if any.
+pub async fn version_notice(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Value>> {
+    let user: i64 = auth
+        .principal()
+        .id
+        .parse()
+        .map_err(|_| AppError::Forbidden)?;
+    Ok(Json(json!({
+        "notice": crate::services::version_service::notice(&app, user).await,
+    })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dismiss {
+    pub version: String,
+}
+
+/// Hides the Dashboard's notice of `version` for the caller.
+pub async fn dismiss_version(
+    State(app): State<AppState>,
+    auth: Auth,
+    Json(body): Json<Dismiss>,
+) -> AppResult<Json<Value>> {
+    let user: i64 = auth
+        .principal()
+        .id
+        .parse()
+        .map_err(|_| AppError::Forbidden)?;
+    crate::services::version_service::dismiss(app.db(), user, &body.version).await?;
+    Ok(Json(json!({ "dismissed": body.version })))
 }
 
 /// Finds the server's public address again (logged as an action).

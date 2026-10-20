@@ -3,7 +3,7 @@
 // asks for a name (and an image), nothing else.
 import { type ReactNode, useState } from "react";
 import { type AdminApi, type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
-import { Button, Dialog, Input, Loading, ErrorState, Textarea } from "@rustcms/admin-sdk/ui";
+import { Alert, Button, Dialog, Input, Loading, ErrorState, Textarea } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, Metric, NavLink, Page, RowActions, Section, Status, useAsk, useConfirm } from "../lib/ui";
 import { percent, size } from "../lib/format";
 import { ResourceError, resources } from "../lib/resources";
@@ -248,6 +248,40 @@ export function NewService(props: {
   );
 }
 
+/** A newer release, for the panel's administrators: its link, and a way to
+ * hide it until the next one (each their own). */
+function UpdateNotice(props: PageProps<unknown>) {
+  const t = props.t;
+  const notice = useAdminQuery<{ notice: { version: string } | null }>(props, "/apps/system/version/notice");
+  const [hidden, setHidden] = useState(false);
+  const version = notice.data?.notice?.version;
+  if (!version || hidden) return null;
+  return (
+    <Alert variant="warning">
+      <span className="rdp2-row rdp2-wrap">
+        <span>{t("RDockPanel {v} is out.").replace("{v}", version)}</span>
+        <NavLink to="/p/settings/version" navigate={props.navigate} className="rdp2-link rdp2-strong">
+          {t("See what changed")}
+        </NavLink>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={async () => {
+            setHidden(true);
+            try {
+              await props.api.post("/apps/system/version/dismiss", { version });
+            } catch {
+              // Shown again next time: nothing lost.
+            }
+          }}
+        >
+          {t("Hide")}
+        </Button>
+      </span>
+    </Alert>
+  );
+}
+
 /** The server's metrics, then the projects (with their permission). */
 export function Dashboard(props: PageProps<unknown>) {
   const t = props.t;
@@ -261,6 +295,7 @@ export function Dashboard(props: PageProps<unknown>) {
       description={t("Your server and the projects running on it.")}
       actions={canCreateProject && <Button onClick={() => setCreating(true)}>{t("New project")}</Button>}
     >
+      {props.can("system.manage") && <UpdateNotice {...props} />}
       <ServerTiles {...props} />
       <Projects {...props} creating={creating} setCreating={setCreating} />
       <Versions {...props} />

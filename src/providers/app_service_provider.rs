@@ -264,6 +264,10 @@ impl ServiceProvider for AppServiceProvider {
         if std::env::args().nth(1).as_deref() != Some("serve") {
             return Ok(());
         }
+        // Another version than the last start's: the history's.
+        if let Err(err) = crate::services::version_service::record_start(state.db()).await {
+            tracing::debug!(%err, "the version's change not recorded");
+        }
         // A restart of the panel or a reboot it asked for: it came back.
         match crate::services::action_service::came_back(
             state.db(),

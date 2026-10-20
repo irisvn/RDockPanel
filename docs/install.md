@@ -67,7 +67,12 @@ kept).
 Images: `ghcr.io/irisvn/rdockpanel:main` (the newest commit of `main`), `:main-<commit>` (that
 commit), and for a release `vX.Y.Z` the tags `:X.Y.Z`, `:X.Y` and `:latest`. The panel says which
 it runs (its version, commit and RustCMS Core's) at the foot of the Dashboard and in
-Settings → Panel, where **Check for updates** compares it with the registry. A secret file in
+**Settings → Version**. A release's panel checks every 6 hours for a newer release (the
+registry's `X.Y.Z` tags; the notes are GitHub's release), says so there and on the Dashboard (to
+its administrators) and gives the installer command for it (`--version X.Y.Z`): the panel never
+updates itself. A `main` image is a development build: not compared. Settings → Version also
+removes the panel's old versions (old tasks' stopped containers and their images; the running and
+previous versions kept). A secret file in
 `/etc/rdockpanel/secrets` that no longer matches its Docker secret stops the installer: restore
 the file from a backup (changing `APP_KEY` needs `rustcms key:reencrypt`; see
 [security](security.md)).

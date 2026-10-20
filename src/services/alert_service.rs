@@ -202,8 +202,10 @@ pub async fn check_health(state: &AppState) -> AppResult<()> {
     Ok(())
 }
 
-/// A newer panel image (installed only): said once per image.
+/// A newer release (installed from a release's image only): checked
+/// ([`version_service::check`]) and said once per version.
 pub async fn check_update(state: &AppState) -> AppResult<()> {
+    use crate::services::version_service;
     let cfg = crate::services::deploy_rules_service::config();
     let Some(docker) = state.service::<Docker>() else {
         return Ok(());
@@ -211,24 +213,24 @@ pub async fn check_update(state: &AppState) -> AppResult<()> {
     if !cfg.installed {
         return Ok(());
     }
-    let found = crate::services::system_service::check_update(&docker, true).await?;
-    let (Some(true), Some(latest), Some(image)) = (
-        found["update"].as_bool(),
-        found["latest"].as_str(),
-        found["image"].as_str(),
-    ) else {
+    let Ok(check) = version_service::check(state, false).await? else {
         return Ok(());
     };
-    if panel_setting::get(state.db(), UPDATE_KEY).await?.as_deref() == Some(latest) {
+    let image = crate::services::system_service::own_image(&docker)
+        .await
+        .ok()
+        .flatten()
+        .map(|(image, _)| image);
+    let Some(version) =
+        version_service::update_of(&check, version_service::channel(image.as_deref()))
+    else {
+        return Ok(());
+    };
+    if panel_setting::get(state.db(), UPDATE_KEY).await?.as_deref() == Some(version.as_str()) {
         return Ok(());
     }
-    panel_setting::set(state.db(), UPDATE_KEY, latest).await?;
-    notify(
-        state,
-        Event::Update {
-            image: image.to_owned(),
-        },
-    );
+    panel_setting::set(state.db(), UPDATE_KEY, &version).await?;
+    notify(state, Event::Update { version });
     Ok(())
 }
 

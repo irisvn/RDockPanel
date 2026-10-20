@@ -196,10 +196,35 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("system.manage"),
                     system::reboot,
                 )
-                .post(
-                    "/system/update",
+                .get(
+                    "/system/version",
                     AdminAccess::can("system.manage"),
-                    system::check_update,
+                    system::version,
+                )
+                .post(
+                    "/system/version/check",
+                    AdminAccess::can("system.manage"),
+                    system::check_version,
+                )
+                .get(
+                    "/system/version/notice",
+                    AdminAccess::can("system.manage"),
+                    system::version_notice,
+                )
+                .post(
+                    "/system/version/dismiss",
+                    AdminAccess::can("system.manage"),
+                    system::dismiss_version,
+                )
+                .get(
+                    "/system/cleanup",
+                    AdminAccess::can("system.manage"),
+                    system::cleanup_preview,
+                )
+                .post(
+                    "/system/cleanup",
+                    AdminAccess::can("system.manage"),
+                    system::cleanup,
                 )
                 .post(
                     "/system/ip",

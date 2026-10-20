@@ -4,7 +4,7 @@
 //! administrators' (`system.manage`).
 //!
 //! The panel never changes its own image: an update is the installer's
-//! command, run on the server. Its restart and the server's reboot are
+//! command, run on the server (Settings → Version gives it). Its restart and the server's reboot are
 //! logged and audited before they start (they stop the panel).
 
 use std::net::IpAddr;
@@ -89,7 +89,7 @@ pub async fn hostname(app: &rustcms::AppState) -> String {
 /// local image's id): its own container's (`HOSTNAME`, Docker's short id),
 /// else its service's (what Swarm wants: a rollout may not have reached
 /// this task). None: not the installer's service.
-async fn own_image(docker: &Docker) -> DockerResult<Option<(String, Option<String>)>> {
+pub async fn own_image(docker: &Docker) -> DockerResult<Option<(String, Option<String>)>> {
     let Some(service) = docker.engine().inspect_service(SELF_SERVICE).await? else {
         return Ok(None);
     };
@@ -244,45 +244,6 @@ pub async fn reboot(
         return Err(err.into());
     }
     Ok(())
-}
-
-/// Whether the registry serves a newer image than the panel runs, and the
-/// installer command that updates it (the panel never replaces itself).
-pub async fn check_update(docker: &Docker, installed: bool) -> AppResult<Value> {
-    if !installed {
-        return Ok(json!({ "installed": false }));
-    }
-    let Some((image, _)) = own_image(docker).await? else {
-        return Ok(json!({ "installed": true, "image": Value::Null }));
-    };
-    let (reference, running) = match image.split_once('@') {
-        Some((reference, digest)) => (reference.to_owned(), Some(digest.to_owned())),
-        None => (image.clone(), None),
-    };
-    // Swarm pins the digest the registry served (a multi-platform image's
-    // index), as the registry serves it now: the same kind compared.
-    // Unknown (offline, a registry that needs a login): said so.
-    let latest = docker
-        .engine()
-        .registry_digest(&reference)
-        .await
-        .ok()
-        .flatten();
-    let update = match (&running, &latest) {
-        (Some(running), Some(latest)) => json!(running != latest),
-        _ => Value::Null,
-    };
-    Ok(json!({
-        "installed": true,
-        "image": reference,
-        "running": running,
-        "latest": latest,
-        "update": update,
-        "command": format!(
-            "curl -fsSL {} | sudo sh",
-            crate::services::panel_domain_service::INSTALLER
-        ),
-    }))
 }
 
 /// Asks the public address again ([`IP_LOOKUPS`], the first valid answer),

@@ -1,8 +1,7 @@
 // Settings → Panel's controls, like EasyPanel's: Panel ▾ (its logs, a
-// restart, whether a newer image is out), Server ▾ (its public address found
-// again, a reboot), Traefik ▾ (its logs, a restart), Docker ▾ (prunes). The
-// panel's administrators' (`system.manage`). An update is the installer's
-// command, run on the server: the panel never replaces itself.
+// restart), Server ▾ (its public address found again, a reboot), Traefik ▾
+// (its logs, a restart), Docker ▾ (prunes). The panel's administrators'
+// (`system.manage`). Its version and updates: Settings → Version.
 import { useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, CodeBlock, Dialog, DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, Input } from "@rustcms/admin-sdk/ui";
@@ -18,15 +17,6 @@ type Status = {
   public_ip: string | null;
   service: boolean;
   can_reboot: boolean;
-};
-
-type Update = {
-  installed: boolean;
-  image?: string | null;
-  running?: string | null;
-  latest?: string | null;
-  update?: boolean | null;
-  command?: string;
 };
 
 type Report = { containers_deleted: number; images_deleted: number; volumes_deleted?: number; build_caches_deleted?: number; space_reclaimed: number };
@@ -96,7 +86,6 @@ export function Controls(props: PageProps<unknown>) {
         : "failed";
   const dockerState = status.error || proxy.error ? "unknown" : status.data ? "running" : "starting";
   const [logs, setLogs] = useState<"panel" | "traefik" | null>(null);
-  const [update, setUpdate] = useState<Update | null>(null);
   const [rebooting, setRebooting] = useState(false);
   const [waiting, setWaiting] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -180,8 +169,8 @@ export function Controls(props: PageProps<unknown>) {
                   <Button size="sm" variant="ghost" onClick={() => setLogs("panel")}>
                     {t("Logs")}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={async () => setUpdate((await call(() => props.api.post<Update>("/apps/system/update", {}))) ?? null)}>
-                    {t("Check for updates")}
+                  <Button size="sm" variant="ghost" onClick={() => props.navigate("/p/settings/version")}>
+                    {t("Version")}
                   </Button>
                 </RowActions>
               </td>
@@ -243,27 +232,6 @@ export function Controls(props: PageProps<unknown>) {
         <Dialog open onClose={() => setLogs(null)} title={logs === "panel" ? t("RDockPanel logs") : t("Traefik logs")} className="rdp2-wide">
           {logs === "panel" && !s?.service && <p className="rdp2-small rdp2-muted">{t("From source: the last lines this process wrote.")}</p>}
           <Logs {...props} url={logs === "panel" ? "/apps/system/logs/300" : "/apps/traefik/logs/200"} />
-        </Dialog>
-      )}
-      {update && (
-        <Dialog open onClose={() => setUpdate(null)} title={t("Check for updates")}>
-          {!update.installed ? (
-            <p>{t("This panel runs from source: update it with git pull and a new build.")}</p>
-          ) : (
-            <div className="rdp2-form">
-              <Facts
-                items={[
-                  [t("Image"), <span className="rdp2-mono">{update.image ?? t("unknown")}</span>],
-                  [t("Running"), <span className="rdp2-mono rdp2-ellipsis">{update.running ?? t("unknown")}</span>],
-                  [t("Latest"), <span className="rdp2-mono rdp2-ellipsis">{update.latest ?? t("unknown")}</span>],
-                ]}
-              />
-              {update.update === true && <Alert variant="warning">{t("A newer image is out. Run this on the server (as root): the installer keeps your settings.")}</Alert>}
-              {update.update === false && <Alert>{t("The panel runs the latest image.")}</Alert>}
-              {update.update == null && <Alert>{t("The registry did not say (offline, or it needs a login). The installer updates it anyway:")}</Alert>}
-              {update.update !== false && update.command && <CodeBlock code={update.command} label={t("Installer command")} />}
-            </div>
-          )}
         </Dialog>
       )}
       {rebooting && s && <RebootDialog {...props} hostname={s.hostname} onClose={() => setRebooting(false)} onDone={() => {

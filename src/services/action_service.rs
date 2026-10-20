@@ -116,6 +116,25 @@ pub async fn start<C: ConnectionTrait>(
     Ok(row.insert(db).await?)
 }
 
+/// A row of something done, not by a user (the panel's own): ok and finished.
+pub async fn record<C: ConnectionTrait>(
+    db: &C,
+    kind: &str,
+    target: &str,
+) -> AppResult<action::Model> {
+    let now = Utc::now();
+    let row = action::ActiveModel {
+        kind: Set(kind.to_owned()),
+        target: Set(target.chars().take(255).collect()),
+        status: Set(action::OK.to_owned()),
+        finished_at: Set(Some(now)),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    };
+    Ok(row.insert(db).await?)
+}
+
 /// Replaces `row`'s log (while it runs).
 pub async fn note<C: ConnectionTrait>(
     db: &C,

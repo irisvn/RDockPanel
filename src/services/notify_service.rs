@@ -101,9 +101,9 @@ pub enum Event {
     Traefik {
         down: bool,
     },
-    /// A newer image of the panel is out (the installer updates it).
+    /// A newer release of the panel is out (Settings → Version).
     Update {
-        image: String,
+        version: String,
     },
     /// Docker objects pruned (Settings → Panel → Docker).
     Prune {
@@ -204,7 +204,7 @@ impl Event {
             } => format!("{project}/{service} runs again"),
             Self::Traefik { down: true } => "Traefik is not running: no domain answers".to_owned(),
             Self::Traefik { down: false } => "Traefik runs again".to_owned(),
-            Self::Update { .. } => "a newer RDockPanel is out".to_owned(),
+            Self::Update { version } => format!("RDockPanel {version} is out"),
             Self::Prune { kind, removed, .. } => format!("Docker {kind} pruned: {removed} removed"),
             Self::Login { user, ip } => format!("{user} signed in from a new address ({ip})"),
             Self::Test => "a test notification from RDockPanel".to_owned(),
@@ -229,8 +229,9 @@ impl Event {
             }
             Self::Service { error, .. } => error.clone().unwrap_or_default(),
             Self::Traefik { .. } => String::new(),
-            Self::Update { image } => {
-                format!("{image}: Settings → Panel → Check for updates gives the installer command")
+            Self::Update { .. } => {
+                "Settings → Version: what changed, and the command that updates the panel"
+                    .to_owned()
             }
             Self::Prune { reclaimed, .. } => {
                 format!("{} MB freed", reclaimed / 1_000_000)
@@ -293,7 +294,7 @@ impl Event {
                 error,
             } => json!({"project": project, "service": service, "down": down, "error": error}),
             Self::Traefik { down } => json!({"down": down}),
-            Self::Update { image } => json!({"image": image}),
+            Self::Update { version } => json!({"version": version}),
             Self::Prune {
                 kind,
                 removed,

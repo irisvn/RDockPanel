@@ -164,7 +164,32 @@ db_test!(
                     &operator,
                     StatusCode::FORBIDDEN,
                 ),
-                Case::new(Method::POST, "/apps/system/update").expect(
+                Case::new(Method::GET, "/apps/system/version").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::POST, "/apps/system/version/check").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::GET, "/apps/system/version/notice").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::POST, "/apps/system/version/dismiss").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::GET, "/apps/system/cleanup").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
+                Case::new(Method::POST, "/apps/system/cleanup").expect(
                     "operator",
                     &operator,
                     StatusCode::FORBIDDEN,

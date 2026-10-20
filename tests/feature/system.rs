@@ -1,5 +1,6 @@
 //! Settings → Panel's controls (`/admin/api/x/apps/system`): the panel's
-//! restart and update check, the server's reboot, Docker's prunes — each
+//! restart, the server's reboot, Docker's prunes; Settings → Version (its
+//! history, the Dashboard's notice, old versions cleaned up) — each
 //! logged as an action and audited, the disruptive ones before they start.
 
 use rdockpanel::database::migrations::Migrator;
@@ -97,10 +98,10 @@ db_test!(
             .post_json(&api("reboot"), &json!({"confirm": status["hostname"]}))
             .await
             .assert_validation_error("server");
-        assert_eq!(
-            admin.post_json(&api("update"), &json!({})).await.json()["installed"],
-            false
-        );
+        // From source: its version shown, no check asked (no registry).
+        let version = admin.get(&api("version")).await.json();
+        assert_eq!(version["rdockpanel"]["installed"], false);
+        assert_eq!(version["rdockpanel"]["channel"], "source");
         assert!(
             calls
                 .lock()
@@ -148,13 +149,12 @@ db_test!(
 );
 
 db_test!(
-    installed_restart_reboot_and_updates,
+    installed_restart_and_reboot,
     migrate = Migrator,
     |db: TestDb| async move {
         let docker = FakeDocker::default();
         installed(&docker);
         let calls = docker.calls.clone();
-        let registry = docker.registry.clone();
         let app = support::app_with_docker(db, docker).await;
         let state = app.state();
         let docker = state.service::<Docker>().unwrap();
@@ -221,25 +221,216 @@ db_test!(
         );
         assert_eq!(rows(&app, "server.reboot").await[0].status, action::RUNNING);
         assert_eq!(audited(&app, "system.server.reboot").await, 1);
+    }
+);
 
-        // Updates: as the registry serves the tag now; unknown when it does not say.
-        let update = system_service::check_update(&docker, true).await.unwrap();
-        assert_eq!(update["update"], Value::Null);
-        assert_eq!(update["image"], IMAGE);
-        registry
-            .lock()
-            .unwrap()
-            .insert(IMAGE.to_owned(), "sha256:aaa".to_owned());
-        assert_eq!(
-            system_service::check_update(&docker, true).await.unwrap()["update"],
-            false
+fn container(
+    id: &str,
+    service: Option<&str>,
+    image: &str,
+    state: &str,
+    created: i64,
+) -> rdockpanel::services::docker_service::ContainerItem {
+    let mut labels = HashMap::new();
+    if let Some(service) = service {
+        labels.insert(SYSTEM_LABEL.to_owned(), "true".to_owned());
+        labels.insert(
+            "com.docker.swarm.service.name".to_owned(),
+            service.to_owned(),
         );
-        registry
-            .lock()
+    }
+    rdockpanel::services::docker_service::ContainerItem {
+        id: id.to_owned(),
+        name: id.to_owned(),
+        image: image.to_owned(),
+        image_id: image.to_owned(),
+        state: state.to_owned(),
+        status: String::new(),
+        created,
+        ports: vec![],
+        labels,
+    }
+}
+
+fn image(id: &str, tag: &str) -> rdockpanel::services::docker_service::ImageItem {
+    rdockpanel::services::docker_service::ImageItem {
+        id: id.to_owned(),
+        tags: vec![tag.to_owned()],
+        size: 300_000_000,
+        created: 0,
+        containers: -1,
+        labels: HashMap::new(),
+    }
+}
+
+db_test!(
+    old_versions_go_but_the_running_and_previous_ones,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        *fake.containers.lock().unwrap() = vec![
+            container("run", Some("rdockpanel"), "sha256:new", "running", 300),
+            container("restarted", Some("rdockpanel"), "sha256:new", "exited", 250),
+            container("previous", Some("rdockpanel"), "sha256:prev", "exited", 200),
+            container("old", Some("rdockpanel"), "sha256:old", "exited", 100),
+            container("theirs", None, "sha256:theirs", "exited", 50),
+            // Nothing runs (failing): its newest version and the one before kept.
+            container("t-new", Some("rdp-traefik"), "sha256:t-new", "exited", 300),
+            container(
+                "t-prev",
+                Some("rdp-traefik"),
+                "sha256:t-prev",
+                "exited",
+                200,
+            ),
+            container("t-old", Some("rdp-traefik"), "sha256:t-old", "exited", 100),
+        ];
+        *fake.images.lock().unwrap() = vec![
+            image("sha256:new", "ghcr.io/irisvn/rdockpanel:0.5.0"),
+            image("sha256:prev", "ghcr.io/irisvn/rdockpanel:0.4.2"),
+            image("sha256:old", "ghcr.io/irisvn/rdockpanel:0.4.1"),
+            image("sha256:theirs", "nginx:1.27"),
+            image("sha256:t-new", "traefik:v3.7"),
+            image("sha256:t-prev", "traefik:v3.5"),
+            image("sha256:t-old", "traefik:v3.4"),
+        ];
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let docker = Docker::new(fake.clone());
+
+        // Each image's containers by state: running, or kept by stopped ones.
+        let usage: HashMap<String, Option<(usize, usize)>> = docker
+            .images_with_use()
+            .await
             .unwrap()
-            .insert(IMAGE.to_owned(), "sha256:bbb".to_owned());
-        let update = system_service::check_update(&docker, true).await.unwrap();
-        assert_eq!(update["update"], true);
-        assert!(update["command"].as_str().unwrap().contains("install.sh"));
+            .into_iter()
+            .map(|(i, u)| (i.id, u))
+            .collect();
+        assert_eq!(usage["sha256:new"], Some((1, 1)));
+        assert_eq!(usage["sha256:prev"], Some((0, 1)));
+        assert_eq!(usage["sha256:theirs"], Some((0, 1)));
+
+        // Said first: only the old tasks' containers and their images.
+        let said = docker.system_cleanup(false).await.unwrap();
+        assert_eq!(said.containers, 2);
+        let mut ids: Vec<_> = said
+            .images
+            .iter()
+            .map(|i| i["id"].as_str().unwrap().to_owned())
+            .collect();
+        ids.sort();
+        assert_eq!(ids, ["sha256:old", "sha256:t-old"]);
+        assert!(
+            fake.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|c| !c.starts_with("remove"))
+        );
+
+        // By an administrator only, then removed (never forced).
+        let user = support::user_with(&app, "operator", &["server.view"]).await;
+        app.acting_as(&user)
+            .await
+            .post_json(&app.admin_api("x/apps/system/cleanup"), &json!({}))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let done = admin
+            .post_json(&app.admin_api("x/apps/system/cleanup"), &json!({}))
+            .await;
+        done.assert_status(StatusCode::OK);
+        let calls = fake.calls.lock().unwrap().clone();
+        assert!(calls.contains(&"remove old".to_owned()), "{calls:?}");
+        assert!(
+            calls.contains(&"remove-image sha256:old force=false".to_owned()),
+            "{calls:?}"
+        );
+        for kept in [
+            "remove run",
+            "remove restarted",
+            "remove previous",
+            "remove theirs",
+            "remove t-new",
+            "remove t-prev",
+        ] {
+            assert!(!calls.contains(&kept.to_owned()), "{kept}: {calls:?}");
+        }
+        assert!(calls.contains(&"remove t-old".to_owned()), "{calls:?}");
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.contains("sha256:prev") || c.contains("sha256:new"))
+        );
+        assert_eq!(rows(&app, "system.cleanup").await[0].status, action::OK);
+    }
+);
+
+db_test!(
+    version_changes_are_the_history_and_notices_are_dismissed,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::version_service;
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let state = app.state();
+        let db = state.db();
+        // The first start: nothing to say; another version: from → to.
+        version_service::record_start(db).await.unwrap();
+        assert!(rows(&app, "panel.version").await.is_empty());
+        rdockpanel::models::panel_setting::set(db, "version.seen", "0.0.1")
+            .await
+            .unwrap();
+        version_service::record_start(db).await.unwrap();
+        let changed = rows(&app, "panel.version").await;
+        assert_eq!(changed.len(), 1);
+        assert!(
+            changed[0].target.starts_with("0.0.1 → "),
+            "{}",
+            changed[0].target
+        );
+        version_service::record_start(db).await.unwrap();
+        assert_eq!(rows(&app, "panel.version").await.len(), 1);
+
+        // Settings → Version: its history; an administrator's only.
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let page = admin.get(&app.admin_api("x/apps/system/version")).await;
+        page.assert_status(StatusCode::OK);
+        let page = page.json();
+        assert_eq!(page["rdockpanel"]["channel"], "source");
+        assert_eq!(page["history"][0]["kind"], "panel.version");
+        assert_eq!(page["update"], Value::Null);
+
+        // A notice dismissed: that version, by that user.
+        admin
+            .post_json(
+                &app.admin_api("x/apps/system/version/dismiss"),
+                &json!({"version": "main"}),
+            )
+            .await
+            .assert_validation_error("version");
+        admin
+            .post_json(
+                &app.admin_api("x/apps/system/version/dismiss"),
+                &json!({"version": "9.0.0"}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let key = format!("version.dismissed.{}", root.id);
+        assert_eq!(
+            rdockpanel::models::panel_setting::get(db, &key)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("9.0.0")
+        );
+        // From source: no notice.
+        let notice = admin
+            .get(&app.admin_api("x/apps/system/version/notice"))
+            .await;
+        notice.assert_status(StatusCode::OK);
+        assert_eq!(notice.json()["notice"], Value::Null);
     }
 );

@@ -12,6 +12,7 @@ import { Certificates } from "./Certificates";
 import { UploadedCertificates } from "./Uploaded";
 import { Traefik } from "./Traefik";
 import { Panel } from "./Panel";
+import { Version } from "./Version";
 import { Git } from "./Git";
 import { Tokens } from "./Tokens";
 import { Tunnel } from "./Tunnel";
@@ -250,6 +251,7 @@ function StorageProviders(props: PageProps<unknown>) {
 /** Its sub-pages (`/p/settings/<tab>`), each shown with its own permission. */
 const TABS: Array<{ id: string; label: string; permission: string | null }> = [
   { id: "panel", label: "Panel", permission: "system.manage" },
+  { id: "version", label: "Version", permission: "system.manage" },
   { id: "traefik", label: "Traefik", permission: "system.manage" },
   { id: "certificates", label: "Certificates", permission: "system.manage" },
   { id: "tunnel", label: "Cloudflare Tunnel", permission: "system.manage" },
@@ -289,6 +291,7 @@ export function Settings(props: PageProps<unknown>) {
         tabs={tabs.map((x) => ({ id: x.id, label: t(x.label) }))}
       >
         {tab === "panel" && <Panel {...props} />}
+        {tab === "version" && <Version {...props} />}
         {tab === "traefik" && <Traefik {...props} />}
         {tab === "certificates" && (
           <>

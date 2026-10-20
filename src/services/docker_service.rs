@@ -599,6 +599,122 @@ impl Docker {
         self.0.prune(SYSTEM_LABEL).await
     }
 
+    /// Each image with how its containers are: running (or paused,
+    /// restarting) and stopped (exited, created, dead). `None`: Docker did
+    /// not list its containers (unknown, never guessed).
+    pub async fn images_with_use(&self) -> DockerResult<Vec<(ImageItem, Option<(usize, usize)>)>> {
+        let images = self.0.images().await?;
+        let containers = self.0.containers().await.ok();
+        Ok(images
+            .into_iter()
+            .map(|image| {
+                let usage = containers.as_ref().map(|list| {
+                    let mine = list.iter().filter(|c| c.image_id == image.id);
+                    mine.fold((0, 0), |(running, stopped), c| {
+                        if is_stopped(&c.state) {
+                            (running, stopped + 1)
+                        } else {
+                            (running + 1, stopped)
+                        }
+                    })
+                });
+                (image, usage)
+            })
+            .collect())
+    }
+
+    /// The panel's own old versions (its services': the panel, Traefik,
+    /// MySQL, cloudflared): their old tasks' stopped containers, then the
+    /// images left without a container. Kept: every image a container runs,
+    /// and each service's previous image (its newest stopped task of
+    /// another image: what a rollback or a look back needs). `apply`:
+    /// removed (never forced), else only said.
+    pub async fn system_cleanup(&self, apply: bool) -> DockerResult<SystemCleanup> {
+        const SERVICE: &str = "com.docker.swarm.service.name";
+        let containers = self.0.containers().await?;
+        let mut kept: std::collections::HashSet<String> = containers
+            .iter()
+            .filter(|c| !is_stopped(&c.state))
+            .map(|c| c.image_id.clone())
+            .collect();
+        let mut services: HashMap<&str, Vec<&ContainerItem>> = HashMap::new();
+        for c in containers.iter().filter(|c| is_system(&c.labels)) {
+            if let Some(service) = c.labels.get(SERVICE) {
+                services.entry(service.as_str()).or_default().push(c);
+            }
+        }
+        for tasks in services.values_mut() {
+            tasks.sort_by_key(|c| std::cmp::Reverse(c.created));
+            // Its current version: what runs, else (stopped, failing) its
+            // newest task's.
+            let mut current: std::collections::HashSet<&str> = tasks
+                .iter()
+                .filter(|c| !is_stopped(&c.state))
+                .map(|c| c.image_id.as_str())
+                .collect();
+            if current.is_empty()
+                && let Some(newest) = tasks.first()
+            {
+                current.insert(newest.image_id.as_str());
+            }
+            kept.extend(current.iter().map(|id| (*id).to_owned()));
+            if let Some(previous) = tasks
+                .iter()
+                .find(|c| !current.contains(c.image_id.as_str()))
+            {
+                kept.insert(previous.image_id.clone());
+            }
+        }
+        let old: Vec<&ContainerItem> = services
+            .values()
+            .flatten()
+            .copied()
+            .filter(|c| is_stopped(&c.state) && !kept.contains(&c.image_id))
+            .collect();
+        let candidates: std::collections::HashSet<&str> =
+            old.iter().map(|c| c.image_id.as_str()).collect();
+        let mut report = SystemCleanup::default();
+        let images = self.0.images().await?;
+        for image in images.iter().filter(|i| candidates.contains(i.id.as_str())) {
+            // Only those no other container uses.
+            let others = containers
+                .iter()
+                .any(|c| c.image_id == image.id && !old.iter().any(|o| o.id == c.id));
+            if !others {
+                report.images.push(serde_json::json!({
+                    "id": image.id,
+                    "tags": image.tags,
+                    "size": image.size,
+                }));
+                report.space += u64::try_from(image.size).unwrap_or(0);
+            }
+        }
+        report.containers = old.len();
+        if !apply {
+            return Ok(report);
+        }
+        for c in &old {
+            if let Err(err) = self.0.remove_container(&c.id, false).await {
+                tracing::warn!(%err, container = c.name, "an old task's container not removed");
+            }
+        }
+        let mut removed = Vec::new();
+        for image in std::mem::take(&mut report.images) {
+            let id = image["id"].as_str().unwrap_or_default().to_owned();
+            match self.0.remove_image(&id, false).await {
+                Ok(()) => removed.push(image),
+                Err(err) => {
+                    report.space = report
+                        .space
+                        .saturating_sub(image["size"].as_u64().unwrap_or(0));
+                    tracing::warn!(%err, image = id, "an old image not removed");
+                }
+            }
+        }
+        report.images = removed;
+        Ok(report)
+    }
+
     /// Removes what `kind` names; never the panel's own objects, nor (for
     /// volumes) data a service of the panel's or a Compose project keeps.
     pub async fn prune_kind(&self, kind: PruneKind) -> DockerResult<PruneReport> {
@@ -1091,6 +1207,20 @@ impl Unavailable {
     fn err(&self) -> DockerError {
         DockerError::Unavailable(self.0.clone())
     }
+}
+
+/// A container's state that is not running (nor paused or restarting).
+fn is_stopped(state: &str) -> bool {
+    matches!(state, "exited" | "created" | "dead")
+}
+
+/// [`Docker::system_cleanup`]'s report: old tasks' containers, and the
+/// images they leave (tags, size).
+#[derive(Debug, Default, Serialize)]
+pub struct SystemCleanup {
+    pub containers: usize,
+    pub images: Vec<Value>,
+    pub space: u64,
 }
 
 fn is_system(labels: &HashMap<String, String>) -> bool {

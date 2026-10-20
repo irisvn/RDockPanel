@@ -3,10 +3,19 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
-## Unreleased
+## 0.5.0 — 2026-10-20
 
-On RustCMS Core 0.8.0 (run `rustcms migrate` and `rustcms permission:sync`: the installer does).
+On RustCMS Core 0.8.0 (the image runs `migrate` and `permission:sync` at its start).
 
+- **Settings → Version**: what the panel runs (version, commit, image) and with what (Core,
+  Traefik, MySQL, cloudflared, Docker, the OS); whether a newer release is out (the registry's
+  `X.Y.Z` tags, checked every 6 hours or by hand), its notes and the installer command for it; the
+  history of version changes and restarts. The Dashboard says a newer release to the panel's
+  administrators (each can hide it until the next). The panel never updates itself.
+- **Old versions removed** (Settings → Version): the stopped containers of the panel's services'
+  old tasks and their images, the running and previous versions kept. The Images page says which
+  images run, which only stopped containers keep, and which none uses.
+- Releases now publish their GitHub Release (this file's section) once their image is named.
 - **Every dialog has a close button (×)** (Core 0.7.1).
 - **System → Queue** keeps a history of finished jobs, each described ("deployment #12", "pull
   nginx:1.27"); **System → Schedules** shows the panel's nine schedules, their last runs with a
