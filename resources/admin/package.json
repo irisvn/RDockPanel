@@ -2,7 +2,9 @@
   "name": "admin-extensions",
   "private": true,
   "type": "module",
-  "engines": { "node": "^20.19.0 || >=22.12.0" },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
     "build": "rustcms-build",
     "typecheck": "tsc --noEmit"
@@ -11,6 +13,7 @@
     "@rustcms/admin-sdk": "file:./sdk",
     "@tanstack/react-query": "5.104.2",
     "@types/react": "19.3.0",
+    "playwright-core": "1.56.1",
     "react": "19.3.0",
     "typescript": "5.9.3",
     "vite": "7.3.7"

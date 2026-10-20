@@ -103,3 +103,37 @@ nothing is left for a final clean-up.
 - Shared CSS (R1) changes every page's look at once: the pilot and full before/after shots
   catch regressions.
 - Breadcrumbs depend on RustCMS; the eyebrow links are the fallback, not a blocker.
+
+## Appendix: what the Docker viewers do today (kept in R5)
+
+From `resources/admin/js/rdockpanel/containers.js`; the React `LogViewer` and `Terminal` (R5.1)
+keep all of it, and the service page gets the same.
+
+**Logs** (`/docker/containers/{id}/logs/follow/{n}`, server-sent events)
+- A line count to load first: 100, 500 (default) or 2000; changing it reconnects.
+- Follow on by default; off closes the stream (the lines stay).
+- At most 5,000 lines kept; older ones dropped.
+- Stays at the bottom only if the reader was already there.
+- stderr lines marked; "No output." until the first line.
+- After each (re)connect the server resends the last lines, so the view is cleared first.
+- The connection state (connecting, reconnecting, closed) is shown.
+- The React viewer adds: ANSI color codes stripped (as the Traefik logs do today).
+
+**Stats** (`/docker/containers/{id}/stats`, events; running containers only): CPU %, memory
+used/limit, network in/out, disk read/written.
+
+**Terminal** (`/docker/containers/{id}/exec`, WebSocket; running containers with `docker.exec`)
+- xterm.js with the fit addon, 5,000 lines of scrollback, monospace 13px; colors from the
+  terminal tokens (today hard-coded `#0b0b0e`/`#e4e4e7`).
+- No typing until the shell is open; the size is sent as `{"type":"resize"}` once open and on
+  every resize (debounced 150ms).
+- Input sent in chunks of 32 KiB; refused input is reported ("Some input was not sent").
+- Output not yet drawn is capped at 8 MiB; past it the session closes with a reason.
+- Never reconnects: a closed socket is the end of that shell; `New session` opens another.
+- End reasons shown: the shell exited, idle 30 minutes, an error message, no longer allowed
+  (4401/4403), disconnected.
+
+**Inspect** (`GET /docker/containers/{id}`): the document as indented JSON.
+
+**Deep links**: `?open=<id>&tab=logs|terminal|stats|inspect` opens a container's detail (used by
+older links; kept as sub-paths `/p/containers/<id>/<tab>`, with the query still honoured).

@@ -79,6 +79,17 @@ in `panel.js`.
 
 xterm.js is vendored in `resources/admin/js/rdockpanel/vendor/` (see its README to update it).
 
+**Design rules:** every page follows [ui-guidelines.md](ui-guidelines.md) (checklist in its
+§10); the redesign in progress is [ui-redesign.md](ui-redesign.md).
+- **Screenshots:** `RDP_SHOT_PASSWORD=… node scripts/ui-shots.mjs [dir]` signs in to a running panel
+  (`RDP_SHOT_BASE`, default `http://localhost:8000/admin`; user `RDP_SHOT_EMAIL`, a super admin)
+  and takes every page at 1440, 768 and 390px, light and dark, English and Vietnamese
+  (`RDP_SHOT_PAGES`, `RDP_SHOT_WIDTHS`, `RDP_SHOT_THEMES`, `RDP_SHOT_LOCALES` narrow it). It needs
+  Google Chrome and `npm ci` in `resources/admin`; the demo project (`demo` with `web`, `db`,
+  `cache`) gives the pages content.
+- **Browser dialogs:** `scripts/check-dialogs.sh` (in CI) fails when `window.confirm`, `alert` or
+  `prompt` are used more than its `MAX`, lowered as pages move to `ConfirmDialog`.
+
 ## RustCMS dependency
 
 `Cargo.toml` pins RustCMS-Core by a release tag (`v0.6.1`), or by git rev between releases. Never

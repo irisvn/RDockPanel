@@ -93,3 +93,5 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: git diff --exit-code -- js css .rustcms-build.json
+      # The browser's confirm/alert/prompt: only fewer (docs/ui-guidelines.md §6).
+      - run: sh ../../scripts/check-dialogs.sh

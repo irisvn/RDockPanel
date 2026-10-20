@@ -40,7 +40,7 @@ The shell's font (`--font-sans`, the system UI face), five sizes, three weights:
 
 - Weights: 400 text, 500 labels and table cells that name a row, 600 titles and values.
 - One monospace face, `ui-monospace, SFMono-Regular, Menlo, monospace`, at 13px (class
-  `rdp-mono`), for images, hashes, hosts, ports, paths, environment and logs. Never `em`-relative.
+  `rdp2-mono`), for images, hashes, hosts, ports, paths, environment and logs. Never `em`-relative.
 - Sentence case everywhere ("Create from schema", not "Create from Schema"). Uppercase only for
   the page eyebrow (12px, 500, letter-spacing 0.05em).
 - Numbers that line up use `tabular-nums`.
@@ -216,6 +216,8 @@ Raw values (`exited (0)`) stay available in a tooltip or a detail view, not as t
   field in error, which is linked to its message (`aria-describedby`).
 
 ## 7. Shared components (`lib/`)
+
+Their CSS classes keep the `rdp2-` prefix (the plain-JS pages' `panel.css` owns `rdp-` until R5).
 
 | Component | What |
 |---|---|
