@@ -28,8 +28,7 @@ nothing is left for a final clean-up.
 ### R0. Contracts (documents and a Core request, no UI change)
 - Status words per kind (guidelines §4) mapped from every backend state (`services.status`,
   deployments, actions, containers, tunnel); the mapping lives in one `lib/status.ts`.
-- Breadcrumbs: ask RustCMS for structured breadcrumbs and a heading switch (guidelines §11);
-  meanwhile pages keep their path links in the eyebrow.
+- Breadcrumbs: dropped (2026-10-20); the eyebrow names the kind of page, without links.
 - The Docker log viewer and terminal: list what the plain-JS versions do (line limit, Follow,
   connection state, bounded output; resize, New session, backpressure) so the React versions
   keep all of it.
@@ -102,7 +101,6 @@ nothing is left for a final clean-up.
 - R5 is the biggest change; split in five steps, each shipped alone.
 - Shared CSS (R1) changes every page's look at once: the pilot and full before/after shots
   catch regressions.
-- Breadcrumbs depend on RustCMS; the eyebrow links are the fallback, not a blocker.
 
 ## Appendix: what the Docker viewers do today (kept in R5)
 

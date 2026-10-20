@@ -14,7 +14,6 @@ import {
   LinkButton,
   Metric,
   type MenuItem,
-  NavLink,
   Page,
   RowActions,
   Section,
@@ -97,19 +96,7 @@ export function ServicePage(props: Props) {
   return (
     <Page
       title={props.title}
-      eyebrow={
-        <>
-          <NavLink to="/p/dashboard" navigate={props.navigate}>
-            {t("Dashboard")}
-          </NavLink>
-          {" / "}
-          <NavLink to={`/p/dashboard/${props.project}`} navigate={props.navigate}>
-            {d.project.name}
-          </NavLink>
-          {" · "}
-          {t(s.kind)}
-        </>
-      }
+      eyebrow={t(s.kind)}
       heading={
         <span className="rdp2-heading">
           {s.name}

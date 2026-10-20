@@ -59,9 +59,8 @@ The shell's font (`--font-sans`, the system UI face), five sizes, three weights:
 Every page has the same frame, top to bottom:
 
 1. **Page header** (`PageHeader`): eyebrow, title, description, actions on the right.
-   - Eyebrow: where the page lives (`Docker`, `Settings`). On a project or a service it is the
-     path back, as links (`Dashboard / demo`), because the shell's breadcrumb shows only the
-     page's own label today (a structured breadcrumb is a RustCMS request, section 11).
+   - Eyebrow: what kind of page this is (`Docker`, `Project`, a service's kind), plain text.
+     No breadcrumb: the sidebar and the page's own links lead back.
    - Title: the thing itself (`Containers`, `web`). A service's status badge sits after its title.
    - Description: one sentence, 14px muted, only where it helps.
 2. **Tabs**, when the page has several views: kit `Tabs` inside `ScrollTabs`, which keeps the
@@ -265,9 +264,3 @@ Their CSS classes use the `rdp2-` prefix, in `dashboard.css`.
 - [ ] No new CSS class, no literal color, sizes from the type scale.
 - [ ] Long work shows pending, queued and done states; dialogs have the right width and focus.
 - [ ] Checked at 1440px, 768px and 390px, light and dark, English and Vietnamese.
-
-## 11. Needs from RustCMS
-
-- A structured breadcrumb for sub-pages (`Dashboard › demo › web`, each part a link), and a way
-  to hide the shell's heading without changing the breadcrumb. Until then, section 2's eyebrow
-  links carry the path.

@@ -321,23 +321,18 @@ function ContainerDetail(props: PageProps<unknown> & { id: string; tab: string; 
     { id: "inspect", label: t("Inspect") },
   ];
   const tab = tabs.find((x) => x.id === props.tab)?.id ?? tabs[0].id;
-  const back = (
-    <NavLink to="/p/containers" navigate={props.navigate}>
-      {t("Containers")}
-    </NavLink>
-  );
   if (list.isLoading) return <Loading />;
   if (list.error) return <ErrorState error={list.error} />;
   if (!c)
     return (
-      <Page title={props.title} eyebrow={back} heading={props.id.slice(0, 12)}>
+      <Page title={props.title} eyebrow="Docker" heading={props.id.slice(0, 12)}>
         <EmptyState title={t("This container no longer exists.")} />
       </Page>
     );
   return (
     <Page
       title={props.title}
-      eyebrow={<>{back} · Docker</>}
+      eyebrow="Docker"
       heading={
         <span className="rdp2-heading">
           {c.name}

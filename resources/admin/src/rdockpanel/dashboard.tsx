@@ -19,7 +19,7 @@ import { ServiceLive } from "./docker/ServiceLive";
 import { Palette } from "./lib/Palette";
 import { Members } from "./apps/Members";
 import type { Overview } from "./apps/types";
-import { ConfirmProvider, EmptyState, NavLink, Page, Section, useAsk } from "./lib/ui";
+import { ConfirmProvider, EmptyState, Page, Section, useAsk } from "./lib/ui";
 import { bindResources } from "./lib/resources";
 import "./lib/i18n";
 import "./dashboard.css";
@@ -38,11 +38,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
   return (
     <Page
       title={props.title}
-      eyebrow={
-        <NavLink to="/p/dashboard" navigate={props.navigate}>
-          {t("Dashboard")}
-        </NavLink>
-      }
+      eyebrow={t("Project")}
       heading={project.name}
       description={project.description || undefined}
       actions={
@@ -113,7 +109,7 @@ function ServiceRoute(props: PageProps<unknown> & { project: string; service: st
 function Apps(props: PageProps<{ user?: string | number }>) {
   bindResources(props.resources);
   const [project, service, tab] = props.path ? props.path.split("/") : [];
-  // A project or a service has its own header (breadcrumb, status, actions):
+  // A project or a service has its own header (status, actions):
   // no "Dashboard" heading above it.
   const { title } = props;
   useEffect(() => {
