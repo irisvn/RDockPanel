@@ -38,6 +38,9 @@ const TRAEFIK_ARG: &str = "--entrypoints.tunnel.address=:8081";
 /// Cloudflare's header for a visitor who came over plain HTTP (routed to
 /// a redirect to HTTPS: no loop, the ones over HTTPS do not carry it).
 pub const PLAIN_VISITOR: &str = r#"Header(`Cf-Visitor`, `{"scheme":"http"}`)"#;
+/// Why a tunnel does not connect, as Settings says it.
+const UNHEALTHY: &str =
+    "Cloudflare does not accept the connection: is the tunnel's token still valid?";
 /// The user cloudflared's image runs as (distroless `nonroot`).
 const CLOUDFLARED_UID: &str = "65532";
 
@@ -117,19 +120,76 @@ pub async fn status(app: &AppState, docker: &Docker) -> AppResult<Value> {
             && t.status.as_ref().and_then(|s| s.state)
                 == Some(crate::services::docker_service::TaskState::RUNNING)
     });
-    let error = tasks
-        .iter()
-        .filter_map(|t| t.status.as_ref().and_then(|s| s.err.clone()))
-        .next();
+    // Swarm replaces an unhealthy task (its exit kept in the history).
+    let failed = tasks.iter().any(|t| {
+        t.status.as_ref().and_then(|s| s.state)
+            == Some(crate::services::docker_service::TaskState::FAILED)
+    });
+    // A running task is no tunnel yet (a revoked token retries forever):
+    // its healthcheck says whether Cloudflare took the connection.
+    let (connected, log_error) = if running {
+        connection(docker, &tasks).await
+    } else {
+        (false, None)
+    };
+    // Connected: what failed before is over. Else why, when known.
+    let error = if connected {
+        None
+    } else {
+        log_error.or_else(|| failed.then(|| UNHEALTHY.to_owned()))
+    };
     Ok(json!({
         "enabled": enabled(app),
         "token_set": token_set,
         "service": service.is_some(),
         "running": running,
+        "connected": connected,
         "error": error,
         "image": IMAGE,
         "origin": format!("http://{}:{PORT}", crate::services::deploy_rules_service::config().traefik_service),
     }))
+}
+
+/// Whether the running task's cloudflared is connected to Cloudflare (its
+/// healthcheck: `cloudflared tunnel ready`), and else why not. Read within
+/// a few seconds (else: not known yet).
+async fn connection(
+    docker: &Docker,
+    tasks: &[crate::services::docker_service::SwarmTask],
+) -> (bool, Option<String>) {
+    use crate::services::docker_service::TaskState;
+    let Some(container) = tasks
+        .iter()
+        .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
+        .find_map(|t| {
+            t.status
+                .as_ref()?
+                .container_status
+                .as_ref()?
+                .container_id
+                .clone()
+        })
+    else {
+        return (false, None);
+    };
+    let inspected = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        docker.engine().inspect_container(&container),
+    )
+    .await;
+    match inspected {
+        Ok(Ok(document)) => health_news(&document),
+        _ => (false, None),
+    }
+}
+
+/// [`connection`] from a container's inspect document.
+fn health_news(document: &Value) -> (bool, Option<String>) {
+    match document["State"]["Health"]["Status"].as_str() {
+        Some("healthy") => (true, None),
+        Some("unhealthy") => (false, Some(UNHEALTHY.to_owned())),
+        _ => (false, None),
+    }
 }
 
 /// Keeps `token` (sealed) when given, then runs cloudflared with the token
@@ -243,6 +303,14 @@ pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> App
                 "Args": ["tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:2000",
                          "run", "--token-file", "/run/secrets/tunnel_token"],
                 "Labels": { SYSTEM_LABEL: "true" },
+                // Connected to Cloudflare (`/ready` of its metrics).
+                "HealthCheck": {
+                    "Test": ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"],
+                    "Interval": 10_000_000_000u64,
+                    "Timeout": 5_000_000_000u64,
+                    "Retries": 3,
+                    "StartPeriod": 20_000_000_000u64,
+                },
                 "Secrets": [{
                     "SecretID": secret_id,
                     "SecretName": secret_name,
@@ -325,9 +393,24 @@ pub fn reconcile(app: &AppState) {
             return;
         };
         let _changing = exclusive().await;
-        let present = matches!(docker.engine().inspect_service(SERVICE).await, Ok(Some(_)));
+        let found = docker
+            .engine()
+            .inspect_service(SERVICE)
+            .await
+            .ok()
+            .flatten();
+        let present = found.is_some();
+        // Made by an older panel (no healthcheck): made again as now.
+        let older = found.is_some_and(|s| {
+            s.spec
+                .and_then(|spec| spec.task_template)
+                .and_then(|t| t.container_spec)
+                .and_then(|c| c.health_check)
+                .is_none()
+        });
         let result = match (enabled(&app), present) {
             (true, false) => enable(&app, &docker, None).await,
+            (true, true) if older => enable(&app, &docker, None).await,
             (false, true) => disable(&app, &docker).await,
             (false, false) => {
                 // Left by a change cut short.
@@ -393,6 +476,16 @@ fn write_panel_route(app: &AppState) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_from_health() {
+        let state = |status: &str| json!({"State": {"Health": {"Status": status}}});
+        assert_eq!(health_news(&state("healthy")), (true, None));
+        let (connected, error) = health_news(&state("unhealthy"));
+        assert!(!connected && error.is_some());
+        assert_eq!(health_news(&state("starting")), (false, None));
+        assert_eq!(health_news(&json!({})), (false, None));
+    }
 
     #[test]
     fn tunnel_tokens() {

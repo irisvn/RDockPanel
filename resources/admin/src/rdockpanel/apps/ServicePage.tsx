@@ -221,7 +221,7 @@ function OverviewTab(props: Props & { d: ServiceDetail }) {
 }
 
 type Errors = {
-  tasks: Array<{ at: string | null; slot: number | null; state: string; error: string; exit_code: number | null }>;
+  tasks: Array<{ at: string | null; slot: number | null; state: string; error: string; exit_code: number | null; recovered: boolean }>;
   deployment: { id: number; trigger: string; error: string | null; created_at: string; finished_at: string | null; log_tail: string } | null;
 };
 
@@ -240,7 +240,8 @@ function RecentErrors(props: Props & { d: ServiceDetail }) {
         <ul className="rdp2-list">
           {e.tasks.slice(0, open ? undefined : 3).map((task, i) => (
             <li key={i} className="rdp2-list-row">
-              <span className="rdp2-error rdp2-small">
+              <span className={task.recovered ? "rdp2-muted rdp2-small" : "rdp2-error rdp2-small"}>
+                {task.recovered && <strong>{t("Recovered automatically")} · </strong>}
                 {t(task.state)}
                 {task.exit_code != null && task.exit_code !== 0 && ` · ${t("exit code")} ${task.exit_code}`}
                 {task.error && ` · ${task.error}`}

@@ -807,6 +807,14 @@ pub async fn errors(
         };
         at(b).cmp(&at(a))
     });
+    // Running now in a slot (since when): a failure there before is over.
+    let running: Vec<(Option<i64>, _)> = tasks
+        .iter()
+        .filter_map(|t| {
+            let status = t.status.as_ref()?;
+            (status.state == Some(TaskState::RUNNING)).then_some((t.slot, status.timestamp))
+        })
+        .collect();
     let mut failed: Vec<Value> = tasks
         .iter()
         .filter_map(|task| {
@@ -832,6 +840,10 @@ pub async fn errors(
                 "state": state.to_string(),
                 "error": error,
                 "exit_code": status.container_status.as_ref().and_then(|c| c.exit_code),
+                // Swarm replaced it, and that one runs.
+                "recovered": running.iter().any(|(slot, since)| {
+                    (task.slot.is_none() || *slot == task.slot) && *since > status.timestamp
+                }),
             }))
         })
         .collect();

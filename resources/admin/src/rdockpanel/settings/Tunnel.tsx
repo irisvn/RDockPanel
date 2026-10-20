@@ -12,6 +12,7 @@ type Status = {
   token_set: boolean;
   service: boolean;
   running: boolean;
+  connected: boolean;
   error: string | null;
   image: string;
   origin: string;
@@ -19,7 +20,7 @@ type Status = {
 
 export function Tunnel(props: PageProps<unknown>) {
   const t = props.t;
-  const status = useAdminQuery<Status>(props, "/apps/tunnel");
+  const status = useAdminQuery<Status>(props, "/apps/tunnel", { refetchInterval: 10000 });
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -40,7 +41,7 @@ export function Tunnel(props: PageProps<unknown>) {
       setBusy(false);
     }
   };
-  const state = !s.enabled ? "stopped" : s.running ? "running" : "starting";
+  const state = !s.enabled ? "stopped" : s.connected ? "running" : s.error ? "failed" : "queued";
   return (
     <Section
       level={2}
@@ -50,7 +51,7 @@ export function Tunnel(props: PageProps<unknown>) {
       <div className="rdp2-form">
         <p className="rdp2-row">
           <StatusDot status={state} />
-          <strong>{s.enabled ? (s.running ? t("Running") : t("Starting")) : t("Off")}</strong>
+          <strong>{s.enabled ? (s.connected ? t("Connected") : s.error ? t("Not connected") : t("Starting")) : t("Off")}</strong>
           <span className="rdp2-small rdp2-muted">{s.image}</span>
         </p>
         {s.enabled && s.error && <Alert variant="warning">{s.error}</Alert>}

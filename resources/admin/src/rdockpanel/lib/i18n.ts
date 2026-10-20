@@ -531,6 +531,8 @@ window.rustcms?.registerTranslations?.("vi", {
   "Reach your domains through Cloudflare, without opening ports 80 and 443 (cloudflared runs beside Traefik).":
     "Vào các domain qua Cloudflare mà không cần mở cổng 80 và 443 (cloudflared chạy cạnh Traefik).",
   Starting: "Đang khởi động",
+  Connected: "Đã kết nối",
+  "Not connected": "Chưa kết nối",
   Off: "Tắt",
   "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared), copy its token.":
     "Trong Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared), copy token của nó.",
@@ -614,6 +616,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "Force rebuild? It builds from scratch (or pulls the image again) and replaces every task.":
     "Build lại từ đầu? Service sẽ được build lại không dùng cache (hoặc pull lại image) và thay mọi task.",
   "Recent errors": "Lỗi gần đây",
+  "Recovered automatically": "Đã tự động phục hồi",
   "Show all": "Xem tất cả",
   "Show less": "Thu gọn",
   "All deployments": "Mọi lần deploy",

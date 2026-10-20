@@ -2021,6 +2021,8 @@ db_test!(
         assert_eq!(tasks.len(), 6, "{seen}");
         assert_eq!(tasks[0]["state"], "failed");
         assert_eq!(tasks[0]["error"], "exit code 1");
+        // Nothing runs in their slot since: not recovered.
+        assert_eq!(tasks[0]["recovered"], false);
         assert_eq!(seen["deployment"]["id"], failed.id);
         assert_eq!(seen["deployment"]["error"], "health check failed");
         // Its end, at a line: no part of the long first line.
