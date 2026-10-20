@@ -2,8 +2,9 @@
 // (checked every 6 hours, or by hand), what changed, the installer's command
 // that updates it, what it runs with, its history, and its old versions
 // cleaned up. Releases only (tags X.Y.Z): a `main` image is a development
-// build. The panel never updates itself: the user runs the command.
-import { useState } from "react";
+// build. The panel never updates by itself: an administrator presses Update
+// (or runs the installer's command).
+import { useRef, useState } from "react";
 import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
 import { Alert, Button, CodeBlock, ErrorState, Loading } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Facts, Section, StatusBadge, TableScroll, useAsk } from "../lib/ui";
@@ -25,7 +26,16 @@ type VersionStatus = {
   notes: Release[];
   command: string | null;
   components: Record<string, string | undefined>;
-  history: Array<{ kind: string; target: string; status: string; error: string | null; at: string }>;
+  history: Array<{ kind: string; target: string; status: string; error: string | null; log: string | null; at: string }>;
+  updating: { from: string; to: string; stage: string; at: string } | null;
+  can_update: boolean;
+};
+
+const STAGES: Record<string, string> = {
+  queued: "Starting…",
+  waiting: "Waiting for running deployments and backups to end…",
+  "backing up": "Backing up the panel's database…",
+  updating: "Swarm replaces the panel (it is unavailable for a moment)…",
 };
 type Cleanup = { containers: number; images: Array<{ id: string; tags: string[]; size: number }>; space: number };
 
@@ -48,14 +58,20 @@ const COMPONENTS: Array<[string, string]> = [
 
 export function Version(props: PageProps<unknown>) {
   const t = props.t;
-  const status = useAdminQuery<VersionStatus>(props, "/apps/system/version");
+  // Followed while an update runs (the panel stops then: errors expected).
+  const status = useAdminQuery<VersionStatus>(props, "/apps/system/version", {
+    refetchInterval: (q) => (q.state.data?.updating || q.state.error ? 3000 : false),
+  });
+  // The version this page was loaded with: once another runs, reload it.
+  const loaded = useRef<string | null>(null);
+  if (status.data && loaded.current === null) loaded.current = status.data.rdockpanel.version;
   const cleanup = useAdminQuery<{ cleanup: Cleanup }>(props, "/apps/system/cleanup");
   const [checking, setChecking] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const ask = useAsk();
   if (status.isLoading) return <Loading />;
-  if (status.error || !status.data) return <ErrorState error={status.error} />;
+  if (!status.data) return <ErrorState error={status.error} />;
   const s = status.data;
   const p = s.rdockpanel;
   const checkNow = async () => {
@@ -68,6 +84,23 @@ export function Version(props: PageProps<unknown>) {
       setError(err);
     } finally {
       setChecking(false);
+    }
+  };
+  const updateTo = async (version: string) => {
+    const ok = await ask({
+      title: t("Update RDockPanel to {v}?").replace("{v}", version),
+      body: t(
+        "New deployments and backups wait; those running end first. The panel's database is backed up, then Swarm replaces the panel: it is unavailable for about a minute. Your services keep running. If the new version does not start, Swarm goes back to {from}; if it had already changed the database, {from} may not start on it: restore the backup (the installation guide says how).",
+      ).replace("{from}", p.version),
+      action: t("Update to {v}").replace("{v}", version),
+    });
+    if (!ok) return;
+    setError(null);
+    try {
+      await props.api.post("/apps/system/version/update", { version });
+      await status.refetch();
+    } catch (err) {
+      setError(err);
     }
   };
   const removeOld = async (c: Cleanup) => {
@@ -98,9 +131,25 @@ export function Version(props: PageProps<unknown>) {
   return (
     <>
       <ErrorNote error={error} />
+      {s.updating && (
+        <Alert>
+          {`${t("Updating to {v}").replace("{v}", s.updating.to)}: ${t(STAGES[s.updating.stage] ?? s.updating.stage)}`}
+          {status.error ? ` ${t("(the panel is restarting)")}` : ""}
+        </Alert>
+      )}
+      {loaded.current && loaded.current !== p.version && (
+        <Alert>
+          <span className="rdp2-row rdp2-wrap">
+            {t("RDockPanel {v} runs now.").replace("{v}", p.version)}
+            <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+              {t("Reload the page")}
+            </Button>
+          </span>
+        </Alert>
+      )}
       <Section
         title="RDockPanel"
-        description={t("The panel checks for a newer release every 6 hours and says so here and on the Dashboard. It never updates itself.")}
+        description={t("The panel checks for a newer release every 6 hours and says so here and on the Dashboard. It never updates by itself: you press Update.")}
         actions={
           p.installed && (
             <Button size="sm" variant="outline" disabled={checking} onClick={checkNow}>
@@ -142,8 +191,24 @@ export function Version(props: PageProps<unknown>) {
               : t("A development build (main): it is not compared with releases.")}
           </Alert>
         )}
-        {s.update && <Alert variant="warning">{t("RDockPanel {v} is out. To update, run this on the server (as root): the installer keeps your settings.").replace("{v}", s.update)}</Alert>}
-        {(s.update || p.channel === "development") && s.command && <CodeBlock code={s.command} label={t("Installer command")} />}
+        {s.update && (
+          <Alert variant="warning">
+            <span className="rdp2-row rdp2-wrap">
+              {t("RDockPanel {v} is out.").replace("{v}", s.update)}
+              {s.can_update && !s.updating && (
+                <Button size="sm" onClick={() => void updateTo(s.update as string)}>
+                  {t("Update to {v}").replace("{v}", s.update)}
+                </Button>
+              )}
+            </span>
+          </Alert>
+        )}
+        {(s.update || p.channel === "development") && s.command && (
+          <>
+            {s.update && <p className="rdp2-small rdp2-muted">{t("Or run this on the server (as root): the installer keeps your settings.")}</p>}
+            <CodeBlock code={s.command} label={t("Installer command")} />
+          </>
+        )}
       </Section>
 
       {s.notes.length > 0 && (
@@ -221,8 +286,12 @@ export function Version(props: PageProps<unknown>) {
                     <td className="rdp2-nowrap" title={dateTime(h.at, props.locale)}>
                       {relative(h.at, props.locale)}
                     </td>
-                    <td>{h.kind === "panel.version" ? t("Version changed") : t("Panel restarted")}</td>
-                    <td className="rdp2-mono">{h.kind === "panel.version" ? h.target : ""}</td>
+                    <td>{h.kind === "panel.version" ? t("Version changed") : h.kind === "panel.update" ? t("Update") : t("Panel restarted")}</td>
+                    <td className="rdp2-mono" title={h.log ?? undefined}>
+                      {h.kind === "panel.restart" ? "" : h.target}
+                      {h.error && <div className="rdp2-small rdp2-error">{h.error}</div>}
+                      {h.kind === "panel.update" && h.log && !h.error && <div className="rdp2-small rdp2-muted">{h.log}</div>}
+                    </td>
                     <td>
                       <StatusBadge tone={h.status === "ok" ? "ok" : h.status === "failed" ? "bad" : "busy"} label={t(h.status === "ok" ? "Done" : h.status === "failed" ? "Failed" : "Running")} title={h.error ?? undefined} />
                     </td>

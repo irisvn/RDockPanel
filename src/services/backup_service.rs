@@ -236,6 +236,8 @@ pub async fn request(
     trigger: &str,
     user_id: Option<i64>,
 ) -> AppResult<backup_run::Model> {
+    // Nothing new while the panel updates (it waits for what runs).
+    crate::services::panel_update_service::refuse_while_updating(txn).await?;
     let (service, owner) = owner_of(txn, backup.service_id).await?;
     let (ext, _) = match &backup.volume {
         Some(path) => What::Volume(path.clone()).format(),
@@ -296,6 +298,7 @@ pub async fn request_restore(
         user_id,
         elevated,
     } = what;
+    crate::services::panel_update_service::refuse_while_updating(txn).await?;
     let now = Utc::now();
     let run = backup_run::ActiveModel {
         service_id: Set(service.id),

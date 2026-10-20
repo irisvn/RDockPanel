@@ -10,8 +10,14 @@ On RustCMS Core 0.8.0 (the image runs `migrate` and `permission:sync` at its sta
 - **Settings → Version**: what the panel runs (version, commit, image) and with what (Core,
   Traefik, MySQL, cloudflared, Docker, the OS); whether a newer release is out (the registry's
   `X.Y.Z` tags, checked every 6 hours or by hand), its notes and the installer command for it; the
-  history of version changes and restarts. The Dashboard says a newer release to the panel's
-  administrators (each can hide it until the next). The panel never updates itself.
+  history of version changes, updates and restarts. The Dashboard says a newer release to the
+  panel's administrators (each can hide it until the next).
+- **Update button** (Settings → Version, `system.manage`): the panel never updates by itself; an
+  administrator's Update moves it to the newest release. New deployments, backups and restores
+  wait while those running end; the panel's database is dumped to
+  `/var/lib/rdockpanel/backups/panel/`; Swarm replaces the panel (pinned to the registry's
+  digest) and rolls back if the new version does not become healthy; the next panel records how
+  it ended. A plain installer run keeps a newer release the panel updated to.
 - **Old versions removed** (Settings → Version): the stopped containers of the panel's services'
   old tasks and their images, the running and previous versions kept. The Images page says which
   images run, which only stopped containers keep, and which none uses.

@@ -69,13 +69,34 @@ commit), and for a release `vX.Y.Z` the tags `:X.Y.Z`, `:X.Y` and `:latest`. The
 it runs (its version, commit and RustCMS Core's) at the foot of the Dashboard and in
 **Settings → Version**. A release's panel checks every 6 hours for a newer release (the
 registry's `X.Y.Z` tags; the notes are GitHub's release), says so there and on the Dashboard (to
-its administrators) and gives the installer command for it (`--version X.Y.Z`): the panel never
-updates itself. A `main` image is a development build: not compared. Settings → Version also
+its administrators). Its **Update** button (an administrator's; the panel never updates by itself)
+moves the panel to that release: new deployments, backups and restores wait while those running
+end, the panel's database is dumped to `/var/lib/rdockpanel/backups/panel/`, then Swarm replaces
+the panel (the release's image pinned by its digest) and rolls back if the new one does not
+become healthy; the next panel records how it ended (Settings → Version → History). The
+installer command for it (`--version X.Y.Z`) is shown too. A run of the installer without
+`--version` or `--image` keeps a newer release the panel updated to. A `main` image is a
+development build: not compared, no button. Settings → Version also
 removes the panel's old versions (old tasks' stopped containers and their images; the running and
 previous versions kept). A secret file in
 `/etc/rdockpanel/secrets` that no longer matches its Docker secret stops the installer: restore
 the file from a backup (changing `APP_KEY` needs `rustcms key:reencrypt`; see
 [security](security.md)).
+
+### Restoring the panel's database
+
+Settings → Version's Update dumps the panel's database first, to
+`/var/lib/rdockpanel/backups/panel/rdockpanel-<version>-<time>-<id>.sql`. If the new version
+migrated the database and then failed, Swarm's rollback to the previous version cannot start on
+it (its `migrate` refuses a newer database): restore the dump, then start the previous version:
+
+```sh
+c=$(docker ps -q -f name=rdp-mysql)
+docker exec -i "$c" sh -c 'MYSQL_PWD="$(cat /run/secrets/rdp_mysql_root)" mysql -uroot' \
+  < /var/lib/rdockpanel/backups/panel/rdockpanel-0.5.0-….sql
+curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh \
+  | sudo sh -s -- --version 0.5.0
+```
 
 ## Backups
 

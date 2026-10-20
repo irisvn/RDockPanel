@@ -179,6 +179,11 @@ db_test!(
                     &operator,
                     StatusCode::FORBIDDEN,
                 ),
+                Case::new(Method::POST, "/apps/system/version/update").expect(
+                    "operator",
+                    &operator,
+                    StatusCode::FORBIDDEN,
+                ),
                 Case::new(Method::POST, "/apps/system/version/dismiss").expect(
                     "operator",
                     &operator,

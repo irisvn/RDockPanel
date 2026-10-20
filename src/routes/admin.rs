@@ -216,6 +216,11 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can("system.manage"),
                     system::dismiss_version,
                 )
+                .post(
+                    "/system/version/update",
+                    AdminAccess::can("system.manage"),
+                    system::update,
+                )
                 .get(
                     "/system/cleanup",
                     AdminAccess::can("system.manage"),

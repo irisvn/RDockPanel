@@ -3,8 +3,8 @@
 //! found again, a reboot) and Docker (what may be pruned). The panel's
 //! administrators' (`system.manage`).
 //!
-//! The panel never changes its own image: an update is the installer's
-//! command, run on the server (Settings → Version gives it). Its restart and the server's reboot are
+//! The panel's own image changes only by Settings → Version's Update
+//! (`panel_update_service`) or the installer's command. Its restart and the server's reboot are
 //! logged and audited before they start (they stop the panel).
 
 use std::net::IpAddr;
@@ -183,7 +183,13 @@ pub async fn restart(
         )
         .into());
     }
-    let row = action_service::announce(app.db(), by, "panel.restart", SELF_SERVICE).await?;
+    let row = crate::services::panel_update_service::announce_disruptive(
+        app.db(),
+        by,
+        "panel.restart",
+        SELF_SERVICE,
+    )
+    .await?;
     let outcome = force_update(docker, SELF_SERVICE).await;
     let error = outcome.as_ref().err().map(ToString::to_string);
     // The panel may already be stopping: closed at its next boot otherwise.
@@ -237,7 +243,13 @@ pub async fn reboot(
     if host.is_empty() || confirm.trim() != host {
         return Err(ValidationErrors::field("confirm", "type the server's hostname").into());
     }
-    let row = action_service::announce(app.db(), by, "server.reboot", &host).await?;
+    let row = crate::services::panel_update_service::announce_disruptive(
+        app.db(),
+        by,
+        "server.reboot",
+        &host,
+    )
+    .await?;
     let command = REBOOT.iter().map(|s| (*s).to_owned()).collect();
     if let Err(err) = docker.engine().run_on_host(&image, command).await {
         let _ = action_service::finish(app.db(), row, Some(err.to_string()), None).await;

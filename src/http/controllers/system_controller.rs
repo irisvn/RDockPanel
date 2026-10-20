@@ -168,6 +168,33 @@ pub async fn version_notice(State(app): State<AppState>, auth: Auth) -> AppResul
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct UpdateTo {
+    pub version: String,
+}
+
+/// Updates the panel to `version` (the newest release): recorded and
+/// audited, then run in the background (it stops this panel).
+pub async fn update(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Json(body): Json<UpdateTo>,
+) -> AppResult<Json<Value>> {
+    let docker = docker(&app)?;
+    let by = Initiator::user(auth.principal(), request);
+    let row = crate::services::panel_update_service::start(
+        &app,
+        &docker,
+        &by,
+        &body.version,
+        installed(),
+    )
+    .await?;
+    Ok(Json(json!({ "action": row.id, "updating": body.version })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Dismiss {
     pub version: String,
 }

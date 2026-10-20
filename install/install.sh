@@ -58,6 +58,8 @@ if [ -f "$CONF" ]; then
 fi
 ADMIN_EMAIL=""
 UPGRADE_SYSTEM=""
+# Set by --image or --version: then that image, whatever runs.
+CHOSEN=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --domain) DOMAIN="${2:-}"; shift 2 ;;
@@ -65,10 +67,10 @@ while [ $# -gt 0 ]; do
     --apps-domain) APPS_DOMAIN="${2:-}"; shift 2 ;;
     --no-domain) DOMAIN=""; shift ;;
     --admin-email) ADMIN_EMAIL="${2:-}"; shift 2 ;;
-    --image) IMAGE="${2:-}"; shift 2 ;;
+    --image) IMAGE="${2:-}"; CHOSEN=1; shift 2 ;;
     --version)
       printf '%s' "${2:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "--version: not a version like 1.2.3"
-      IMAGE="ghcr.io/irisvn/rdockpanel:$2"; shift 2 ;;
+      IMAGE="ghcr.io/irisvn/rdockpanel:$2"; CHOSEN=1; shift 2 ;;
     --upgrade-system) UPGRADE_SYSTEM=1; shift ;;
     -h|--help) sed -n '2,22p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "unknown option: $1" ;;
@@ -111,6 +113,29 @@ docker node ls >/dev/null 2>&1 || die "this server is in a Swarm but not one of 
 NODE=$(docker info --format '{{.Swarm.NodeID}}')
 docker node update --label-add rdockpanel.main=true "$NODE" >/dev/null
 PLACE=node.labels.rdockpanel.main==true
+
+# A release newer than the saved one runs (Settings → Version's Update): kept
+# on a run without --version or --image, never moved back.
+RELEASE='ghcr.io/irisvn/rdockpanel:'
+if [ -z "$CHOSEN" ] && docker service inspect rdockpanel >/dev/null 2>&1; then
+  # Its reference as pinned (the digest kept: the image chosen, not the tag's newest).
+  RUNS=$(docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' rdockpanel)
+  case "$RUNS" in
+    "$RELEASE"*)
+      RUNS_V=${RUNS#"$RELEASE"}
+      RUNS_V=${RUNS_V%%@*}
+      SAVED_V=""
+      case "$IMAGE" in "$RELEASE"*) SAVED_V=${IMAGE#"$RELEASE"}; SAVED_V=${SAVED_V%%@*} ;; esac
+      if printf '%s' "$RUNS_V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+        && printf '%s' "$SAVED_V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+        && [ "$RUNS_V" != "$SAVED_V" ] \
+        && [ "$(printf '%s\n%s\n' "$RUNS_V" "$SAVED_V" | sort -V | tail -n1)" = "$RUNS_V" ]; then
+        say "Keeping RDockPanel $RUNS_V (newer than $SAVED_V, updated from the panel)"
+        IMAGE="$RUNS"
+      fi
+      ;;
+  esac
+fi
 
 # --- Directories, options and secrets (made once, kept) -----------------------
 mkdir -p "$ETC/secrets" "$ETC/traefik/dynamic" "$ETC/traefik/acme" "$BACKUPS" "$COMPOSE"
@@ -313,7 +338,10 @@ if exists rdockpanel; then
   mounted "$COMPOSE" || set -- "$@" --mount-add "type=bind,source=$COMPOSE,target=$COMPOSE"
   # Its health check again (an older panel's own restart could drop it).
   docker service update --quiet --image "$IMAGE" "$@" \
-    --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-retries 60 \
+    --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-timeout 3s \
+    --health-retries 6 --health-start-period 180s \
+    --update-failure-action rollback --update-monitor 90s --update-order stop-first \
+    --rollback-failure-action pause --rollback-monitor 90s \
     rdockpanel >/dev/null
 else
   say "Starting RDockPanel ($IMAGE)"
@@ -341,7 +369,10 @@ else
     --mount type=bind,source="$BACKUPS",target="$BACKUPS" \
     --mount type=bind,source="$COMPOSE",target="$COMPOSE" \
     --secret rdp_app_key --secret rdp_database_url \
-    --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-retries 60 \
+    --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-timeout 3s \
+    --health-retries 6 --health-start-period 180s \
+    --update-failure-action rollback --update-monitor 90s --update-order stop-first \
+    --rollback-failure-action pause --rollback-monitor 90s \
     "$@" "$IMAGE" >/dev/null
 fi
 

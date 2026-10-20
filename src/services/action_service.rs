@@ -270,6 +270,9 @@ pub async fn reap_stale<C: ConnectionTrait>(db: &C) -> AppResult<u64> {
         // A script's run ends once its processes are known dead (the
         // reaper's `abandoned_scripts`), never here.
         .filter(action::Column::Kind.ne("script.run"))
+        // An update ends when the next panel reconciles it (it may take
+        // longer than this), never here.
+        .filter(action::Column::Kind.ne(crate::services::panel_update_service::KIND))
         .exec(db)
         .await?;
     Ok(result.rows_affected)

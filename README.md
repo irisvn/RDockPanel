@@ -71,8 +71,9 @@ feature is free: no project limits, no paid tiers.
   a Cloudflare, DigitalOcean, Hetzner, Vultr or Linode token), applied to Traefik without SSH; or a
   certificate of your own, uploaded (checked, its key sealed, warned of before it expires).
 - **Settings → Version**: what the panel runs (and with: Core, Traefik, MySQL, Docker, the OS), whether a
-  newer release is out (checked every 6 hours, also said on the Dashboard), what changed, the installer
-  command that updates it (the panel never updates itself), its history, and its old versions removed.
+  newer release is out (checked every 6 hours, also said on the Dashboard), what changed, an **Update**
+  button (an administrator's: the panel never updates by itself; its database dumped first, a rollback
+  if the new version does not start), its history, and its old versions removed.
 - **Settings → Panel** has EasyPanel's menus: the panel's logs and restart; Refresh IP and Reboot
   for the server; Traefik's logs and restart; Docker prunes that never touch the services' data.
 - **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:

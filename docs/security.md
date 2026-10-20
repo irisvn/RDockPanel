@@ -169,9 +169,14 @@ both alike (PHP, WSGI) never takes a client's forged one for Traefik's.
 Settings → Version asks, every 6 hours (by hand at most once a minute), the registry
 (`ghcr.io/irisvn/rdockpanel`, anonymously, as `docker pull` does) for its `X.Y.Z` tags and GitHub
 for the release notes; nothing about the server is sent (a user agent with the panel's version).
-The panel trusts the registry: images are not signed. It never updates itself: it shows the
-installer command for the newer version, run on the server by its administrator. Release notes
-are shown as text, never as HTML.
+The panel trusts the registry: images are not signed. It never updates by itself: an
+administrator presses Update (`system.manage`, audited as `system.panel.update`). The image is
+always `ghcr.io/irisvn/rdockpanel:<version>`, pinned to the digest the panel asked the registry
+for (never one the browser sends); the panel's database is dumped first (readable by root only,
+in the backups directory), and Swarm rolls back to the previous image if the new one does not
+become healthy. Until RustCMS lets an older panel start on a newer database (asked), a rollback
+after the new version migrated its database does not start: restore the dump then
+([install](install.md#restoring-the-panels-database)). Release notes are shown as text, never as HTML.
 
 ## GitHub tokens
 

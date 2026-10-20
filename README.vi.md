@@ -20,7 +20,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 - Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Actions, Settings và các trang Docker.
 - **Trang service** có header (trạng thái, Deploy, Start/Stop, Restart, Open, Logs, Shell) và các tab: Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts, Storage, Backups (với database), Advanced.
-- **Settings → Phiên bản**: panel đang chạy bản nào (cùng Core, Traefik, MySQL, Docker, hệ điều hành), có bản phát hành mới chưa (kiểm tra 6 giờ một lần, báo cả trên Bảng điều khiển), có gì mới, lệnh installer để cập nhật (panel không bao giờ tự cập nhật), lịch sử, và dọn các bản cũ.
+- **Settings → Phiên bản**: panel đang chạy bản nào (cùng Core, Traefik, MySQL, Docker, hệ điều hành), có bản phát hành mới chưa (kiểm tra 6 giờ một lần, báo cả trên Bảng điều khiển), có gì mới, nút **Cập nhật** (admin bấm: panel không bao giờ tự cập nhật; database được backup trước, bản mới không chạy thì Swarm tự quay về), lịch sử, và dọn các bản cũ.
 - **Settings → Panel** có các menu như EasyPanel: log và khởi động lại panel; Refresh IP và Reboot server; log và khởi động lại Traefik; dọn Docker mà không đụng tới dữ liệu của service.
 - **Trang Domains** liệt kê domain của mọi service, nơi chúng trỏ tới và domain nào đang được phục vụ.
 - Domain, redirect, basic auth và maintenance **áp dụng ngay khi lưu** (không cần Deploy, container của khách không bị khởi động lại); image, env, port, mount, tài nguyên… mới cần Deploy.

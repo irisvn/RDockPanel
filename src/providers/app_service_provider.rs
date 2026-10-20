@@ -268,6 +268,12 @@ impl ServiceProvider for AppServiceProvider {
         if let Err(err) = crate::services::version_service::record_start(state.db()).await {
             tracing::debug!(%err, "the version's change not recorded");
         }
+        // The update's gate (its row: admissions lock it), and an update
+        // left running: settled once Swarm is done with it.
+        if let Err(err) = crate::services::panel_update_service::ensure_gate(state.db()).await {
+            tracing::warn!(%err, "the update's gate not made");
+        }
+        crate::services::panel_update_service::reconcile(state);
         // A restart of the panel or a reboot it asked for: it came back.
         match crate::services::action_service::came_back(
             state.db(),

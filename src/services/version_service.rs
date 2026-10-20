@@ -523,6 +523,9 @@ pub async fn status(app: &AppState, installed: bool) -> AppResult<Value> {
         "command": command,
         "components": components,
         "history": history(app.db()).await?,
+        "updating": crate::services::panel_update_service::progress(app.db()).await?,
+        // The button's: a release's panel, installed, its service found.
+        "can_update": update.is_some() && installed && image.is_some(),
     }))
 }
 
@@ -596,7 +599,7 @@ pub async fn history<C: sea_orm::ConnectionTrait>(db: &C) -> AppResult<Vec<Value
     use crate::models::action;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
     let rows = action::Entity::find()
-        .filter(action::Column::Kind.is_in(["panel.version", "panel.restart"]))
+        .filter(action::Column::Kind.is_in(["panel.version", "panel.restart", "panel.update"]))
         .order_by_desc(action::Column::Id)
         .limit(20)
         .all(db)
@@ -610,6 +613,8 @@ pub async fn history<C: sea_orm::ConnectionTrait>(db: &C) -> AppResult<Vec<Value
                 "status": r.status,
                 "user_id": r.user_id,
                 "error": r.error,
+                // An update's end ("updated to …", the dump's path).
+                "log": (r.kind == "panel.update" && r.status != action::RUNNING).then_some(r.log),
                 "at": r.created_at,
             })
         })

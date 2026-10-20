@@ -333,6 +333,8 @@ pub async fn request<C: ConnectionTrait>(
     user_id: Option<i64>,
     keyring: &Keyring,
 ) -> AppResult<deployment::Model> {
+    // Nothing new while the panel updates (it waits for what runs).
+    crate::services::panel_update_service::refuse_while_updating(txn).await?;
     let now = Utc::now();
     // The service and its project as they are now, locked until the
     // transaction ends: a rename waits for it, or went first (then the
