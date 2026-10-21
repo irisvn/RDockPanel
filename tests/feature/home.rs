@@ -28,7 +28,7 @@ db_test!(
         );
         let csp = page.header("content-security-policy").unwrap();
         assert!(
-            csp.contains("default-src 'none'") && !csp.contains("script-src"),
+            csp.contains("default-src 'none'") && csp.contains("script-src 'self'"),
             "{csp}"
         );
         let html = page.text();
@@ -36,7 +36,9 @@ db_test!(
         assert!(html.contains("https://github.com/irisvn/rdockpanel"));
         assert!(html.contains(r#"href="/admin""#));
         assert!(!html.contains("{{"), "every text filled in");
-        assert!(!html.contains("<script"), "no script");
+        // One script, its own file (no inline code).
+        assert_eq!(html.matches("<script").count(), 1);
+        assert!(html.contains(r#"<script src="/home/home.js?v="#));
         assert!(
             !html.contains(env!("CARGO_PKG_VERSION")),
             "never the version"
@@ -60,6 +62,14 @@ db_test!(
         let css = app.get("/home/home.css").await;
         css.assert_status(StatusCode::OK);
         assert!(css.header("content-type").unwrap().starts_with("text/css"));
+        let script = app.get("/home/home.js").await;
+        script.assert_status(StatusCode::OK);
+        assert!(
+            script
+                .header("content-type")
+                .unwrap()
+                .starts_with("text/javascript")
+        );
         let brand = app.get("/home/brand.css").await;
         brand.assert_status(StatusCode::OK);
         assert!(

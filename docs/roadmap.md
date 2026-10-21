@@ -1,6 +1,6 @@
 # Roadmap
 
-RDockPanel aims at EasyPanel's features, all free.
+Every feature free: no project limits, no paid tiers.
 
 ## Phase 1: server and Docker (done)
 
@@ -21,15 +21,16 @@ RDockPanel aims at EasyPanel's features, all free.
 - The installer (`install/install.sh`, the image `ghcr.io/irisvn/rdockpanel` for amd64 and arm64):
   Swarm, MySQL, Traefik with Let's Encrypt, the panel; tried on Ubuntu 24.04 (install twice, reboot).
 
-## Phase 3: EasyPanel's features (mostly done)
+## Phase 3: apps, builds and Settings (mostly done)
 
-Done (feature by feature in [the EasyPanel comparison](easypanel-comparison.md)):
+Done:
 
-- The EasyPanel-like interface (React): the Dashboard as the panel's home, service pages and their
+- The interface (React): the Dashboard as the panel's home, service pages and their
   tabs, Actions, Settings (tabbed), server metrics on the Dashboard, ⌘K.
-- Databases (PostgreSQL, MySQL, MariaDB, MongoDB, Redis), EasyPanel templates, Create from Schema,
+- Databases (PostgreSQL, MySQL, MariaDB, MongoDB, Redis), 800+ EasyPanel templates, Create from Schema,
   Compose services.
-- Builds from Git or an inline Dockerfile (Dockerfile, Nixpacks), trigger URLs, GitHub webhooks.
+- Builds from Git (the repository's Dockerfile) or an inline Dockerfile, trigger URLs, GitHub webhooks;
+  GitHub tokens (Settings → Git) given to projects, their repositories picked from a list.
 - Database and volume backups (local or S3, scheduled, retention, restore); notifications (Discord,
   Slack, Telegram, email, webhooks).
 - Redirects, basic authentication, maintenance mode, scripts, notes, per-service CPU and memory,
@@ -40,10 +41,12 @@ Done (feature by feature in [the EasyPanel comparison](easypanel-comparison.md))
 - Cloudflare Tunnel (Settings): cloudflared with the tunnel's token as a Swarm secret; every domain
   and the panel also served on Traefik's `tunnel` entrypoint (plain HTTP, Cloudflare holds TLS).
 - Branding in Settings (RustCMS 0.7.0 runtime branding); the Roles page's areas, labels and presets.
+- Project members and the public API with scoped tokens (`rdp`); Settings → Version (update,
+  history, old versions removed); the public homepage at `/`.
 
 Next:
 
-- Builds from uploads, Railpack and buildpacks; a GitHub token.
+- Builds from uploads.
 - Certificate status of the resolvers; drift checks (RustCMS W4).
 - A web database client; the panel's domain applied from Settings (today: checked there, applied by the installer).
 
@@ -60,7 +63,10 @@ Next:
 | 0.4.1 W8: encrypted columns, key rotation | Phase 2 environment variables, registry credentials | released, in use |
 | 0.4.1 W4: scheduler | the deployment lease reaper (every minute); reconcile/drift, periodic prune, backups | released, in use |
 | 0.5.0: React extension host (API v2) | the Phase 3 interface (dashboard, service pages, templates) | released, in use |
-| 0.5.1 W9 part A: home page, sidebar order, hidden resources | an EasyPanel-like sidebar | released, in use |
+| 0.5.1 W9 part A: home page, sidebar order, hidden resources | the panel's sidebar | released, in use |
 | 0.6.0 W9 part B: resource API, toasts, UI kit 2, page titles, any-of page permissions | the kit's tabs, page titles on sub-paths, Settings for either permission, icons | released, in use |
 | 0.6.1: a light/dark switch per user | the panel's sidebar | released, in use |
+| 0.7.0: runtime branding | Settings → Branding | released, in use |
+| 0.8.x: `migrate --allow-newer` | an older panel starting on a newer database (Settings → Version's rollback) | released, in use |
+| 0.8.2: pages remounted after an action | Stop/Start from a service's tab without the error page | released, in use (the pin) |
 | TOTP | two-factor authentication | planned |

@@ -31,7 +31,7 @@ pub struct Model {
     pub git_branch: Option<String>,
     /// The build context in the repository (`/` by default).
     pub git_path: Option<String>,
-    /// `dockerfile` (the repository's) or `nixpacks`.
+    /// `dockerfile`: the repository's Dockerfile (the only builder).
     pub builder: String,
     /// The Dockerfile's path in the context (`Dockerfile` by default).
     pub dockerfile_path: Option<String>,

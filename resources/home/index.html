@@ -8,6 +8,7 @@
 <link rel="icon" href="/home/favicon.svg?v={{v}}" type="image/svg+xml">
 <link rel="stylesheet" href="/home/home.css?v={{v}}">
 <link rel="stylesheet" href="/home/brand.css">
+<script src="/home/home.js?v={{v}}" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">{{skip}}</a>
@@ -58,12 +59,12 @@
   <h2>{{screens_title}}</h2>
   <p class="sub">{{screens_sub}}</p>
   <div class="gallery">
-    <figure class="shot"><a href="/home/img/service.jpg?v={{v}}"><img src="/home/img/service.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s1}}"></a><figcaption>{{s1}}</figcaption></figure>
-    <figure class="shot"><a href="/home/img/templates.jpg?v={{v}}"><img src="/home/img/templates.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s2}}"></a><figcaption>{{s2}}</figcaption></figure>
-    <figure class="shot"><a href="/home/img/deployments.jpg?v={{v}}"><img src="/home/img/deployments.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s3}}"></a><figcaption>{{s3}}</figcaption></figure>
-    <figure class="shot"><a href="/home/img/domains.jpg?v={{v}}"><img src="/home/img/domains.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s4}}"></a><figcaption>{{s4}}</figcaption></figure>
-    <figure class="shot"><a href="/home/img/containers.jpg?v={{v}}"><img src="/home/img/containers.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s5}}"></a><figcaption>{{s5}}</figcaption></figure>
-    <figure class="shot"><a href="/home/img/actions.jpg?v={{v}}"><img src="/home/img/actions.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s6}}"></a><figcaption>{{s6}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/service.jpg?v={{v}}" data-slide data-caption="{{s1}}"><img src="/home/img/service.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s1}}"></a><figcaption>{{s1}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/templates.jpg?v={{v}}" data-slide data-caption="{{s2}}"><img src="/home/img/templates.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s2}}"></a><figcaption>{{s2}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/deployments.jpg?v={{v}}" data-slide data-caption="{{s3}}"><img src="/home/img/deployments.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s3}}"></a><figcaption>{{s3}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/domains.jpg?v={{v}}" data-slide data-caption="{{s4}}"><img src="/home/img/domains.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s4}}"></a><figcaption>{{s4}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/containers.jpg?v={{v}}" data-slide data-caption="{{s5}}"><img src="/home/img/containers.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s5}}"></a><figcaption>{{s5}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/actions.jpg?v={{v}}" data-slide data-caption="{{s6}}"><img src="/home/img/actions.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s6}}"></a><figcaption>{{s6}}</figcaption></figure>
   </div>
 </div></section>
 <section id="install"><div class="wrap">
@@ -74,6 +75,18 @@
   <p class="note">{{install_note}} <a href="https://github.com/irisvn/rdockpanel/blob/main/docs/install.md">{{install_guide}}</a>.</p>
   <p class="warn">{{early}}</p>
 </div></section>
+<dialog id="viewer" class="viewer" aria-label="{{viewer}}">
+  <figure>
+    <img src="" alt="">
+    <figcaption></figcaption>
+  </figure>
+  <div class="viewer-bar">
+    <button type="button" data-prev aria-label="{{previous}}">‹</button>
+    <span data-count aria-live="polite"></span>
+    <button type="button" data-next aria-label="{{next}}">›</button>
+    <button type="button" data-close aria-label="{{close}}">×</button>
+  </div>
+</dialog>
 </main>
 <footer><div class="wrap">
   <span>{{footer}}</span>

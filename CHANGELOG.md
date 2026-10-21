@@ -3,6 +3,14 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.5.5 — 2026-10-21
+
+- The homepage's screens open in a viewer (previous / next, arrow keys, swipe) instead of a new page,
+  and show the panel as it is now; the docs use the same new screenshots.
+- Nixpacks is removed: apps build from Git with their Dockerfile. A service that used Nixpacks now
+  builds with its repository's Dockerfile.
+- The docs follow the code again (every admin route, the installer, permissions, Settings' tabs).
+
 ## 0.5.4 — 2026-10-21
 
 - A homepage at the panel's address: what RDockPanel is, real screens, how to install it and a

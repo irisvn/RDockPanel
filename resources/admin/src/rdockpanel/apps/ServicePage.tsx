@@ -920,7 +920,6 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
   const [branch, setBranch] = useState(s.git_branch ?? "main");
   const [path, setPath] = useState(s.git_path ?? "/");
   const [provider, setProvider] = useState<number | null>(s.git_provider_id);
-  const [builder, setBuilder] = useState(s.builder);
   const [dockerfilePath, setDockerfilePath] = useState(s.dockerfile_path ?? "Dockerfile");
   const [dockerfile, setDockerfile] = useState(s.dockerfile ?? "FROM nginx:1.27-alpine\n");
   const [compose, setCompose] = useState(s.compose ?? "");
@@ -961,7 +960,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
                 git_branch: branch.trim() || null,
                 git_path: path.trim() || "/",
                 git_provider_id: provider === null ? null : String(provider),
-                builder,
+                builder: "dockerfile",
                 dockerfile_path: dockerfilePath.trim() || "Dockerfile",
               });
             } else {
@@ -1058,17 +1057,9 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
                 <Field label={t("Build path")} help={t("The folder of the repository to build")} error={fields.git_path}>
                   <Input value={path} onChange={(e) => setPath(e.target.value)} disabled={disabled} />
                 </Field>
-                <Field label={t("Builder")}>
-                  <NativeSelect value={builder} onChange={(e) => setBuilder(e.target.value as "dockerfile" | "nixpacks")} disabled={disabled}>
-                    <option value="dockerfile">Dockerfile</option>
-                    <option value="nixpacks">Nixpacks</option>
-                  </NativeSelect>
+                <Field label={t("Dockerfile path")} error={fields.dockerfile_path}>
+                  <Input value={dockerfilePath} onChange={(e) => setDockerfilePath(e.target.value)} disabled={disabled} />
                 </Field>
-                {builder === "dockerfile" && (
-                  <Field label={t("Dockerfile path")} error={fields.dockerfile_path}>
-                    <Input value={dockerfilePath} onChange={(e) => setDockerfilePath(e.target.value)} disabled={disabled} />
-                  </Field>
-                )}
               </div>
             </>
           )}

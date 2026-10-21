@@ -1,31 +1,30 @@
 # RDockPanel
 
-**Panel quản trị server tự host, miễn phí, theo tinh thần [EasyPanel](https://easypanel.io), viết bằng Rust.**
+**Panel quản trị server tự host, miễn phí, viết bằng Rust.**
 Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domain và HTTPS. Mọi tính năng
 đều miễn phí: không giới hạn số project, không có gói trả phí.
 
 [English](README.md) · [Tài liệu (tiếng Anh)](docs/) · [Lộ trình](docs/roadmap.md)
 
-> **Trạng thái: đang phát triển.**
-> - Phase 1 (giám sát server, quản lý Docker) đã chạy được.
-> - Phase 2 (deploy app) đã chạy được từ mã nguồn: project, service, deploy, domain, biến môi trường mã hoá, registry riêng.
-> - Đã có installer cài bằng một lệnh, build từ Git hoặc Dockerfile, backup database và volume, thông báo, Compose.
-> - Chưa dùng được cho production.
+> **Trạng thái: giai đoạn đầu phát triển.** Đã chạy được: giám sát server, quản lý Docker, app và
+> database trên Docker Swarm kèm domain và HTTPS, build từ Git hoặc Dockerfile, hơn 800 template
+> EasyPanel, service Compose, backup database và volume, thông báo, và installer cài bằng một lệnh.
+> Hãy thử trên một server test trước.
 
 ![Dashboard](docs/images/dashboard.png)
 
 ## Tính năng
 
-**Giao diện giống EasyPanel**
+**Giao diện**
 
-- Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Actions, Settings và các trang Docker.
-- **Trang service** có header (trạng thái, Deploy, Start/Stop, Restart, Open, Logs, Shell) và các tab: Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts, Storage, Backups (với database), Advanced.
+- Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Actions, Domains, Settings và các trang Docker.
+- **Trang service** có header (trạng thái, Deploy, Start/Stop, Restart, Open, Logs, Shell) và các tab: Overview, Credentials (với database), Backups (với database và service có volume), Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts, Source, Storage, Advanced.
 - **Settings → Phiên bản**: panel đang chạy bản nào (cùng Core, Traefik, MySQL, Docker, hệ điều hành), có bản phát hành mới chưa (kiểm tra 6 giờ một lần, báo cả trên Bảng điều khiển), có gì mới, nút **Cập nhật** (admin bấm: panel không bao giờ tự cập nhật; database được backup trước, bản mới không chạy thì Swarm tự quay về), lịch sử, và dọn các bản cũ.
-- **Settings → Panel** có các menu như EasyPanel: log và khởi động lại panel; Refresh IP và Reboot server; log và khởi động lại Traefik; dọn Docker mà không đụng tới dữ liệu của service.
+- **Settings → Panel:** log và khởi động lại panel; Refresh IP và Reboot server; log và khởi động lại Traefik; dọn Docker mà không đụng tới dữ liệu của service.
 - **Trang chủ** ở địa chỉ của panel (`/`): giới thiệu RDockPanel, ảnh giao diện, lệnh cài đặt và link GitHub, bằng tiếng Anh hoặc tiếng Việt, không có thông tin nào của máy chủ. Tắt được trong Settings → Panel (khi đó `/` mở trang đăng nhập).
 - **Trang Domains** liệt kê domain của mọi service, nơi chúng trỏ tới và domain nào đang được phục vụ.
 - Domain, redirect, basic auth và maintenance **áp dụng ngay khi lưu** (không cần Deploy, container của khách không bị khởi động lại); image, env, port, mount, tài nguyên… mới cần Deploy.
-- **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** chứa nơi lưu backup và kênh thông báo; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
+- **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** có các tab Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Git, Backups, Notifications và API tokens; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
 - Mọi trang theo chung một bộ quy tắc thiết kế ([docs/ui-guidelines.md](docs/ui-guidelines.md)): nút cùng cỡ, thao tác phụ của từng dòng gom vào menu ⋯, trạng thái cùng chữ và màu, hộp thoại của panel thay cho của trình duyệt, bảng dùng được trên điện thoại.
 
 **Server và Docker**
@@ -62,8 +61,8 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
   - trang service báo khi có thay đổi chưa deploy.
 - **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS; domain wildcard (`*.example.com`, chỉ quản trị panel) và middleware Traefik tuỳ chỉnh; chuyển hướng (biểu thức chính quy), xác thực cơ bản (basic auth) và trang bảo trì. Mỗi domain chọn được certificate resolver riêng (Settings → Chứng chỉ: Let's Encrypt qua HTTP, hoặc qua DNS bằng token Cloudflare, DigitalOcean, Hetzner, Vultr, Linode), áp dụng vào Traefik ngay trong panel, không cần SSH; hoặc tải chứng chỉ của riêng bạn lên (được kiểm tra, khoá được mã hoá, báo trước khi hết hạn).
 - **Database:** PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ với một cú bấm (chỉ cần đặt tên: mật khẩu tự sinh, dữ liệu trên volume, có healthcheck), kèm URL kết nối để copy.
-- **Template EasyPanel:** hơn 800 template của easypanel.io, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải từ repo của họ khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
-- **Build:** app từ repo Git (https, ssh với deploy key sinh sẵn, hoặc GitHub token ở Settings → Git được cấp cho project, chọn repo từ danh sách; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo hoặc Nixpacks, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI, và webhook GitHub có chữ ký để tự deploy mỗi lần push.
+- **Hơn 800 template EasyPanel**, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải về khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
+- **Build:** app từ repo Git (https, ssh với deploy key sinh sẵn, hoặc GitHub token ở Settings → Git được cấp cho project, chọn repo từ danh sách; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI, và webhook GitHub có chữ ký để tự deploy mỗi lần push.
 - **Compose:** file Compose (viết trong panel hoặc lấy từ Git) chạy bằng `docker compose` trong network của project, domain trỏ tới một service trong file.
 - **Backup:** dump PostgreSQL, MySQL, MariaDB và MongoDB, và nén volume, theo lịch (cron) vào thư mục trên server hoặc bucket tương thích S3, giữ lại N bản, có log từng lần chạy, nút "Run now" và Khôi phục.
 - **Thành viên project** (Xem, Developer, Quản trị theo từng project) và **API công khai** với token có scope (Settings → API token), kèm lệnh `rdp`.
@@ -78,7 +77,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 **Sắp tới** (xem [lộ trình](docs/roadmap.md))
 
-- Nguồn Upload, build bằng Railpack và Buildpacks; web client cho database.
+- Nguồn Upload; web client cho database.
 - **Sau đó:** nhiều node, xác thực 2 lớp.
 
 | Trang service | Template | Tạo service |

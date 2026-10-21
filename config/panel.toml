@@ -2,8 +2,8 @@
 
 # Host directories services may bind-mount, for users with `system.manage`.
 # Empty: no bind mounts (named volumes only). Each root must also be visible
-# to the panel at the same path (the installer mounts it read-only), so
-# sources are resolved (symlinks included) before they are allowed. Only list
+# to the panel at the same path (mounted read-only by hand: the installer
+# mounts none), so sources are resolved (symlinks included) before they are allowed. Only list
 # directories no service and no untrusted user can write (see docs/security.md).
 bind_roots = []
 

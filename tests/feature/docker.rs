@@ -813,8 +813,7 @@ async fn desired_specs_run_on_a_real_swarm() {
     }
 }
 
-/// A build on the real engine goes through BuildKit (`RUN --mount`, as
-/// Nixpacks writes).
+/// A build on the real engine goes through BuildKit (`RUN --mount`).
 #[tokio::test]
 async fn a_real_build_uses_buildkit() {
     if std::env::var_os("PANEL_TEST_DOCKER").is_none() {

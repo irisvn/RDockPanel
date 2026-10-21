@@ -22,7 +22,11 @@ protected object. Images are removed only by an id or a tag exactly as Docker li
 
 ## Bind mounts
 
-Off by default. A host directory must sit under one of `[panel] bind_roots`, is resolved with its
+Off by default: `[panel] bind_roots` is empty, and the installer sets none and mounts none. To
+allow one, add it to the panel's service yourself, at the same path inside (read-only is enough):
+`docker service update --env-add 'RUSTCMS_PANEL__BIND_ROOTS=["/srv/data"]' --mount-add
+type=bind,source=/srv/data,target=/srv/data,readonly rdockpanel` (a rerun of the installer keeps
+both). A host directory must sit under one of those roots, is resolved with its
 symlinks when saved, and is checked again before each deployment. Docker resolves the path once more
 when the task starts, so **only list roots that no service and no untrusted user can write**: someone
 who can replace a directory there with a symlink could point a later start elsewhere.
@@ -58,7 +62,8 @@ who can replace a directory there with a symlink could point a later start elsew
 
 ## Templates
 
-EasyPanel templates are code (TypeScript generators) from a third-party repository. The panel runs
+Templates are code (TypeScript generators) from a third-party repository (`easypanel-io/templates`
+on GitHub, fetched at runtime: it has no license, so it is not bundled). The panel runs
 them in a child process of the panel (CPU and memory limits, killed after 15 s), in an embedded
 QuickJS with no file system, network or process access, nothing importable but a few random/hash
 helpers (16 bcrypt hashes at most), and a memory (64 MB), stack and time (3 s) budget; sources and
@@ -76,13 +81,13 @@ not exist. Only a push to the service's own branch deploys.
 
 ## Builds
 
-A build runs the repository's Dockerfile (or Nixpacks') on this node's Docker: it is as trusted as
+A build runs a Dockerfile (the repository's, or one written in the panel) on this node's Docker: it
+is as trusted as
 the repository. Clone URLs are https or ssh only (no local paths, `file://` or `ext::`), branches
 and paths are checked (no options, nothing outside the repository, links resolved: a link in the
 repository cannot point the build elsewhere), Git never prompts, and the deploy key is written `0600`
 beside the checkout (never in a build context), in a temporary directory removed after the build.
-The repository's `.dockerignore` applies (a tracked `.env` it lists stays out of the image). Each clone and
-Nixpacks run is limited to 10 minutes, the context to 1 GB. A trigger URL's token is in its query (the
+The repository's `.dockerignore` applies (a tracked `.env` it lists stays out of the image). Each clone is limited to 10 minutes, the context to 1 GB. A trigger URL's token is in its query (the
 request log records paths only) and stored as its SHA-256 only; anyone with the URL can deploy the service (not change it): make a new one when it
 leaks.
 
@@ -121,7 +126,9 @@ Notifications carry project, service and database names and errors, never enviro
 
 ## The terminal
 
-- Needs `docker.exec` (and `system.manage` for the panel's own containers).
+- Needs `docker.exec` (the Containers page), or `services.exec` in the service's project (the
+  service page, a running task of that service only); `system.manage` for the panel's own
+  containers, and for a privileged service's.
 - Opened over a WebSocket that requires the panel's exact origin and the session's CSRF token; the
   session is rechecked every 10 s and the terminal stops within 15 s of a revoked access.
 - Shells are ended when the session ends: hang-up, then kill, of every process in the shell's session
@@ -139,9 +146,11 @@ pages build the DOM with elements and text nodes, never `innerHTML` with Docker 
 `<style>` elements that scripts create into constructed stylesheets instead. Parsed markup is
 untouched, so injected HTML still cannot add styles. The policy itself is unchanged.
 
-The homepage at `/` is public: one static page (English or Vietnamese), its stylesheets, images
-and favicon, all built into the panel. It has a policy of its own, stricter still
-(`default-src 'none'; style-src 'self'; img-src 'self'`, no script at all), and nothing of the
+The homepage at `/` is public: one static page (English or Vietnamese), its stylesheets, images,
+favicon and one same-origin script (`/home/home.js`, the screens' viewer: a dialog with
+previous/next, arrow keys, swipe, Esc), all built into the panel. It has a policy of its own,
+stricter still (`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self';
+base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, no inline script), and nothing of the
 installation: no version, address, domain or project (its screenshots are of a demo server). Only
 the brand color of Settings → Branding comes from the database. Settings → Panel turns it off
 (`system.manage`, audited as `home.update`): `/` then redirects to `/admin`.

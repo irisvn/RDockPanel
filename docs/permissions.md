@@ -20,9 +20,12 @@ unsaved selection: nothing is granted until the role is saved.
 ## Projects and services (Phase 2)
 
 The pages of the sidebar need: the Dashboard `projects.view_any` (projects, services and their
-tabs) or `server.view` (its server metrics only); Actions `projects.view_any`; Settings
-`storage_providers.view_any` (its Backups tab), `notification_channels.view_any` (Notifications) or
-`system.manage` (Panel, Traefik, Certificates): each tab shows with its own. The resources behind them have no
+tabs), `server.view` (its server metrics only) or `apps.access` (a member's projects); Actions
+`projects.view_any` or `apps.access` (a member's projects' actions); Domains
+`service_domains.view_any` or `apps.access`; Settings any of `storage_providers.view_any` (its
+Backups tab), `notification_channels.view_any` (Notifications), `system.manage` (Panel, Version,
+Traefik, Certificates, Cloudflare Tunnel, Branding, Git), `projects.view_any` or `apps.access`:
+each tab shows with its own, and API tokens (each user's own) needs none. The resources behind them have no
 sidebar entry, so give a role that manages services `projects.view_any` as well (their routes,
 `/admin/r/<slug>`, still answer to the resource's own permissions).
 
@@ -67,7 +70,8 @@ The resources use the panel's standard permissions, one set per resource
   `service_scripts.*` to write them, `docker.exec` to run them (a command in the container);
 
 - a **host directory** (bind mount) needs `system.manage`, and a source under one of the
-  `[panel] bind_roots` of `config/panel.toml` (none by default), resolved with its symlinks; `/`, `/proc`,
+  `[panel] bind_roots` of `config/panel.toml` (none by default, and none set by the installer: see
+  [security](security.md#bind-mounts)), resolved with its symlinks; `/`, `/proc`,
   `/sys`, `/dev`, `/boot`, `/var/lib/docker`, the Docker socket, `/etc/rdockpanel`, `/run/secrets`,
   and any directory above them (`/run`, `/etc`, `/var`), are always refused (keep the panel's other
   files, such as a checkout with its `.env`, out of the roots);
@@ -107,11 +111,13 @@ pages).
 
 ## The panel's own objects
 
-Objects labelled `rdockpanel.system=true` are the panel's own. The installer (Phase 2, not written
-yet) will put that label on the panel, its MySQL and Traefik (services, containers, volumes, networks,
-secrets); until then only the development Traefik (`scripts/dev-swarm.sh` labels its service and
-containers) and objects you label yourself are protected (the development MySQL from
-`docker-compose.yml` is not). Without `system.manage`:
+Objects labelled `rdockpanel.system=true` are the panel's own. The installer puts that label on
+the panel, its MySQL and Traefik (services, containers, volumes, networks, secrets), and the panel
+on Cloudflare Tunnel's cloudflared, network and secret (DNS tokens' secrets are labelled
+`rdockpanel.dns-token`). In
+development, the Traefik of `scripts/dev-swarm.sh` (its service and containers) and objects you
+label yourself are protected (the development MySQL from `docker-compose.yml` is not). Without
+`system.manage`:
 
 - they are left out of every list;
 - inspect, logs, stats, terminal and every change answer 403;

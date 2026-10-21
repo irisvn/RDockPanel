@@ -57,13 +57,20 @@ The address and token are kept in `~/.config/rdp/config.json`, or given as `RDP_
 `RDP_TOKEN`. The address is https (http for localhost only); redirects are never followed, so
 the token goes to the panel only.
 
-- Writes (`POST`, `DELETE`) need an allowed `Origin` and the session's CSRF token in `X-CSRF-Token`
-  (`GET /admin/api/auth/csrf` returns it).
-- Each route requires the permission shown; `{id}` is a container id or name. Errors from the panel
-  are JSON with a stable `code`; a malformed path or query parameter (e.g. `?force=maybe`) gets a
+`GET /api/v1/ping` (public) answers `{"pong": true}`.
+
+## Admin routes (`/admin/api/x`)
+
+- Writes (`POST`, `PUT`, `PATCH`, `DELETE`) need an allowed `Origin` and the session's CSRF token in
+  `X-CSRF-Token` (`GET /admin/api/auth/csrf` returns it).
+- Each route requires the permission shown. "member" is any signed-in user: the handler then checks
+  the permission in the record's project (a role's, or a project role's). Errors from the panel are
+  JSON with a stable `code`; a malformed path or query parameter (e.g. `?force=maybe`) gets a
   plain-text 400.
 
 ## Docker (`/docker`)
+
+`{id}` is a container id or name.
 
 | Method | Path | Permission | |
 |---|---|---|---|
@@ -96,10 +103,13 @@ their actions), so the resources' policies, validation and audit apply.
 
 | Method | Path | Permission | |
 |---|---|---|---|
-| GET | `/overview` | projects.view_any | every project with its services (status, kind, primary domain) |
+| GET | `/overview` | projects.view_any, or a project member (their projects only) | the projects with their services (status, kind, primary domain) |
 | GET | `/services/{id}` | services.view | a service's page: configuration (names of its environment variables, never values), domains, ports, mounts, pending changes, recent deployments (with deployments.view) |
 | GET | `/deployments/{id}` | deployments.view | one deployment with its log |
 | GET | `/services/{id}/stats` | services.view | the Overview's monitor: CPU and memory of each running task on this node, and their sum (two Docker stats samples, at most 3 s) |
+| GET | `/services/{id}/errors` | services.view | the Overview's recent errors: failed tasks (exit code, refused, lost; not those a deployment stopped) and the last failed deployment with the end of its log (deployments.view) |
+| GET (SSE) | `/services/{id}/logs/{tail}` | services.logs (in its project) or docker.logs | `lines` events: the service's logs (every task's), the last `tail` lines first; not a Compose service's |
+| GET (WS) | `/services/{id}/exec/{container}` | services.exec (in its project) or docker.exec | a terminal in a running task container of the service (its full id), as `/docker/containers/{id}/exec` |
 | POST | `/projects/{id}/services` | services.create | `{"name","kind","image"?,"database"?:{database,user,password,root_password}}`: an app (`kind` `app`, `image` required) or a database (`postgres`, `mysql`, `mariadb`, `mongo`, `redis`: credentials generated when left out); 422 on bad names, images, taken names; audited (`services.create`) |
 | POST | `/services/{id}/deploy-key` | services.update | a new SSH deploy key (ed25519): `{"public_key"}`, the private half sealed; audited |
 | POST | `/services/{id}/trigger` | services.deploy | a new deployment trigger URL, shown once: `{"url"}`; the old one stops working; audited |
@@ -117,14 +127,55 @@ passwords. `GET /services/{id}/credentials` (services.secrets) answers `{"passwo
 `/overview` and `/services/{id}` include each kind of record only with its resource's permission
 (`services.view_any`, `service_domains.view_any`, `service_ports.view_any`, `service_mounts.view_any`).
 
+A Compose or privileged service's diagnostics, logs and terminal are its administrators' only.
+
+## Domains (`/apps`)
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/domains` | member (services.view_any and service_domains.view_any somewhere) | the Domains page: every domain the caller may see, where it leads and whether it is served; the panel's own domain, resolvers and certificates for system.manage |
+
+## Project members (`/apps`)
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/projects/{id}/members` | projects.members (in the project) | its members and the roles (`viewer`, `developer`, `admin`) |
+| POST | `/projects/{id}/members` | same | `{"email","role"}`: a user of the panel given a role; audited |
+| PATCH | `/projects/{id}/members/{user}` | same | `{"role"}`; the last admin changed only by whoever manages every project's members; audited |
+| DELETE | `/projects/{id}/members/{user}` | same | removes one (the same rule); audited |
+| GET | `/users?q=` | users.view_any | users whose email or name starts with `q` (2 characters at least; 10 at most) |
+
+## API tokens (`/apps`)
+
+Each user's own (Settings → API tokens); audited, never the token.
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/tokens` | member | the caller's live tokens, the scopes, `max_days` |
+| POST | `/tokens` | member | `{"name","scopes","days"}`: `{"token","info"}`, the token shown once |
+| DELETE | `/tokens/{id}` | member | revokes one of the caller's |
+
+## Git (`/apps`)
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| GET | `/git/providers` | system.manage | Settings → Git: the GitHub tokens (never their value) and the projects |
+| POST | `/git/providers` | system.manage | `{"name","token","projects"}`: added once GitHub accepts the token, sealed; audited |
+| PATCH | `/git/providers/{id}` | system.manage | renames it, replaces its token (checked first) or changes its projects; audited |
+| DELETE | `/git/providers/{id}` | system.manage | removes it, unless a service clones with it; audited |
+| POST | `/git/providers/{id}/test` | system.manage | asks GitHub who the token signs in as |
+| GET | `/services/{id}/github` | services.update | the tokens the service's project was given (names, accounts) |
+| GET | `/services/{id}/github/{provider}/repos` | services.update | the repositories that token reaches |
+| GET | `/services/{id}/github/{provider}/branches?repo=owner/name` | services.update | a repository's branches |
+
 ## Templates (`/apps`)
 
 | Method | Path | Permission | |
 |---|---|---|---|
-| GET | `/templates` | projects.view_any | the catalog: slug, name, description, tags, logo file |
+| GET | `/templates` | services.create (a role's, or in a project) | the catalog: slug, name, description, tags, logo file |
 | POST | `/templates/refresh` | services.create | fetch the catalog and templates again |
-| GET | `/templates/{slug}` | projects.view_any | name, description, instructions, links, `schema` (the form) |
-| GET | `/templates/{slug}/logo` | projects.view_any | the logo (image, `sandbox` CSP) |
+| GET | `/templates/{slug}` | services.create (a role's, or in a project) | name, description, instructions, links, `schema` (the form) |
+| GET | `/templates/{slug}/logo` | services.create (a role's, or in a project) | the logo (image, `sandbox` CSP) |
 | POST | `/projects/{id}/templates/{slug}` | services.create (+ projects.view; services.deploy to deploy) | `{"input":{…},"deploy":bool}`: runs the generator, creates its services (databases first), queues their deployments when asked; `{"project","services","warnings"}` |
 | POST | `/projects/{id}/schema` | same | `{"schema":{"services":[…]},"deploy":bool}`: "Create from Schema" |
 
@@ -147,7 +198,7 @@ resources.
 
 | Method | Path | Permission | |
 |---|---|---|---|
-| GET | `/actions` | projects.view_any | the last 100 deployments (with deployments.view_any and deployments.view), backup runs (database_backups.view_any) and Docker actions (docker.view; own unless system.manage): `{type, id, what, status, error, detail?, target?: {project, service}, created_at, finished_at}` |
+| GET | `/actions` | projects.view_any, or a project member (their projects only) | the last 100 deployments (with deployments.view_any and deployments.view), backup runs (database_backups.view_any) and Docker actions (docker.view; own unless system.manage): `{type, id, what, status, error, detail?, target?: {project, service}, created_at, finished_at}` |
 
 ## Notifications (`/apps`)
 
@@ -167,6 +218,18 @@ Resolvers are written through the `cert_resolvers` resource (their token sealed,
 | GET | `/traefik/resolvers` | system.manage | the resolvers (`has_token`, `in_use`), the DNS providers, the default resolver, and whether Traefik runs them (`applied`: `null` without a Traefik service) |
 | POST | `/traefik/apply` | system.manage | gives Traefik the resolvers (it restarts); logged as an action |
 | GET | `/panel` | system.manage | the panel's domain, Let's Encrypt email (from Traefik's arguments), apps' domain and address, as the installer set them |
+| GET / PUT | `/home` | system.manage | the homepage at `/` (Settings → Panel): `{"enabled"}`; the change audited |
+| GET / PUT | `/branding` | system.manage | Settings → Branding: `{"name","primary"}` (empty: the defaults); audited |
+| PUT / DELETE | `/branding/images/{kind}` | system.manage | `logo`, `logo-dark` or `favicon`: `{"mime","data"}` (base64) / removed; audited |
+| GET | `/tunnel` | system.manage | Settings → Cloudflare Tunnel: its state |
+| POST | `/tunnel/enable` | system.manage | `{"token"?}` (none: the one kept): cloudflared run, Traefik changed; audited (never the token) |
+| POST | `/tunnel/disable` | system.manage | stops it; audited |
+| GET | `/system/status` | system.manage | Settings → Panel: version, installed, image, hostname, public IP, whether it restarts and reboots |
+| GET (SSE) | `/system/logs/{tail}` | system.manage | `lines` events: the panel's log (its service's when installed; else the lines this process kept) |
+| POST | `/system/restart` | system.manage | restarts the panel's service (installed only); logged and audited first |
+| POST | `/system/reboot` | system.manage | `{"confirm"}` (the server's hostname): reboots the server (installed only); logged first |
+| POST | `/system/ip` | system.manage | finds the server's public address again; logged as an action |
+| POST | `/system/prune/{kind}` | system.manage | `containers`, `images`, `build_cache` or `volumes` (never the services' and Compose's): `{"report"}`; logged as an action, audited, notified |
 | POST | `/panel/check` | system.manage | `{"domain","email","apps_domain"}`: `{"errors","warnings","dns","command"}` — checked (names, a service's domain, DNS records) and the installer command applying them |
 | GET | `/system/version` | system.manage | Settings → Version: the panel (version, commit, image, digest, channel `release`/`development`/`source`), the last check (`checked_at`, `latest`, `error`), the update (`null` but on a release older than the newest), its release notes, the installer command for it, the components (Core, Traefik, MySQL, cloudflared, Docker, OS) and the history (version changes, restarts) |
 | GET | `/domains/dns?host=` | service_domains.view_any | where a host leads: `{"host", "via": "server" \| "cloudflare" \| "elsewhere" \| "none", "tunnel"}` (answers kept 5 minutes); the Domains page's rows carry `via` too |

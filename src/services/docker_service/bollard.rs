@@ -812,8 +812,8 @@ impl DockerApi for BollardDocker {
             .rm(true)
             .forcerm(true)
             .pull("true")
-            // BuildKit (what `docker build` uses): `RUN --mount`, as
-            // Nixpacks writes, needs it; its session sends the context.
+            // BuildKit (what `docker build` uses): `RUN --mount` needs it;
+            // its session sends the context.
             .version(::bollard::query_parameters::BuilderVersion::BuilderBuildKit)
             .session(&format!(
                 "rdp-{}",

@@ -546,9 +546,9 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
         errors.add("dockerfile", ctx.t("is at most 64 KB"));
     }
     if let Some(builder) = text(data, "builder")
-        && !matches!(builder, "dockerfile" | "nixpacks")
+        && builder != "dockerfile"
     {
-        errors.add("builder", ctx.t("must be dockerfile or nixpacks"));
+        errors.add("builder", ctx.t("must be dockerfile"));
     }
     let range =
         |field: &str, bounds: std::ops::RangeInclusive<i64>, errors: &mut ValidationErrors| {

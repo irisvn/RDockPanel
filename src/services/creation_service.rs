@@ -81,7 +81,7 @@ pub struct NewBuild {
     pub git_url: Option<String>,
     pub git_branch: Option<String>,
     pub git_path: Option<String>,
-    /// `dockerfile` or `nixpacks`.
+    /// `dockerfile` (the only builder).
     pub builder: String,
     pub dockerfile_path: Option<String>,
     pub dockerfile: Option<String>,
@@ -315,8 +315,8 @@ pub async fn create(
                         errors.add("git_path", "must stay inside the repository");
                     }
                 }
-                if !matches!(build.builder.as_str(), "dockerfile" | "nixpacks") {
-                    errors.add("builder", "must be dockerfile or nixpacks");
+                if build.builder != "dockerfile" {
+                    errors.add("builder", "must be dockerfile");
                 }
             }
             "dockerfile" => {

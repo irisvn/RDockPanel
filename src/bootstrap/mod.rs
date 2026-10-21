@@ -22,6 +22,7 @@ pub fn build(config: Config) -> AppBuilder {
             .route("/home/home.css", get(home::css))
             .route("/home/brand.css", get(home::brand))
             .route("/home/favicon.svg", get(home::favicon))
+            .route("/home/home.js", get(home::script))
             .route("/home/img/{name}", get(home::image))
     });
     app

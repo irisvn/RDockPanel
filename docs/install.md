@@ -26,7 +26,7 @@ Point `panel.example.com` and `*.apps.example.com` (a wildcard record) to the se
 | `--apps-domain HOST` | generated app domains `<project>-<service>.HOST` |
 | `--no-domain` | back to `http://<server-ip>:3000` |
 | `--admin-email EMAIL` | creates the first administrator and prints its password |
-| `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:main` until the first release) |
+| `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:main`, a development build: use `--version` for a release) |
 | `--version X.Y.Z` | that release of the panel: `ghcr.io/irisvn/rdockpanel:X.Y.Z` |
 | `--upgrade-system` | MySQL and Traefik pulled again at their tags (a newer patch of `mysql:8.4`, `traefik:v3.7`) |
 
@@ -34,8 +34,8 @@ The options are kept in `/etc/rdockpanel/install.conf`: a later run changes only
 That file is read as data (`KEY=value` lines of `IMAGE`, `DOMAIN`, `EMAIL`, `APPS_DOMAIN`, each
 value checked), never run. In the panel, **Settings → Panel** checks a new domain, email or apps'
 domain (DNS records, a name a service already uses) and gives the exact command to run here.
-Without a domain the panel answers on plain HTTP (port 3000), like EasyPanel before its domain is
-set: give it a domain before using it over the internet. With one, port 3000 is closed and the
+Without a domain the panel answers on plain HTTP (port 3000): give it a domain before using it
+over the internet. With one, port 3000 is closed and the
 panel is reached over HTTPS only.
 
 ## What it sets up
@@ -50,12 +50,22 @@ panel is reached over HTTPS only.
   - `rdp-mysql`: MySQL 8.4, data on the volume `rdp-mysql-data`, reachable on `rdp-internal` only;
     under 2 GB of memory it runs small (no `performance_schema`, no binary log, smaller buffers
     and caches: the panel's database is some 50 tables), and it gets 120 seconds to shut down;
-  - `rdp-traefik`: Traefik v3 on ports 80 and 443;
+  - `rdp-traefik`: Traefik v3.7 on ports 80 and 443, and an entrypoint `tunnel` (`:8081`, never
+    published) that Cloudflare Tunnel's routes use while the tunnel is on;
   - `rdockpanel`: the panel (port 3000 without a domain), with the Docker socket, the host's `/proc` (server
-    metrics), the routes directory and `/var/lib/rdockpanel/backups` (the same path inside: what a
-    "Local directory" storage provider under it writes lands on the host). Its entrypoint migrates
+    metrics), the routes directory, `/var/lib/rdockpanel/backups` (the same path inside: what a
+    "Local directory" storage provider under it writes lands on the host) and
+    `/var/lib/rdockpanel/compose` (Compose services' files, the same path inside). Its entrypoint migrates
     the database at each start. It reaches itself at `http://rdockpanel:3000` from Traefik
     (maintenance pages).
+
+The panel's address (`/`) shows a public homepage: what RDockPanel is, its screens, the install
+command and a link to GitHub, with nothing of this server on it. **Settings → Panel** turns it off
+(`/` then opens the sign-in). The panel itself is at `/admin`.
+
+Settings adds more as they are used: Cloudflare Tunnel's service `rdp-cloudflared`, its network
+`rdp-tunnel` and its token as secrets `rdp_tunnel_*` (labelled `rdockpanel.system=true` too); DNS
+resolvers' tokens as secrets `rdp-dns-*` (Traefik reads them).
 
 ## Upgrading and changing options
 
@@ -112,7 +122,17 @@ variables, registry passwords and file mounts (see [security](security.md)).
 
 ## Uninstalling
 
-`docker service rm rdockpanel rdp-traefik rdp-mysql`, then (this deletes the panel's data)
-`docker volume rm rdp-mysql-data`, `docker secret rm rdp_app_key rdp_database_url rdp_mysql_root
-rdp_mysql_password`, `docker network rm rdp-internal` and `rm -r /etc/rdockpanel`. Your apps'
-services keep running until removed.
+`docker service rm rdockpanel rdp-traefik rdp-mysql rdp-cloudflared` (the last one if the tunnel
+was on), then (this deletes the panel's data, its backups included):
+
+```sh
+docker volume rm rdp-mysql-data
+docker secret rm rdp_app_key rdp_database_url rdp_mysql_root rdp_mysql_password
+docker secret ls -q -f name=rdp_tunnel_ -f name=rdp-dns- | xargs -r docker secret rm
+docker network rm rdp-internal rdp-tunnel     # rdp-tunnel only if the tunnel was used
+rm -r /etc/rdockpanel /var/lib/rdockpanel/backups
+```
+
+Your apps' services keep running until removed. `/var/lib/rdockpanel/compose` holds the Compose
+services' files, and their relative bind mounts (`./data`) live there too: remove it only once
+those services and their data are gone.

@@ -1,6 +1,6 @@
 //! Building a service's image: its Git repository cloned (a deploy key for a
-//! private one), or the Dockerfile written in the panel; Nixpacks when asked
-//! (it writes the Dockerfile); then Docker builds the context. The image is
+//! private one), or the Dockerfile written in the panel; then Docker builds
+//! the context with its Dockerfile. The image is
 //! tagged `rdp/<project>_<service>:d<deployment>` on this node (one node:
 //! nothing is pushed to a registry). Every step goes to the deployment's log,
 //! and the deployment's lock is renewed all along (a build takes minutes).
@@ -15,7 +15,7 @@ use crate::services::deploy_service::Build;
 use crate::services::deployment_service::{Outcome, RunLog};
 use crate::services::docker_service::{BuildLine, Docker};
 
-/// How long a clone, or Nixpacks, may take.
+/// How long a clone may take.
 const STEP_TIME: Duration = Duration::from_secs(10 * 60);
 /// The largest `.dockerignore` read.
 const MAX_IGNORE: u64 = 1024 * 1024;
@@ -555,14 +555,6 @@ pub(crate) async fn build(
         .to_owned();
     if build.source == "dockerfile" {
         dockerfile = "Dockerfile".to_owned();
-    }
-    if build.builder == "nixpacks" {
-        log.line("nixpacks: writing the Dockerfile").await;
-        let context_text = context.to_string_lossy().into_owned();
-        let mut command = tokio::process::Command::new("nixpacks");
-        command.args(["build", &context_text, "--out", &context_text]);
-        run(log, "nixpacks", &mut command).await?;
-        dockerfile = ".nixpacks/Dockerfile".to_owned();
     }
     let dockerfile_path = inside(&dockerfile)
         .and_then(|p| contained(&context, &context.join(p)))

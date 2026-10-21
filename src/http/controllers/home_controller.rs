@@ -13,8 +13,8 @@ use std::collections::HashMap;
 
 use crate::services::home_service::{self, Lang};
 
-/// Its own policy: its stylesheets and images, nothing else (no script).
-const CSP: &str = "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/// Its own policy: its stylesheets, images and the screens' viewer only.
+const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /// `GET /`: the homepage, or the panel when it is turned off.
 pub async fn page(
@@ -61,6 +61,11 @@ fn asset(content_type: &'static str, body: impl IntoResponse) -> Response {
 /// `GET /home/home.css`.
 pub async fn css() -> Response {
     asset("text/css; charset=utf-8", home_service::CSS)
+}
+
+/// `GET /home/home.js`: the screens' viewer.
+pub async fn script() -> Response {
+    asset("text/javascript; charset=utf-8", home_service::SCRIPT)
 }
 
 /// `GET /home/favicon.svg`.

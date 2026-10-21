@@ -265,10 +265,9 @@ fn template_build(
 ) -> Result<NewBuild, String> {
     let builder = match build.and_then(|b| text(b, "type")).as_deref() {
         None | Some("dockerfile") => "dockerfile",
-        Some("nixpacks") => "nixpacks",
         Some(other) => {
             return Err(format!(
-                "{name}: builds with {other}, not supported (Dockerfile and Nixpacks are)"
+                "{name}: builds with {other}, not supported (a Dockerfile is)"
             ));
         }
     };
@@ -650,7 +649,7 @@ mod tests {
 
     #[test]
     fn what_cannot_be_done_is_said() {
-        let git = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "github", "owner": "org", "repo": "app", "ref": "main", "path": "/web"}, "build": {"type": "nixpacks"}}}]});
+        let git = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "github", "owner": "org", "repo": "app", "ref": "main", "path": "/web"}, "build": {"type": "dockerfile"}}}]});
         let built = plan(&git, "p", None).unwrap();
         let build = built.services[0].build.as_ref().unwrap();
         assert_eq!(
@@ -659,8 +658,10 @@ mod tests {
         );
         assert_eq!(
             (build.builder.as_str(), build.git_path.as_deref()),
-            ("nixpacks", Some("/web"))
+            ("dockerfile", Some("/web"))
         );
+        let nixpacks = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "git", "repo": "https://x/y.git"}, "build": {"type": "nixpacks"}}}]});
+        assert!(plan(&nixpacks, "p", None).unwrap_err().contains("nixpacks"));
         let packs = json!({"services": [{"type": "app", "data": {"serviceName": "x", "source": {"type": "git", "repo": "https://x/y.git"}, "build": {"type": "heroku-buildpacks"}}}]});
         assert!(
             plan(&packs, "p", None)

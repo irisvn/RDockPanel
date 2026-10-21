@@ -13,6 +13,7 @@ const ENABLED_KEY: &str = "home.enabled";
 const PAGE: &str = include_str!("../../resources/home/index.html");
 pub const CSS: &str = include_str!("../../resources/home/home.css");
 pub const FAVICON: &str = include_str!("../../resources/home/favicon.svg");
+pub const SCRIPT: &str = include_str!("../../resources/home/home.js");
 
 /// Its images, by name: `/home/img/{name}`.
 pub const IMAGES: [(&str, &[u8]); 8] = [
@@ -124,7 +125,7 @@ pub fn assets_tag() -> &'static str {
     static TAG: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (CSS, FAVICON).hash(&mut hasher);
+        (CSS, FAVICON, SCRIPT).hash(&mut hasher);
         for (name, bytes) in IMAGES {
             (name, bytes).hash(&mut hasher);
         }
@@ -189,10 +190,7 @@ const EN: Texts = &[
         "The RDockPanel dashboard: the server's CPU, memory, disk and network, and a project with its services",
     ),
     ("features_title", "Everything a small server needs"),
-    (
-        "features_sub",
-        "In the spirit of EasyPanel, open source and free.",
-    ),
+    ("features_sub", "Open source and free, every feature."),
     ("f1_title", "Server monitoring"),
     (
         "f1",
@@ -206,7 +204,7 @@ const EN: Texts = &[
     ("f3_title", "App deployments"),
     (
         "f3",
-        "Deploy an image or build from Git (Dockerfile or Nixpacks), with history and rollback.",
+        "Deploy an image or build from Git with its Dockerfile, with history and rollback.",
     ),
     ("f4_title", "Domains and HTTPS"),
     (
@@ -236,7 +234,7 @@ const EN: Texts = &[
     ("screens_title", "See it"),
     ("screens_sub", "The panel as it is, from a real server."),
     ("s1", "A service: its state, Deploy and its tabs"),
-    ("s2", "800+ EasyPanel templates"),
+    ("s2", "800+ templates, one click each"),
     ("s3", "Deployments, their logs and rollback"),
     ("s4", "Every domain and where it leads"),
     ("s5", "Every container, with logs and a terminal"),
@@ -254,6 +252,10 @@ const EN: Texts = &[
     ("early", "Early development: try it on a test server first."),
     ("footer", "RDockPanel · free and open source"),
     ("docs", "Docs"),
+    ("viewer", "Screens"),
+    ("previous", "Previous"),
+    ("next", "Next"),
+    ("close", "Close"),
 ];
 
 const VI: Texts = &[
@@ -296,10 +298,7 @@ const VI: Texts = &[
         "Bảng điều khiển RDockPanel: CPU, bộ nhớ, ổ đĩa, mạng của máy chủ và một dự án với các dịch vụ của nó",
     ),
     ("features_title", "Đủ mọi thứ cho một máy chủ nhỏ"),
-    (
-        "features_sub",
-        "Theo tinh thần của EasyPanel, mã nguồn mở và miễn phí.",
-    ),
+    ("features_sub", "Mã nguồn mở và miễn phí, mọi tính năng."),
     ("f1_title", "Giám sát máy chủ"),
     (
         "f1",
@@ -313,7 +312,7 @@ const VI: Texts = &[
     ("f3_title", "Triển khai ứng dụng"),
     (
         "f3",
-        "Chạy một image hoặc build từ Git (Dockerfile hay Nixpacks), có lịch sử và rollback.",
+        "Chạy một image hoặc build từ Git bằng Dockerfile, có lịch sử và rollback.",
     ),
     ("f4_title", "Tên miền và HTTPS"),
     (
@@ -343,7 +342,7 @@ const VI: Texts = &[
         "Giao diện thật, chụp từ một máy chủ đang chạy.",
     ),
     ("s1", "Một dịch vụ: trạng thái, nút Deploy và các tab"),
-    ("s2", "Hơn 800 template của EasyPanel"),
+    ("s2", "Hơn 800 template, mỗi cái một cú bấm"),
     ("s3", "Các lần triển khai, log và rollback"),
     ("s4", "Mọi tên miền và nơi chúng trỏ tới"),
     ("s5", "Mọi container, có log và terminal"),
@@ -364,6 +363,10 @@ const VI: Texts = &[
     ),
     ("footer", "RDockPanel · miễn phí, mã nguồn mở"),
     ("docs", "Tài liệu"),
+    ("viewer", "Hình ảnh"),
+    ("previous", "Ảnh trước"),
+    ("next", "Ảnh sau"),
+    ("close", "Đóng"),
 ];
 
 #[cfg(test)]

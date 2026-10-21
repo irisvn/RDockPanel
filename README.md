@@ -1,13 +1,13 @@
 # RDockPanel
 
-**A free, self-hosted server panel in the spirit of [EasyPanel](https://easypanel.io), built in Rust.**
+**A free, self-hosted server panel, built in Rust.**
 Watch your server, manage Docker, and deploy apps to Docker Swarm with domains and HTTPS. Every
 feature is free: no project limits, no paid tiers.
 
 [Tiếng Việt](README.vi.md) · [Docs](docs/) · [Roadmap](docs/roadmap.md)
 
 > **Status: early development.** Server monitoring, Docker management, apps and databases on
-> Docker Swarm with domains and HTTPS, builds from Git or a Dockerfile, EasyPanel templates,
+> Docker Swarm with domains and HTTPS, builds from Git or a Dockerfile, 800+ EasyPanel templates,
 > Compose services, database and volume backups, notifications, and a one-command installer work.
 > Try it on a test server first.
 
@@ -15,15 +15,16 @@ feature is free: no project limits, no paid tiers.
 
 ## Features
 
-**The interface, like EasyPanel's**
+**The interface**
 
 - `/admin` opens the **Dashboard**: server tiles, projects with their service cards, **+ Service**
-  and **Templates**. The sidebar has Dashboard, Actions, Settings and the Docker pages.
+  and **Templates**. The sidebar has Dashboard, Actions, Domains, Settings and the Docker pages.
 - A **service page** has its header (status, Deploy, Start/Stop, Restart, Open, Logs, Shell) and tabs:
-  Overview, Source, Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts,
-  Storage, Backups (databases), Advanced.
-- **Actions** lists deployments, backups and Docker actions; **Settings** holds storage providers and
-  notification channels; **⌘K** finds a project or a service. Light by default, with a Light / Dark /
+  Overview, Credentials (databases), Backups (databases and services with volumes), Deployments,
+  Environment, Domains, Redirects, Security, Maintenance, Scripts, Source, Storage, Advanced.
+- **Actions** lists deployments, backups and Docker actions; **Settings** has the tabs Panel,
+  Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Git, Backups, Notifications and
+  API tokens; **⌘K** finds a project or a service. Light by default, with a Light / Dark /
   System switch per user; in English and Vietnamese.
 - Every page follows one set of design rules ([docs/ui-guidelines.md](docs/ui-guidelines.md)): the
   same button sizes, extra row actions in a ⋯ menu, the same status words and colors, the panel's own dialogs,
@@ -74,20 +75,20 @@ feature is free: no project limits, no paid tiers.
   newer release is out (checked every 6 hours, also said on the Dashboard), what changed, an **Update**
   button (an administrator's: the panel never updates by itself; its database dumped first, a rollback
   if the new version does not start), its history, and its old versions removed.
-- **Settings → Panel** has EasyPanel's menus: the panel's logs and restart; Refresh IP and Reboot
+- **Settings → Panel**: the panel's logs and restart; Refresh IP and Reboot
   for the server; Traefik's logs and restart; Docker prunes that never touch the services' data.
 - **A homepage** at the panel's address (`/`): what RDockPanel is, its screens, the install command
   and a link to GitHub, in English or Vietnamese, with nothing of this server on it. Settings → Panel
   turns it off (`/` then opens the sign-in).
 - **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:
   credentials generated, data on a volume, health-checked), with their connection URL to copy.
-- **EasyPanel templates**: the 800+ templates of easypanel.io in one click (searched, filled in by
-  their own form, deployed with their databases), fetched from their repository when you open the
-  catalog; or paste a template's output ("Create from Schema").
+- **800+ EasyPanel templates** in one click (searched, filled in by their own form, deployed with
+  their databases), fetched when you open the catalog; or paste a template's output ("Create from
+  Schema").
 - **Builds**: an app from a Git repository (https, ssh with a generated deploy key, or a GitHub token of
   Settings → Git given to its project, its repositories picked from a list; a branch, tag
-  or commit; a sub-directory), built with its Dockerfile or Nixpacks, or from a Dockerfile written in
-  the panel; the build's log is the deployment's. A deployment trigger URL deploys from a CI, and a
+  or commit; a sub-directory), built with its Dockerfile, or from a Dockerfile written in the
+  panel; the build's log is the deployment's. A deployment trigger URL deploys from a CI, and a
   signed GitHub webhook deploys on each push (auto deploy).
 - **Compose services**: a Compose file (written in the panel or from Git) run with `docker compose`
   on the project's network, its domains leading to one of its services.
@@ -119,7 +120,7 @@ feature is free: no project limits, no paid tiers.
 
 **Coming next** (see the [roadmap](docs/roadmap.md))
 
-- Uploads as a source, Railpack and buildpacks; a web database client.
+- Uploads as a source; a web database client.
 - Later: multiple nodes, two-factor authentication.
 
 | A service | Templates | + Service |
@@ -206,7 +207,6 @@ More in [docs/architecture.md](docs/architecture.md).
 | [Security](docs/security.md) | the Docker socket, protected objects, the terminal, CSP |
 | [API](docs/api.md) | the panel's JSON, event-stream and WebSocket routes |
 | [Install](docs/install.md) | the installer, upgrades, backups |
-| [EasyPanel comparison](docs/easypanel-comparison.md) | what RDockPanel has of EasyPanel, feature by feature |
 | [Development](docs/development.md) | environment, tests, conventions |
 | [UI guidelines](docs/ui-guidelines.md) | the design rules every page follows |
 | [Roadmap](docs/roadmap.md) | phases and what they depend on |

@@ -2,25 +2,33 @@
 
 RDockPanel is a [RustCMS](https://github.com/irisvn/RustCMS-Core) application: one binary
 (`rdockpanel`) that serves the admin panel, its JSON/event/WebSocket routes, and runs queue
-workers. It follows the standard RustCMS layout (`rustcms make:*` generators).
+workers. It follows the standard RustCMS layout (`rustcms make:*` generators). The main pieces:
 
 ```
 src/
-  bootstrap/        the app from its providers, then its API and admin routes
+  bin/rdp.rs        the `rdp` command line (the public API)
+  bootstrap/        the app from its providers, then its API and admin routes, the homepage at /
   providers/        auth (permissions), admin panel (pages, scripts, styles), app (services, jobs, boot)
   routes/admin.rs   the panel's own routes under /admin/api/x (AdminRoutes)
-  http/controllers/ docker_controller (containers, images, volumes, networks, terminal), server_controller,
-                    deploy_controller (a deployment's live log)
+  routes/api.rs     /api/v1: the public API (tokens), deployment triggers, GitHub webhooks,
+                    maintenance pages
+  http/controllers/ docker (containers, images, volumes, networks, terminals, a service's logs),
+                    server, deploy (a deployment's live log), apps, domains, templates, backups,
+                    actions, notifications, traefik, system, members, tokens, git, tunnel,
+                    branding, home; api_v1 and trigger (/api/v1)
   services/         docker_service (+ bollard), system_stats_service, live_service, action_service;
                     deploy_rules_service (rules, [panel] config), deploy_service (spec and routes),
-                    deployment_service (running deployments), traefik_service (route files)
-  models/           action (the actions log); project, service, service_domain/port/mount, deployment
-  jobs/             pull_image, run_deployment, publish_routes
+                    deployment_service (running deployments), traefik_service (route files),
+                    build_service, compose_service, template_service, backup_service, …
+  models/           action (the actions log); project, service, service_*, deployment, … (see Data)
+  jobs/             pull_image, run_deployment, publish_routes, run_backup
   admin/pages/      Dashboard, Domains, Actions, Settings, Containers, Images, Volumes, Networks (React)
-  admin/resources/  Projects, Services, Domains, Ports, Mounts, Deployments (schema-driven resources)
+  admin/resources/  Projects, Services, Domains, Ports, Mounts, Redirects, Scripts, Deployments,
+                    backups, storage providers, notification channels, certificate resolvers
   admin/slots/      the service page's aside (state, actions, live deployment log)
 resources/admin/    src/: every page in React (built to js/rdockpanel/dashboard.js), css/rdockpanel/
                     (dashboard.css, xterm.css), js/rdockpanel/vendor/ (xterm.js)
+resources/home/     the public homepage (HTML, CSS, its screens' viewer, images)
 scripts/            dev-swarm.sh (a development Swarm with Traefik)
 tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER and
                     PANEL_TEST_SWARM
@@ -70,7 +78,9 @@ ended at the next boot (its token is kept in its action row). Each session is an
 ## Jobs
 
 The RustCMS queue (database-backed). Workers in `serve` take jobs from `default`, `docker` (image
-pulls) and `deploy` (Phase 2), configured in `config/queue.toml`.
+pulls), `deploy` (deployments, route publishing) and `backup` (backups and restores, up to 3 hours),
+configured in `config/queue.toml`. Jobs: `pull_image`, `run_deployment`, `publish_routes`,
+`run_backup`.
 
 ## Projects and services (Phase 2)
 
@@ -106,15 +116,16 @@ Swarm updates go at the version just read, retried when Swarm moved it meanwhile
 Snapshot tests (`src/services/snapshots/`, insta) pin the generated spec and routes; a Swarm test runs a
 generated spec on a real engine.
 
-### EasyPanel templates
+### Templates
 
 `services/template_service.rs`, `services/template_engine.rs`, `templates_controller.rs`. The
 catalog (`list.json`), each template's `meta.yaml` and `index.ts`, and logos are fetched from
-`[panel] templates_url` (EasyPanel's repository, raw files) when the Templates dialog opens, and
+`[panel] templates_url` (the `easypanel-io/templates` repository on GitHub, raw files) when the
+Templates dialog opens, and
 kept six hours; nothing is bundled (the repository has no license). Logos go through the panel
 (`/apps/templates/{slug}/logo`): its CSP loads images from itself only.
 
-A template runs as EasyPanel runs it: its form is its JSON Schema (defaults filled in); its
+A template's form is its JSON Schema (defaults filled in); its
 TypeScript generator (at most 256 KB), types stripped by oxc, runs in QuickJS with a 64 MB, 3 s
 budget, in a child process of the panel's own binary (`rdockpanel __rdockpanel-run-template`: CPU
 and, on Linux, memory limits, killed after 15 s; a crash takes the child down, never the panel),
@@ -122,12 +133,13 @@ and nothing to import but `~templates-utils` (`randomString`, `randomPassword`, 
 `crypto` (`randomBytes`, `randomUUID`; also `require("crypto")` and `Buffer.from` for older
 templates); no file system, no network. Its `{services: [{type, data}]}` output becomes
 services through `creation_service` (one transaction: all or none): apps from an image (env as
-`.env` text, quoted and multi-line values as EasyPanel reads them, placeholders resolved at deploy, `$(EASYPANEL_DOMAIN)` domains as generated domains,
+`.env` text, quoted and multi-line values, placeholders resolved at deploy, `$(EASYPANEL_DOMAIN)` domains as generated domains,
 volumes, files, ports, command, replicas, zero downtime) and databases (their options), databases
 first. What cannot be done is said, never dropped silently: host directories, redirects, resources
 and registry credentials are left out with a warning; what a service needs to be safe or to run
 (basic authentication, Linux capabilities, sysctls) is created but refused for "Deploy now"; Git, GitHub and
-Dockerfile sources become builds (Dockerfile or Nixpacks; other builders refuse the template), and
+Dockerfile sources become builds (with a Dockerfile; a template building any other way is reported
+as not supported), and
 Compose services become Compose services (a file of a repository, or inline; their domains name
 their container; only for `system.manage`). The same output pasted
 is "Create from Schema". Of the 843 templates of October 2026, 829 run; the others build from
@@ -151,7 +163,7 @@ database's own.
 
 ### Placeholders, generated domains, files
 
-- **Placeholders** (`services/placeholders.rs`), as EasyPanel's templates write them, are replaced
+- **Placeholders** (`services/placeholders.rs`), as templates write them, are replaced
   in the environment at each deployment: `$(PROJECT_NAME)`, `$(SERVICE_NAME)`, `$(PRIMARY_DOMAIN)`
   (the first domain added, else the generated one), `$(EASYPANEL_DOMAIN)` (the generated domain),
   `$(EASYPANEL_HOST)` (`[panel] service_domain`) and `$(EASYPANEL_HOST_IP)` (`[panel] public_ip`).
@@ -173,8 +185,10 @@ database's own.
 
 An app's `source` is `image` (pulled), `git` or `dockerfile` (built by `build_service`). A Git
 source is an https or ssh URL (never a local path or another transport), a branch, tag or commit
-(a commit: the whole history, then that commit), a path in the repository and a builder: the
-repository's Dockerfile (`dockerfile_path`), or Nixpacks writing one (`nixpacks build --out`). A
+(a commit: the whole history, then that commit), a path in the repository and the repository's
+Dockerfile (`dockerfile_path`); `builder` takes `dockerfile` only (services that had another
+builder were moved to it by the migration `builds_use_a_dockerfile`). A `dockerfile` source is a
+Dockerfile written in the panel. A
 private repository uses the service's deploy key (ed25519, made by `ssh-keygen`, its private half
 sealed like the environment, its public half shown to add to the repository). The repository is
 cloned (`--depth 1`) into a temporary directory removed afterwards, packed as a tar (no `.git`,
@@ -201,18 +215,18 @@ panel does not write), applied after the panel's (redirects, authentication).
 
 ### Redirects and basic authentication
 
-As EasyPanel's Redirects and Security tabs. A service's redirects (`service_redirects`: a regular
+The Redirects and Security tabs. A service's redirects (`service_redirects`: a regular
 expression over the request's URL, its replacement, permanent or not, on or off) and the users of
 its HTTP basic authentication (`service_basic_auth`: bcrypt hashes, never shown) become Traefik
 middlewares (`redirectRegex`, then `basicAuth`) on every router of its domains. They apply when
 saved (the routes written again, no deployment): a user added, removed or given a new password signs
 in so at once. A deployment's snapshot records them (users as a digest of their hash, never the hash).
 Regular expressions are checked as Go's (inline flags `i`, `m`, `s`, `U` only), and no value
-written to Traefik's files may contain `{{` or `}}` (Traefik reads them as Go templates). EasyPanel templates' `basicAuth` and `redirects` are created with the service.
+written to Traefik's files may contain `{{` or `}}` (Traefik reads them as Go templates). Templates' `basicAuth` and `redirects` are created with the service.
 
 ### Compose services
 
-As EasyPanel's. A service of kind `compose` (made by the panel's administrators only:
+A service of kind `compose` (made by the panel's administrators only:
 `system.manage`, since a Compose file can run anything on the host) is the containers of a Compose
 file, written in the panel or a file of its Git repository (cloned once into its directory, then
 fetched: files the repository does not track, such as `./data`, stay). They run with `docker
@@ -233,7 +247,7 @@ file.
 
 ### Database and volume backups
 
-As EasyPanel's. A **storage provider** (Settings) is a local directory (absolute; in the
+A **storage provider** (Settings) is a local directory (absolute; in the
 installed panel under `/var/lib/rdockpanel/backups`, a host directory) or an S3-compatible bucket
 (requests signed by `rusty-s3`, sent by `reqwest`; its secret key sealed, context
 `storage_providers.secret_key`). A database service (PostgreSQL, MySQL, MariaDB, MongoDB; Redis
@@ -273,15 +287,16 @@ claimed in the database.
 
 ### Actions
 
-The Actions page (`/admin/p/actions`, like EasyPanel's) lists the last 100 deployments, backup runs
+The Actions page (`/admin/p/actions`) lists the last 100 deployments, backup runs
 and Docker actions (pulls, prunes, container actions), newest first, each kind with its permissions
 (deployments: `deployments.view_any` and `deployments.view`)
-(Docker actions: the caller's own, every one with `system.manage`); a row opens its service's tab or
+(Docker actions: the caller's own, every one with `system.manage`); a project member sees their
+projects' only; a row opens its service's tab or
 its log.
 
 ### Notifications
 
-As EasyPanel's (Settings → Notifications). A channel is Discord or Slack (their webhook URL), a
+Settings → Notifications. A channel is Discord or Slack (their webhook URL), a
 Telegram bot (token and chat), email (SMTP: port 465 TLS, else STARTTLS required) or a webhook (a
 JSON `{event, ok, title, details, data}` POST). Its URL, token or SMTP password is sealed (context
 `notification_channels.secret`); changing a channel's kind or SMTP server needs it entered again
@@ -293,21 +308,21 @@ notification" sends at once and answers why it failed.
 
 ### Capabilities and sysctls
 
-As EasyPanel's Advanced → Deploy. Tini is every container's init. A service's added and dropped
+The Advanced tab. Tini is every container's init. A service's added and dropped
 Linux capabilities (`CAP_` prefix optional) and sysctls (`key=value` lines) become its container
 spec's `CapabilityAdd`, `CapabilityDrop` and `Sysctls`. Adding capabilities, sysctls or supplemental groups reaches the
 host's kernel: it needs `system.manage` (in the panel and for templates); dropping does not.
 
 ### Scripts
 
-As EasyPanel's Scripts. A service's scripts (`service_scripts`: a name, a shell command) run with
+The Scripts tab. A service's scripts (`service_scripts`: a name, a shell command) run with
 `sh -c` in one of its running containers (`POST /apps/scripts/{id}/run`, `docker.exec` as a
 terminal), at most 25 seconds (then killed in the container; within the request's own timeout), only the command its runner saw (409 otherwise), only in a service the panel deployed; run apart from the request (its action always finished); a run left running (a stop) is killed by the every-minute reaper after 5 minutes, then finished (`script.run` actions hold its mark; a failed kill is tried again), their output's last 64 KB returned;
 each run is audited (its name, never its output). Not for Compose services.
 
 ### Maintenance mode
 
-As EasyPanel's Maintenance tab. A service in maintenance (applied when saved) has its
+The Maintenance tab. A service in maintenance (applied when saved) has its
 domains routed to the panel (`[panel] internal_url`, `http://rdockpanel:3000` installed; empty: no
 maintenance mode) at `/api/v1/maintenance/<project>_<service>`, a public page of its title and
 subtitle (escaped), answered 503 with `Retry-After`, while it is in maintenance (turned off: its
@@ -448,17 +463,20 @@ change at once, with no way back if it did not come up. The installer reads `ins
 
 ## The apps interface
 
-`Dashboard` (`/admin/p/dashboard`, React, RustCMS extension host v2) is the EasyPanel-like
-interface: server tiles and projects with their service cards; a project; a service with its header
-(status, Deploy, Start/Stop, Restart, Open) and tabs (Overview, Deployments, Environment, Domains,
-Source, Storage, Advanced), by sub-path `<project>/<service>/<tab>`. It reads
+`Dashboard` (`/admin/p/dashboard`, React, RustCMS extension host v2) is the apps interface: server
+tiles and projects with their service cards; a project; a service with its header (status, Deploy,
+Start/Stop, Restart, Open, Logs, Shell) and tabs (Overview, Credentials (databases), Backups
+(databases and services with volumes), Deployments, Environment, Domains, Redirects, Security,
+Maintenance, Scripts, Source, Storage, Advanced; a database has no Redirects, Security, Maintenance
+or Scripts, a Compose service no Scripts), by sub-path `<project>/<service>/<tab>`. It reads
 `/admin/api/x/apps/...` (`apps_controller.rs`) and writes through the resources' API and actions, so
 the resources' policies, validation, audit and encrypted fields apply unchanged. The environment is
 edited as `.env` text (`services/dotenv.rs`): `PUT /apps/services/{id}/env` seals it; reading it in
 clear needs `services.secrets` and is audited.
 
-The sidebar is EasyPanel's: Dashboard (the panel's home, `AdminProvider::home`, RustCMS 0.5.1), Actions,
-Settings (its tabs: Panel, Traefik, Certificates, Backups, Notifications, each by its permission), then the Docker pages, then RustCMS's System. The resources (projects, services,
+The sidebar: Dashboard (the panel's home, `AdminProvider::home`, RustCMS 0.5.1), Actions, Domains,
+Settings (its tabs: Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Git,
+Backups, Notifications, API tokens, each by its permission), then the Docker pages, then RustCMS's System. The resources (projects, services,
 domains, …) have no sidebar entry (`navigation(false)`): their routes and API stay, as the React pages
 write through them, and an administrator can still open `/admin/r/<slug>`. The panel is light by default,
 whatever the operating system prefers (`Theme::color_scheme`); each user can pick Light, Dark or System
@@ -467,7 +485,9 @@ at the bottom of the sidebar (RustCMS 0.6.1, kept in the browser).
 ## Data
 
 MySQL 8.4 (`docker-compose.yml` for development). Besides the framework's tables (users, roles,
-sessions, audit log, jobs, schedule slots, …), the panel adds `actions`, then for Phase 2 `projects`,
-`services`, `service_domains`, `service_ports`, `service_mounts` and `deployments` (each with its
-configuration snapshot, pinned image, status and log), then `storage_providers`,
-`database_backups`, `backup_runs` and `notification_channels`.
+sessions, audit log, API tokens, jobs, schedule slots, …), the panel adds `actions`, then for Phase 2
+`projects`, `services`, `service_domains`, `service_ports`, `service_mounts` and `deployments` (each
+with its configuration snapshot, pinned image, status and log), then `service_redirects`,
+`service_basic_auth`, `service_scripts`, `storage_providers`, `database_backups`, `backup_runs`,
+`notification_channels`, `cert_resolvers`, `certificates`, `panel_settings` (custom middlewares,
+the homepage switch, …), `project_members`, `git_providers` and `branding_images`.

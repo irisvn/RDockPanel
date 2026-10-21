@@ -161,7 +161,7 @@ pub struct Build {
     /// The GitHub token the repository is cloned with (`git_providers`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_provider: Option<i64>,
-    /// `dockerfile` or `nixpacks`.
+    /// `dockerfile` (the only builder).
     pub builder: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dockerfile_path: Option<String>,
