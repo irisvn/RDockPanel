@@ -125,7 +125,6 @@ ss -H -ltnup 2>/dev/null
 echo '== tools'
 command -v nft >/dev/null 2>&1 && echo nft=yes || echo nft=no
 command -v systemd-run >/dev/null 2>&1 && echo systemd=yes || echo systemd=no
-echo "ufw=$(systemctl is-active ufw 2>/dev/null)"
 echo "ufw_status=$(ufw status 2>/dev/null | head -n 1)"
 echo "firewalld=$(systemctl is-active firewalld 2>/dev/null)"
 echo "nftables=$(systemctl is-enabled nftables 2>/dev/null)"
@@ -299,7 +298,6 @@ pub fn parse_discovery(text: &str) -> Discovery {
             "tools" => match line.split_once('=') {
                 Some(("nft", v)) => found.nft = v == "yes",
                 Some(("systemd", v)) => found.systemd = v == "yes",
-                Some(("ufw", v)) => found.ufw_active |= v == "active",
                 Some(("ufw_status", v)) => {
                     found.ufw_active |= v.ends_with("active") && !v.contains("inactive")
                 }
@@ -1383,6 +1381,13 @@ boot_failed=none
         );
         assert!(found.listeners[2].local());
         assert!(!found.listeners[0].local());
+    }
+
+    #[test]
+    fn ufw_is_its_status_not_its_unit() {
+        // Ubuntu keeps ufw.service active while ufw is disabled.
+        let found = parse_discovery("== tools\nufw=active\nufw_status=Status: inactive\n== end\n");
+        assert!(!found.ufw_active);
     }
 
     #[test]

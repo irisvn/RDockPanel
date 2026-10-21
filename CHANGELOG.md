@@ -3,6 +3,10 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.6.1 — 2026-10-22
+
+- The Firewall page no longer says ufw is on when it is installed but disabled.
+
 ## 0.6.0 — 2026-10-22
 
 - **Firewall** page (Workspace menu): every port is closed to the internet except SSH, 80 and 443;
