@@ -13,6 +13,7 @@ import { Templates } from "./apps/Templates";
 import { Settings } from "./settings/Settings";
 import { Actions } from "./actions/Actions";
 import { Domains } from "./domains/Domains";
+import { Firewall } from "./firewall/Firewall";
 import { Containers } from "./docker/Containers";
 import { Images } from "./docker/Images";
 import { Networks, Volumes } from "./docker/VolumesNetworks";
@@ -169,6 +170,18 @@ function DomainsRoute(props: PageProps<{ user?: string | number }>) {
 }
 
 registerPage("rdockpanel/domains", DomainsRoute as (p: PageProps<unknown>) => ReturnType<typeof DomainsRoute>);
+
+function FirewallRoute(props: PageProps<{ user?: string | number }>) {
+  bindResources(props.resources);
+  return (
+    <ConfirmProvider t={props.t} path={props.path}>
+      <Firewall {...props} />
+      <Palette {...props} />
+    </ConfirmProvider>
+  );
+}
+
+registerPage("rdockpanel/firewall", FirewallRoute as (p: PageProps<unknown>) => ReturnType<typeof FirewallRoute>);
 
 /** The Docker pages, on the same frame as the rest (docs/ui-redesign.md R5). */
 function dockerRoute(Page: (p: PageProps<never>) => ReturnType<typeof Containers>) {

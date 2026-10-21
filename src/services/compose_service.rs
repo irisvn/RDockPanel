@@ -226,6 +226,8 @@ async fn compose(
         }
     };
     let (code, output) = done.map_err(|e| failed(e.to_string()))?;
+    // Compose may have made (or removed) bridges: the firewall trusts them.
+    crate::services::firewall_service::NETWORKS_CHANGED.notify_one();
     for line in output.lines().filter(|l| !l.trim().is_empty()).take(400) {
         log.line(line).await;
     }

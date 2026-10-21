@@ -17,10 +17,11 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 **Giao diện**
 
-- Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Actions, Domains, Settings và các trang Docker.
+- Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Domains, Firewall, Actions, Settings và các trang Docker.
 - **Trang service** có header (trạng thái, Deploy, Start/Stop, Restart, Open, Logs, Shell) và các tab: Overview, Credentials (với database), Backups (với database và service có volume), Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts, Source, Storage, Advanced.
 - **Settings → Phiên bản**: panel đang chạy bản nào (cùng Core, Traefik, MySQL, Docker, hệ điều hành), có bản phát hành mới chưa (kiểm tra 6 giờ một lần, báo cả trên Bảng điều khiển), có gì mới, nút **Cập nhật** (admin bấm: panel không bao giờ tự cập nhật; database được backup trước, bản mới không chạy thì Swarm tự quay về), lịch sử, và dọn các bản cũ.
 - **Settings → Panel:** log và khởi động lại panel; Refresh IP và Reboot server; log và khởi động lại Traefik; dọn Docker mà không đụng tới dữ liệu của service.
+- **Tường lửa** (menu Workspace, chỉ quản trị viên): đóng mọi port với internet trừ SSH, 80 và 443, cùng các port anh mở cho địa chỉ chỉ định (ví dụ IP của VPN), cho máy chủ hoặc cho port service publish; chặn địa chỉ; xem các port đang lắng nghe và của ai. Mỗi thay đổi được thử trước, server tự quay về nếu không bấm Giữ; nạp lúc khởi động trước Docker ([docs/firewall.md](docs/firewall.md)).
 - **Trang chủ** ở địa chỉ của panel (`/`): giới thiệu RDockPanel, ảnh giao diện, lệnh cài đặt và link GitHub, bằng tiếng Anh hoặc tiếng Việt, không có thông tin nào của máy chủ. Tắt được trong Settings → Panel (khi đó `/` mở trang đăng nhập).
 - **Trang Domains** liệt kê domain của mọi service, nơi chúng trỏ tới và domain nào đang được phục vụ.
 - Domain, redirect, basic auth và maintenance **áp dụng ngay khi lưu** (không cần Deploy, container của khách không bị khởi động lại); image, env, port, mount, tài nguyên… mới cần Deploy.

@@ -447,6 +447,17 @@ pub trait DockerApi: Send + Sync {
             "registry lookups are not supported".to_owned(),
         ))
     }
+    /// Starts a helper: a privileged container of `image` (local) in the
+    /// host's process namespace, idle for at most `lifetime` seconds, kept
+    /// (no auto-remove) until [`DockerApi::remove_container`]. Host commands
+    /// run in it through [`DockerApi::run_in_container`] (`nsenter -t 1`):
+    /// their output and exit code are read before it goes. Its id.
+    async fn start_host_helper(&self, image: &str, lifetime: u32) -> DockerResult<String> {
+        let _ = (image, lifetime);
+        Err(DockerError::Unavailable(
+            "host commands are not supported".to_owned(),
+        ))
+    }
     /// Starts `cmd` in a new privileged container of `image` (local) in the
     /// host's process namespace, removed when it ends; not waited for.
     async fn run_on_host(&self, image: &str, cmd: Vec<String>) -> DockerResult<()> {
@@ -779,7 +790,10 @@ impl Docker {
         if self.0.networks().await?.iter().any(|n| n.name == name) {
             return Err(DockerError::Conflict(format!("network {name} exists")));
         }
-        self.0.create_network(name, driver).await
+        let created = self.0.create_network(name, driver).await;
+        // A new bridge: the firewall trusts it at once.
+        crate::services::firewall_service::NETWORKS_CHANGED.notify_one();
+        created
     }
 
     /// `id` is a network's full id, else its name (Docker's order); the one

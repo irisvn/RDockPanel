@@ -135,6 +135,24 @@ A Compose or privileged service's diagnostics, logs and terminal are its adminis
 |---|---|---|---|
 | GET | `/domains` | member (services.view_any and service_domains.view_any somewhere) | the Domains page: every domain the caller may see, where it leads and whether it is served; the panel's own domain, resolvers and certificates for system.manage |
 
+## Firewall (`/apps`)
+
+All `system.manage`; every change audited (`firewall.*`) and the host's changes logged as actions. See [firewall.md](firewall.md).
+
+| Method | Path | |
+|---|---|---|
+| GET | `/firewall` | the page: `available` (installed panels only), `enabled`, `changed`, `drift`, `pending` (`txid`, `deadline`), `unsupported` (reasons), `ssh_ports`, `host` (nft, systemd, ufw, firewalld, nodes, `boot_failed`), `ports` (each listener and published port: `owner`, `state` `local`/`always_open`/`opened`/`closed`/`open`, its `openings`), `openings`, `blocked` |
+| GET | `/firewall/preview` | the table the saved policy loads (`ruleset`) and the listening ports it closes (`closes`) |
+| POST | `/firewall/openings` | `{"ports":"5432" or "8000-8100","protocol":"tcp"/"udp","target":"published"/"host","anywhere":bool,"sources_v4":"10.8.0.0/24, …","sources_v6":"…","note":…}`: sources canonical, each in its family; SSH, 80 and 443 (TCP) refused (always open) |
+| PATCH | `/firewall/openings/{id}` | the same body, plus `enabled` |
+| DELETE | `/firewall/openings/{id}` | |
+| POST | `/firewall/blocked` | `{"cidr":"198.51.100.7" or "203.0.113.0/24","note":…}` |
+| DELETE | `/firewall/blocked/{id}` | |
+| POST | `/firewall/apply` | applies the saved policy: `{"txid","deadline"}`; refused while a change waits or when unsupported |
+| POST | `/firewall/keep` | `{"txid"}`: keeps it (before its deadline, the host's table still the one it loaded) |
+| POST | `/firewall/revert` | `{"txid"}`: back to the previous rules now |
+| POST | `/firewall/disable` | turns it off (the table, the host's units and files removed) |
+
 ## Project members (`/apps`)
 
 | Method | Path | Permission | |

@@ -15,7 +15,7 @@ impl PanelPage for ActionsPage {
     fn meta() -> PanelPageMeta {
         PanelPageMeta::new("Actions")
             .icon("history")
-            .sort(2)
+            .sort(3)
             // A role's, or a member's (`apps.access`): their projects' actions.
             .permission_any(["projects.view_any", "apps.access"])
     }

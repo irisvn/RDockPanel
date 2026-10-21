@@ -195,6 +195,28 @@ impl ServiceProvider for AppServiceProvider {
                 Ok(None)
             }),
         );
+        // The firewall: an interrupted change settled, Docker's bridges kept
+        // trusted, the table compared with the confirmed one (reloaded).
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "firewall-check",
+                std::time::Duration::from_secs(120),
+            )
+            .task(|ctx| async move {
+                let Some(docker) = ctx
+                    .state
+                    .service::<crate::services::docker_service::Docker>()
+                else {
+                    return Ok(None);
+                };
+                Ok(crate::services::firewall_service::check(
+                    &ctx.state,
+                    &docker,
+                    crate::services::deploy_rules_service::config().installed,
+                )
+                .await?)
+            }),
+        );
         // A full disk, said to the channels that asked (each at most every 6 h).
         app.schedule(
             rustcms::schedule::Schedule::every("disk-check", std::time::Duration::from_secs(300))
@@ -305,6 +327,7 @@ impl ServiceProvider for AppServiceProvider {
         }
         crate::services::tunnel_service::sync_panel_route(state).await;
         crate::services::tunnel_service::reconcile(state);
+        firewall_watch(state);
         // Traefik's routes, written again from the database.
         if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {
             let options = crate::services::deployment_service::deploy_options(0);
@@ -374,4 +397,28 @@ impl ServiceProvider for AppServiceProvider {
         }
         Ok(())
     }
+}
+
+/// Right after the start (an interrupted change settled), then each time
+/// Docker's networks change (a new bridge trusted at once).
+fn firewall_watch(state: &AppState) {
+    if !crate::services::deploy_rules_service::config().installed {
+        return;
+    }
+    let app = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        loop {
+            if let Some(docker) = app.service::<crate::services::docker_service::Docker>()
+                && let Err(err) =
+                    crate::services::firewall_service::check(&app, &docker, true).await
+            {
+                tracing::debug!(%err, "firewall check");
+            }
+            crate::services::firewall_service::NETWORKS_CHANGED
+                .notified()
+                .await;
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    });
 }

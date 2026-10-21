@@ -16,6 +16,9 @@ use rdockpanel::services::docker_service::{
 use rustcms::async_trait;
 use serde_json::{Value, json};
 
+/// The host helper's container id ([`DockerApi::start_host_helper`]).
+pub const HOST_HELPER: &str = "host-helper";
+
 /// A config: its id, content and labels.
 pub type FakeConfig = (String, Vec<u8>, HashMap<String, String>);
 
@@ -43,6 +46,11 @@ pub struct FakeDocker {
     pub composed: Arc<Mutex<Option<String>>>,
     /// What commands run in containers were fed (a restore's dump).
     pub fed: Arc<Mutex<Vec<u8>>>,
+    /// What a host command (in the host helper) prints.
+    pub host_output: Arc<Mutex<String>>,
+    /// What the next host commands print, in order (exit code, output);
+    /// then [`Self::host_output`].
+    pub host_outputs: Arc<Mutex<std::collections::VecDeque<(i64, String)>>>,
     /// The exit code of commands run in containers (default 0).
     pub exec_exit: Arc<Mutex<i64>>,
     /// `"restart web"`, `"remove web"`, `"prune rdockpanel.system"`, …
@@ -326,6 +334,23 @@ impl DockerApi for FakeDocker {
             *self.fed.lock().unwrap() = fed;
         }
         let code = *self.exec_exit.lock().unwrap();
+        if container == HOST_HELPER {
+            let script = cmd.last().cloned().unwrap_or_default();
+            let first = script.trim().lines().next().unwrap_or("").to_owned();
+            self.record(format!("host: {first}"));
+            let (code, out) = self
+                .host_outputs
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| (code, self.host_output.lock().unwrap().clone()));
+            let mut chunks = vec![Ok(ExecChunk::Out(out.into_bytes()))];
+            if code != 0 {
+                chunks.push(Ok(ExecChunk::Err(b"refused\n".to_vec())));
+            }
+            chunks.push(Ok(ExecChunk::Exit(code)));
+            return Ok(stream::iter(chunks).boxed());
+        }
         let mut chunks = vec![Ok(ExecChunk::Out(
             format!("dump of {container}\n").into_bytes(),
         ))];
@@ -377,6 +402,10 @@ impl DockerApi for FakeDocker {
     }
     async fn registry_digest(&self, reference: &str) -> DockerResult<Option<String>> {
         Ok(self.registry.lock().unwrap().get(reference).cloned())
+    }
+    async fn start_host_helper(&self, image: &str, lifetime: u32) -> DockerResult<String> {
+        self.record(format!("host helper {image} {lifetime}"));
+        Ok(HOST_HELPER.to_owned())
     }
     async fn run_on_host(&self, image: &str, cmd: Vec<String>) -> DockerResult<()> {
         self.record(format!("host {image} {}", cmd.join(" ")));

@@ -15,6 +15,7 @@ mod deployments;
 mod docker;
 mod docker_routes;
 mod domains;
+mod firewall;
 mod git;
 mod health;
 mod home;

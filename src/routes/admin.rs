@@ -8,10 +8,11 @@ use rustcms::prelude::*;
 use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
     branding_controller as branding, deploy_controller as deploy, docker_controller as docker,
-    domains_controller as domains, git_controller as git, home_controller as home,
-    members_controller as members, notifications_controller as notifications,
-    server_controller as server, system_controller as system, templates_controller as templates,
-    tokens_controller as tokens, traefik_controller as traefik, tunnel_controller as tunnel,
+    domains_controller as domains, firewall_controller as firewall, git_controller as git,
+    home_controller as home, members_controller as members,
+    notifications_controller as notifications, server_controller as server,
+    system_controller as system, templates_controller as templates, tokens_controller as tokens,
+    traefik_controller as traefik, tunnel_controller as tunnel,
 };
 
 /// Every admin route, with the access it requires.
@@ -93,6 +94,62 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                // The Firewall page: the server's listeners and firewall.
+                .get(
+                    "/firewall",
+                    AdminAccess::can("system.manage"),
+                    firewall::show,
+                )
+                .get(
+                    "/firewall/preview",
+                    AdminAccess::can("system.manage"),
+                    firewall::preview,
+                )
+                .post(
+                    "/firewall/openings",
+                    AdminAccess::can("system.manage"),
+                    firewall::create_opening,
+                )
+                .patch(
+                    "/firewall/openings/{id}",
+                    AdminAccess::can("system.manage"),
+                    firewall::update_opening,
+                )
+                .delete(
+                    "/firewall/openings/{id}",
+                    AdminAccess::can("system.manage"),
+                    firewall::delete_opening,
+                )
+                .post(
+                    "/firewall/blocked",
+                    AdminAccess::can("system.manage"),
+                    firewall::create_blocked,
+                )
+                .delete(
+                    "/firewall/blocked/{id}",
+                    AdminAccess::can("system.manage"),
+                    firewall::delete_blocked,
+                )
+                .post(
+                    "/firewall/apply",
+                    AdminAccess::can("system.manage"),
+                    firewall::apply,
+                )
+                .post(
+                    "/firewall/keep",
+                    AdminAccess::can("system.manage"),
+                    firewall::keep,
+                )
+                .post(
+                    "/firewall/revert",
+                    AdminAccess::can("system.manage"),
+                    firewall::revert,
+                )
+                .post(
+                    "/firewall/disable",
+                    AdminAccess::can("system.manage"),
+                    firewall::disable,
+                )
                 // The homepage at `/` (Settings → Panel): on or off.
                 .get("/home", AdminAccess::can("system.manage"), home::show)
                 .put("/home", AdminAccess::can("system.manage"), home::update)

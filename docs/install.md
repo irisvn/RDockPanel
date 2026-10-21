@@ -122,7 +122,10 @@ variables, registry passwords and file mounts (see [security](security.md)).
 
 ## Uninstalling
 
-`docker service rm rdockpanel rdp-traefik rdp-mysql rdp-cloudflared` (the last one if the tunnel
+If the Firewall is on, turn it off first (Firewall → Turn off): Docker waits for it at boot. Without
+the panel, `sh /var/lib/rdockpanel/firewall/fw.sh disable` does the same.
+
+Then `docker service rm rdockpanel rdp-traefik rdp-mysql rdp-cloudflared` (the last one if the tunnel
 was on), then (this deletes the panel's data, its backups included):
 
 ```sh

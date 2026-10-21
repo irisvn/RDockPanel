@@ -22,7 +22,7 @@ src/
                     build_service, compose_service, template_service, backup_service, …
   models/           action (the actions log); project, service, service_*, deployment, … (see Data)
   jobs/             pull_image, run_deployment, publish_routes, run_backup
-  admin/pages/      Dashboard, Domains, Actions, Settings, Containers, Images, Volumes, Networks (React)
+  admin/pages/      Dashboard, Domains, Firewall, Actions, Settings, Containers, Images, Volumes, Networks (React)
   admin/resources/  Projects, Services, Domains, Ports, Mounts, Redirects, Scripts, Deployments,
                     backups, storage providers, notification channels, certificate resolvers
   admin/slots/      the service page's aside (state, actions, live deployment log)
@@ -474,8 +474,8 @@ the resources' policies, validation, audit and encrypted fields apply unchanged.
 edited as `.env` text (`services/dotenv.rs`): `PUT /apps/services/{id}/env` seals it; reading it in
 clear needs `services.secrets` and is audited.
 
-The sidebar: Dashboard (the panel's home, `AdminProvider::home`, RustCMS 0.5.1), Actions, Domains,
-Settings (its tabs: Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Git,
+The sidebar: Dashboard (the panel's home, `AdminProvider::home`, RustCMS 0.5.1), Domains, Firewall
+(`system.manage`, [firewall.md](firewall.md)), Actions, Settings (its tabs: Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Git,
 Backups, Notifications, API tokens, each by its permission), then the Docker pages, then RustCMS's System. The resources (projects, services,
 domains, …) have no sidebar entry (`navigation(false)`): their routes and API stay, as the React pages
 write through them, and an administrator can still open `/admin/r/<slug>`. The panel is light by default,

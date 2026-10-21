@@ -3,6 +3,13 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.6.0 — 2026-10-22
+
+- **Firewall** page (Workspace menu): every port is closed to the internet except SSH, 80 and 443;
+  open a port for the addresses you choose (a VPN), block addresses, see what listens and who owns
+  it. Each change is tried first: keep it within two minutes or the server goes back by itself.
+  Off until you turn it on.
+
 ## 0.5.5 — 2026-10-21
 
 - The homepage's screens open in a viewer (previous / next, arrow keys, swipe) instead of a new page,

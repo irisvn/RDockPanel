@@ -155,6 +155,17 @@ installation: no version, address, domain or project (its screenshots are of a d
 the brand color of Settings → Branding comes from the database. Settings → Panel turns it off
 (`system.manage`, audited as `home.update`): `/` then redirects to `/admin`.
 
+## The firewall
+
+The Firewall page ([firewall.md](firewall.md)) changes the host's nftables, so it is `system.manage`
+only and installed panels only. It never takes raw rules: ports, protocols and canonical CIDRs are
+checked, notes are never rendered, and the host scripts are fixed texts in the binary (the table on
+standard input, checked tokens as arguments). They run from a short-lived privileged helper
+container in the host's namespaces, as Reboot does. Against locking yourself out: SSH and 80/443
+are always open and are accepted before the blocked addresses (SSH) or the drops; each change is
+reverted by the host itself after 120 s unless kept; a boot that cannot load the confirmed table
+loads the fallback (SSH and the web only), and Docker does not start unfiltered.
+
 ## Live data limits
 
 Log lines are cut to 16 KiB. A log request (the last lines) stops reading after about 2 MiB of text;

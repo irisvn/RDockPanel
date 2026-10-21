@@ -32,6 +32,7 @@ mod m20261020_040000_add_events_to_notification_channels;
 mod m20261020_050000_create_project_members;
 mod m20261020_060000_create_branding_images;
 mod m20261021_000000_builds_use_a_dockerfile;
+mod m20261022_000000_create_firewall_tables;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -70,6 +71,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261020_050000_create_project_members::Migration),
             Box::new(m20261020_060000_create_branding_images::Migration),
             Box::new(m20261021_000000_builds_use_a_dockerfile::Migration),
+            Box::new(m20261022_000000_create_firewall_tables::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

@@ -1083,6 +1083,42 @@ end HUP; sleep 2; end KILL; true"#
         Ok(found.descriptor.digest.filter(|d| d.starts_with("sha256:")))
     }
 
+    async fn start_host_helper(&self, image: &str, lifetime: u32) -> DockerResult<String> {
+        // Idle, its own entrypoint never runs: what it does comes by exec.
+        let body = ::bollard::models::ContainerCreateBody {
+            image: Some(image.to_owned()),
+            entrypoint: Some(vec!["sleep".to_owned(), lifetime.to_string()]),
+            cmd: Some(vec![]),
+            labels: Some(HashMap::from([(
+                super::SYSTEM_LABEL.to_owned(),
+                "true".to_owned(),
+            )])),
+            host_config: Some(::bollard::models::HostConfig {
+                privileged: Some(true),
+                pid_mode: Some("host".to_owned()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let created = self
+            .client
+            .create_container(
+                None::<::bollard::query_parameters::CreateContainerOptions>,
+                body,
+            )
+            .await
+            .map_err(map_err)?;
+        if let Err(err) = self
+            .client
+            .start_container(&created.id, None::<StartContainerOptions>)
+            .await
+        {
+            let _ = self.remove_container(&created.id, true).await;
+            return Err(map_err(err));
+        }
+        Ok(created.id)
+    }
+
     async fn run_on_host(&self, image: &str, cmd: Vec<String>) -> DockerResult<()> {
         // `cmd` as the entrypoint: the image's own (the panel's) never runs.
         let body = ::bollard::models::ContainerCreateBody {

@@ -8,6 +8,7 @@ pub mod branding_controller;
 pub mod deploy_controller;
 pub mod docker_controller;
 pub mod domains_controller;
+pub mod firewall_controller;
 pub mod git_controller;
 pub mod home_controller;
 pub mod members_controller;

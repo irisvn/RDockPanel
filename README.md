@@ -18,7 +18,7 @@ feature is free: no project limits, no paid tiers.
 **The interface**
 
 - `/admin` opens the **Dashboard**: server tiles, projects with their service cards, **+ Service**
-  and **Templates**. The sidebar has Dashboard, Actions, Domains, Settings and the Docker pages.
+  and **Templates**. The sidebar has Dashboard, Domains, Firewall, Actions, Settings and the Docker pages.
 - A **service page** has its header (status, Deploy, Start/Stop, Restart, Open, Logs, Shell) and tabs:
   Overview, Credentials (databases), Backups (databases and services with volumes), Deployments,
   Environment, Domains, Redirects, Security, Maintenance, Scripts, Source, Storage, Advanced.
@@ -77,6 +77,11 @@ feature is free: no project limits, no paid tiers.
   if the new version does not start), its history, and its old versions removed.
 - **Settings → Panel**: the panel's logs and restart; Refresh IP and Reboot
   for the server; Traefik's logs and restart; Docker prunes that never touch the services' data.
+- **Firewall** (Workspace menu, administrators): every port closed to the internet except SSH, 80
+  and 443, and the ports you open for the addresses you choose (a VPN's, say), for this server or a
+  service's published port; blocked addresses; the listening ports and who owns them. Each change is
+  tried first and reverted by the server itself unless kept; loaded at boot before Docker
+  ([docs/firewall.md](docs/firewall.md)).
 - **A homepage** at the panel's address (`/`): what RDockPanel is, its screens, the install command
   and a link to GitHub, in English or Vietnamese, with nothing of this server on it. Settings → Panel
   turns it off (`/` then opens the sign-in).

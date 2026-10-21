@@ -31,6 +31,7 @@ pub fn provider() -> AdminProvider {
         // The apps interface first (React, host API v2).
         .page::<crate::admin::pages::dashboard_page::DashboardPage>()
         .page::<crate::admin::pages::domains_page::DomainsPage>()
+        .page::<crate::admin::pages::firewall_page::FirewallPage>()
         .page::<crate::admin::pages::actions_page::ActionsPage>()
         .page::<crate::admin::pages::settings_page::SettingsPage>()
         .page::<crate::admin::pages::containers_page::ContainersPage>()
