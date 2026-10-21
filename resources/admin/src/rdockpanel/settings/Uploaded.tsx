@@ -5,7 +5,8 @@
 // dialog. The panel warns the notification channels 14, 7 and 1 days before
 // it expires.
 import { useState } from "react";
-import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { fieldErrors, type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, Textarea } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk, when } from "../lib/ui";
 import { dateTime } from "../lib/format";

@@ -2,7 +2,8 @@
 // (database, schedule, provider, path, retention) with "Run now", the last
 // runs with their logs, and Restore (a file of a provider, into a database).
 import { useRef, useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
 import { bytes, EmptyState, ErrorNote, Field, type MenuItem, NavLink, RowActions, Section, Status, StatusBadge, TableScroll, useAsk, when } from "../lib/ui";
 import { dateTime, relative, size } from "../lib/format";

@@ -2,7 +2,8 @@
 // queued job followed through its action until it ends), removing (with
 // force for the panel's administrators when in use), pruning.
 import { useEffect, useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, type MenuItem, Page, Pager, RowActions, Section, StatusBadge, TableScroll, useAsk, usePaged } from "../lib/ui";
 import { dateTime, relative, size } from "../lib/format";

@@ -3,7 +3,8 @@
 // up to 512 KiB (no SVG). Left empty: RDockPanel's own. A reload shows the
 // change here; other open pages and instances within about 30 seconds.
 import { useState } from "react";
-import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { fieldErrors, type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Button, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { ColorField, ErrorNote, Field, FilePicker, RowActions, Section, TableScroll } from "../lib/ui";
 import { size } from "../lib/format";

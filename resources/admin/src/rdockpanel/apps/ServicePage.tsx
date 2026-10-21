@@ -2,7 +2,8 @@
 // visible) and its tabs, in the URL (`/p/dashboard/<project>/<service>/<tab>`).
 // Saving never deploys: the page says when a change waits for Deploy.
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
+import { type PageProps, useEvents } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Checkbox, Dialog, ErrorState, Input, Loading, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
 import {
   CopyButton,

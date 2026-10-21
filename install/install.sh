@@ -182,14 +182,44 @@ constrained() { # service: on this node only (installs of before: on any manager
 # Alive is enough (a ping answers before credentials; the first start
 # initializes the database for a minute or two).
 MYSQL_HEALTH='mysqladmin ping -h 127.0.0.1 --silent'
+# The panel's database is small (some 50 tables, 10 connections): MySQL's
+# defaults are for a server of its own. Under 2 GB of memory it gets less:
+# no instrumentation, no binary log (nothing replicates it; the backups are
+# dumps), smaller buffers and caches.
+MYSQL_ARGS="--character-set-server=utf8mb4 --collation-server=utf8mb4_0900_bin --default-time-zone=+00:00"
+MEMORY_KB=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+if [ "${MEMORY_KB:-0}" -lt 2000000 ]; then
+  MYSQL_ARGS="$MYSQL_ARGS --performance-schema=OFF --skip-log-bin \
+--innodb-buffer-pool-size=64M --innodb-log-buffer-size=8M \
+--innodb-read-io-threads=1 --innodb-write-io-threads=1 \
+--max-connections=40 --table-open-cache=400 --table-open-cache-instances=1 \
+--table-definition-cache=400 --temptable-max-ram=32M --tmp-table-size=16M \
+--max-heap-table-size=16M --key-buffer-size=1M"
+fi
+# A shutdown flushes the buffer pool: more than Swarm's 10 seconds (killed,
+# it recovers at the next start, and a new task may wait for its files).
+MYSQL_STOP=120s
 if exists rdp-mysql; then
   constrained rdp-mysql
   # Restarted only for another image (or --upgrade-system): never a newer
-  # patch of the same tag behind the database's back.
+  # patch of the same tag behind the database's back. Its arguments are the
+  # installer's: other ones (a rerun on a smaller or larger server) restart
+  # it once.
+  ARGS_NOW=$(docker service inspect --format '{{join .Spec.TaskTemplate.ContainerSpec.Args " "}}' rdp-mysql)
+  # In nanoseconds (`null` when never set).
+  STOP_NOW=$(docker service inspect --format '{{json .Spec.TaskTemplate.ContainerSpec.StopGracePeriod}}' rdp-mysql)
   if [ -n "$UPGRADE_SYSTEM" ] || [ "$(image_of rdp-mysql)" != "$MYSQL_IMAGE" ]; then
     say "Updating MySQL ($MYSQL_IMAGE)"
+    # shellcheck disable=SC2086 # the arguments split as meant
     docker service update --quiet --image "$MYSQL_IMAGE" \
-      --health-cmd "$MYSQL_HEALTH" --health-start-period 120s rdp-mysql >/dev/null
+      --health-cmd "$MYSQL_HEALTH" --health-start-period 120s \
+      --stop-grace-period "$MYSQL_STOP" --args "$(echo $MYSQL_ARGS)" rdp-mysql >/dev/null
+  elif [ "$ARGS_NOW" != "$(echo $MYSQL_ARGS)" ] || [ "$STOP_NOW" != "120000000000" ]; then
+    # Its image as it is (the digest Swarm pinned): settings only.
+    say "Updating MySQL's settings (it restarts)"
+    # shellcheck disable=SC2086 # the arguments split as meant
+    docker service update --quiet \
+      --stop-grace-period "$MYSQL_STOP" --args "$(echo $MYSQL_ARGS)" rdp-mysql >/dev/null
   fi
 else
   say "Starting MySQL"
@@ -204,9 +234,9 @@ else
     --env MYSQL_DATABASE=panel --env MYSQL_USER=panel \
     --env MYSQL_PASSWORD_FILE=/run/secrets/rdp_mysql_password \
     --health-cmd "$MYSQL_HEALTH" --health-interval 5s --health-retries 30 \
-    --health-start-period 120s \
+    --health-start-period 120s --stop-grace-period "$MYSQL_STOP" \
     "$MYSQL_IMAGE" \
-    --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_bin --default-time-zone=+00:00 \
+    $MYSQL_ARGS \
     >/dev/null
 fi
 

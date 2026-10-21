@@ -3,7 +3,8 @@
 // live stats, a terminal and its inspect document. Old links
 // (`?open=<id>&tab=…`) still open it.
 import { useEffect, useState } from "react";
-import { type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
+import { type PageProps, useEvents } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Button, Checkbox, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import {
   EmptyState,

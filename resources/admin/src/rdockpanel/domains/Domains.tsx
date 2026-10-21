@@ -3,7 +3,8 @@
 // with whether Traefik serves it (a change is applied when saved, while the
 // service runs), opened, changed or removed here.
 import { useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Button, ErrorState, Loading, NativeSelect } from "@rustcms/admin-sdk/ui";
 import {
   EmptyState,

@@ -5,7 +5,8 @@
 // resource (the token sealed, never shown again); a domain chooses one in
 // its dialog.
 import { useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";

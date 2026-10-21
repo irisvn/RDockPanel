@@ -2,7 +2,8 @@
 // Telegram, email, webhook), the events each gets, and "Send test
 // notification". The URL, bot token or SMTP password is never shown again.
 import { useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, type MenuItem, RowActions, Section, TableScroll, useAsk } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";

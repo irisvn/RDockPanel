@@ -2,7 +2,8 @@
 // Docker's volumes and networks, made and removed here. Docker's own networks
 // (bridge, host, none, ingress, docker_gwbridge) cannot be removed.
 import { useState, type ReactNode } from "react";
-import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { fieldErrors, type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Button, Dialog, ErrorState, Input, Loading, NativeSelect } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, Page, Pager, RowActions, Section, StatusBadge, TableScroll, useAsk, usePaged } from "../lib/ui";
 

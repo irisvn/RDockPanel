@@ -3,7 +3,8 @@
 // projects whose services may clone with it (their developers then pick a
 // repository among those it reaches). The panel's administrators'.
 import { useState } from "react";
-import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { fieldErrors, type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Button, Checkbox, Dialog, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk, when } from "../lib/ui";
 

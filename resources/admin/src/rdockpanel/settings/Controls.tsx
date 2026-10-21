@@ -3,7 +3,8 @@
 // (its logs, a restart), Docker ▾ (prunes). The panel's administrators'
 // (`system.manage`). Its version and updates: Settings → Version.
 import { useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, CodeBlock, Dialog, DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, Input } from "@rustcms/admin-sdk/ui";
 import { bytes, ErrorNote, Facts, RowActions, Section, Status, TableScroll, useAsk } from "../lib/ui";
 import { Logs } from "./Traefik";

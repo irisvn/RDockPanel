@@ -5,7 +5,8 @@
 // its route itself — no way back if it did not come up). The panel's
 // administrators' (`system.manage`).
 import { useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, CodeBlock, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Facts, Field, Section } from "../lib/ui";
 import { Controls, SystemFooter } from "./Controls";

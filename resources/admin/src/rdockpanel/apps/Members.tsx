@@ -3,7 +3,8 @@
 // secrets and terminal), admin (also removes services, restores databases,
 // chooses members). Its admins manage them; the project keeps one admin.
 import { useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Button, Dialog, ErrorState, Input, Loading, NativeSelect } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, RowActions, useAsk } from "../lib/ui";
 import type { Project } from "./types";

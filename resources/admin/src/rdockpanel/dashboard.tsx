@@ -3,7 +3,8 @@
 // tabs, by sub-path: `<project>`, `<project>/<service>`, `<project>/<service>/<tab>`.
 // A React page on the panel's React, React Query and UI kit (host API v2);
 // `npm run build` in resources/admin, then commit the built files.
-import { type PageProps, registerPage, registerSlot, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps, registerPage, registerSlot } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "./lib/query";
 import { Button, ErrorState, Loading } from "@rustcms/admin-sdk/ui";
 import { useEffect, useState } from "react";
 import { Dashboard, NewService, ServiceCards, templateWarnings } from "./apps/Dashboard";

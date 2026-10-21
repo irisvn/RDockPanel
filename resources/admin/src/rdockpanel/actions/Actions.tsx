@@ -2,7 +2,8 @@
 // lately — deployments, database backups and restores, Docker actions — with
 // their status; a row opens its service's tab, or its log.
 import { useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, ErrorState, Loading, NativeSelect } from "@rustcms/admin-sdk/ui";
 import { EmptyState, Page, Pager, RowActions, Section, Status, TableScroll, usePaged } from "../lib/ui";
 import { dateTime, relative } from "../lib/format";

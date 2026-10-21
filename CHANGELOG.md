@@ -3,6 +3,14 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.5.3 — 2026-10-21
+
+- Stop, Start or another action from a service's tab no longer shows "Something went wrong" for
+  a moment (a reload was not needed).
+- On a server under 2 GB of memory, the installer starts MySQL with less memory (no
+  `performance_schema`, no binary log, smaller buffers) and gives it time to shut down. A rerun
+  applies it: MySQL restarts once.
+
 ## 0.5.2 — 2026-10-21
 
 - A domain whose name leads to Cloudflare is marked "via Cloudflare". With the tunnel on, its

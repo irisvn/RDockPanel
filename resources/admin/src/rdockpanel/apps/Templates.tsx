@@ -2,7 +2,8 @@
 // template's form (its JSON Schema), and "Create from schema" (a generator's
 // `{services}` output, pasted). Creating can deploy at once.
 import { useMemo, useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field } from "../lib/ui";
 import type { Project } from "./types";

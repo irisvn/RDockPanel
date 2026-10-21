@@ -3,7 +3,8 @@
 // YAML; a domain uses one as `custom-<name>@file`), written with no restart.
 // The panel's administrators' (`system.manage`).
 import { useState } from "react";
-import { fieldErrors, type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
+import { fieldErrors, type PageProps, useEvents } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Button, ErrorState, Loading, Textarea } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Facts, Field, Section, StatusBadge, useAsk, when } from "../lib/ui";
 import { LogViewer } from "../lib/viewers";

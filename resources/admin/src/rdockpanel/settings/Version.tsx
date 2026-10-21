@@ -5,7 +5,8 @@
 // build. The panel never updates by itself: an administrator presses Update
 // (or runs the installer's command).
 import { useRef, useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, CodeBlock, ErrorState, Loading } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Facts, Section, StatusBadge, TableScroll, useAsk } from "../lib/ui";
 import { dateTime, relative, size } from "../lib/format";

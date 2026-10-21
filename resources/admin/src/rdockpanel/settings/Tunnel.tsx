@@ -3,7 +3,8 @@
 // and 443. Each public hostname of the tunnel (set in Cloudflare) goes to the
 // origin shown here; every domain of the panel is served there too.
 import { useState } from "react";
-import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { fieldErrors, type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, CodeBlock, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field, Section, StatusDot, useAsk } from "../lib/ui";
 

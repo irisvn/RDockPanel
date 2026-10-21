@@ -3,7 +3,8 @@
 // each with a "Test" button, and notification channels. Written through the `storage_providers`
 // resource (its secret key sealed, never shown again).
 import { useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, type MenuItem, Page, RowActions, Section, TableScroll, Tabs, useAsk } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";

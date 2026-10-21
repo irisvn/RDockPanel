@@ -1,7 +1,8 @@
 // ⌘K / Ctrl+K: a quick search over projects, services and the panel's
 // pages (EasyPanel's command palette). Arrows move, Enter opens.
 import { useEffect, useMemo, useState } from "react";
-import { type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "./query";
 import { Dialog, Input } from "@rustcms/admin-sdk/ui";
 import type { Overview } from "../apps/types";
 

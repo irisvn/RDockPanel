@@ -2,7 +2,8 @@
 // services as cards (status, kind, domain). Creating a project or a service
 // asks for a name (and an image), nothing else.
 import { type ReactNode, useState } from "react";
-import { type AdminApi, type PageProps, useAdminQuery, useEvents } from "@rustcms/admin-sdk";
+import { type AdminApi, type PageProps, useEvents } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, Input, Loading, ErrorState, Textarea } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, Metric, NavLink, Page, RowActions, Section, Status, useAsk, useConfirm } from "../lib/ui";
 import { percent, size } from "../lib/format";

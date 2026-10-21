@@ -48,6 +48,8 @@ panel is reached over HTTPS only.
 - Three Swarm services, labelled `rdockpanel.system=true` (hidden from users without
   `system.manage`), pinned to this node (`node.labels.rdockpanel.main`: their data lives here):
   - `rdp-mysql`: MySQL 8.4, data on the volume `rdp-mysql-data`, reachable on `rdp-internal` only;
+    under 2 GB of memory it runs small (no `performance_schema`, no binary log, smaller buffers
+    and caches: the panel's database is some 50 tables), and it gets 120 seconds to shut down;
   - `rdp-traefik`: Traefik v3 on ports 80 and 443;
   - `rdockpanel`: the panel (port 3000 without a domain), with the Docker socket, the host's `/proc` (server
     metrics), the routes directory and `/var/lib/rdockpanel/backups` (the same path inside: what a
@@ -61,7 +63,8 @@ Run the installer again: it updates the panel to its image (the newest of its ta
 given, keeping the secrets, the database and the certificates. MySQL and Traefik are left running
 as they are while their configuration is unchanged (no newer patch of their tag behind the
 database's back, no restart of every domain): `--upgrade-system` pulls them again; a changed
-`--email` restarts Traefik with its new arguments (the certificate resolvers added in the panel are
+`--email` restarts Traefik with its new arguments, and MySQL restarts once when its settings
+change (a first rerun after this release, or a server with more or less memory) (the certificate resolvers added in the panel are
 kept).
 
 Images: `ghcr.io/irisvn/rdockpanel:main` (the newest commit of `main`), `:main-<commit>` (that

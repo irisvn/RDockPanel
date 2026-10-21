@@ -2,7 +2,8 @@
 // `rdp` command line (docs/api.md). Made with scopes and an expiry, shown
 // once; revoked here. A token does what its user may, within its scopes.
 import { useState } from "react";
-import { fieldErrors, type PageProps, useAdminQuery } from "@rustcms/admin-sdk";
+import { fieldErrors, type PageProps } from "@rustcms/admin-sdk";
+import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Checkbox, CodeBlock, Dialog, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk, when } from "../lib/ui";
 import { dateTime, relative } from "../lib/format";
