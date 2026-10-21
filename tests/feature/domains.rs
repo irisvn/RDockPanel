@@ -139,3 +139,36 @@ db_test!(
         assert_eq!(find(&seen, "api.localhost")["status"], "stopped");
     }
 );
+
+db_test!(
+    where_a_domain_leads_is_said,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let url = |host: &str| app.admin_api(&format!("x/apps/domains/dns?host={host}"));
+        let none = support::user_with(&app, "none", &["services.view_any"]).await;
+        app.acting_as(&none)
+            .await
+            .get(&url("localhost"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        admin
+            .get(&url("not%20a%20host"))
+            .await
+            .assert_validation_error("host");
+        // A name (here one that resolves locally): where it leads, and
+        // whether the tunnel is on.
+        let found = admin.get(&url("app.localhost")).await;
+        found.assert_status(StatusCode::OK);
+        let found = found.json();
+        assert_eq!(found["host"], "app.localhost");
+        assert!(
+            ["server", "elsewhere", "none"].contains(&found["via"].as_str().unwrap()),
+            "{found}"
+        );
+        assert_eq!(found["tunnel"], false);
+    }
+);

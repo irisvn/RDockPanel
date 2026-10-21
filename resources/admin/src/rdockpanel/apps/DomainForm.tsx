@@ -1,7 +1,7 @@
 // A domain's dialog, adding one or changing it: the service's Domains tab
 // and the Domains page. Written through the domains' resource (its policy:
 // a certificate of its own, a wildcard, are the panel's administrators').
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Dialog, Input, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
@@ -26,6 +26,8 @@ export function DomainForm(props: {
   defaultResolver: string | null;
   /** `system.manage`: a certificate of the domain's own is chosen. */
   system: boolean;
+  /** Where a host leads (`cloudflare`: its HTTPS is Cloudflare's). */
+  lookup?: (host: string) => Promise<{ via: string; tunnel: boolean }>;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -42,6 +44,27 @@ export function DomainForm(props: {
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // Where the host leads, looked up once typing stops (a name, no wildcard).
+  const [via, setVia] = useState<{ via: string; tunnel: boolean } | null>(null);
+  // The caller's function (a new one each render): read when it runs.
+  const lookupRef = useRef(props.lookup);
+  lookupRef.current = props.lookup;
+  useEffect(() => {
+    setVia(null);
+    const name = host.trim().toLowerCase();
+    const lookup = lookupRef.current;
+    if (!lookup || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(name)) return;
+    let gone = false;
+    const timer = setTimeout(() => {
+      lookup(name)
+        .then((r) => gone || setVia(r))
+        .catch(() => undefined);
+    }, 600);
+    return () => {
+      gone = true;
+      clearTimeout(timer);
+    };
+  }, [host]);
   const fields = error instanceof ResourceError ? error.fieldErrors : {};
   const kind = props.service?.kind ?? props.services?.find((s) => String(s.id) === serviceId)?.kind;
   const isCompose = kind === "compose";
@@ -116,6 +139,19 @@ export function DomainForm(props: {
         <label className="rdp2-row">
           <Switch checked={https} onCheckedChange={setHttps} /> {t("HTTPS")}
         </label>
+        {/* Through the tunnel with the installer's resolver (an HTTP challenge):
+            it cannot pass Cloudflare. A DNS resolver or an uploaded
+            certificate works; without a resolver Traefik's own one is used. */}
+        {https && via?.via === "cloudflare" && via.tunnel && !resolver && props.defaultResolver && (
+          <Alert variant="warning">
+            <span className="rdp2-row rdp2-wrap">
+              {t("This name leads to Cloudflare. Through the Cloudflare Tunnel, Cloudflare gives its visitors HTTPS and this server's certificate cannot be issued (Let's Encrypt's check stops at Cloudflare): turn HTTPS off. Proxied to this server instead (Cloudflare's Full mode), keep it, with a DNS resolver or an uploaded certificate.")}
+              <Button type="button" size="sm" variant="outline" onClick={() => setHttps(false)}>
+                {t("Turn HTTPS off")}
+              </Button>
+            </span>
+          </Alert>
+        )}
         {https && choosable && (
           <Field
             label={t("Certificate")}

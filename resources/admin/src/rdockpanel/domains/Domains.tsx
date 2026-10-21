@@ -38,6 +38,8 @@ type Row = Omit<Domain, "id"> & {
   /** Changed by this user (a Compose or privileged service's: administrators'). */
   writable: boolean;
   status: "live" | "pending" | "removed" | "stopped";
+  /** Where its name leads (`cloudflare`: proxied or a tunnel's). */
+  via?: "server" | "cloudflare" | "elsewhere" | "none";
 };
 
 type List = {
@@ -174,6 +176,13 @@ export function Domains(props: PageProps<unknown>) {
                         <td>
                           <div className="rdp2-row">
                             <span className={d.status === "removed" ? "rdp2-mono rdp2-ellipsis rdp2-gone" : "rdp2-mono rdp2-ellipsis"}>{url(d)}</span>
+                            {d.via === "cloudflare" && (
+                              <StatusBadge
+                                tone="off"
+                                label={t("via Cloudflare")}
+                                title={t("Its name leads to Cloudflare: through the tunnel, Cloudflare gives it HTTPS (HTTPS off here); proxied to this server, it needs a DNS resolver or an uploaded certificate.")}
+                              />
+                            )}
                             {d.primary && <span className="rdp2-badge">{t("Primary")}</span>}
                           </div>
                         </td>
@@ -217,6 +226,7 @@ export function Domains(props: PageProps<unknown>) {
           services={data.services.filter((s) => !project || s.project === project)}
           cert_resolvers={data.cert_resolvers}
           certificates={data.certificates}
+          lookup={(host) => props.api.get<{ via: string; tunnel: boolean }>("/apps/domains/dns", { query: { host } })}
           defaultResolver={data.default_resolver}
           system={data.can.system}
           onClose={() => {

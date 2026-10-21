@@ -56,6 +56,21 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
     {
         rows.entry(row.service_id).or_default().push(row);
     }
+    // Where each name leads, every domain's at once (kept a few minutes).
+    let hosts: Vec<String> = {
+        let mut all: Vec<String> = rows.values().flatten().map(|d| d.host.clone()).collect();
+        all.sort();
+        all.dedup();
+        all
+    };
+    let found = futures_util::future::join_all(
+        hosts
+            .iter()
+            .map(|h| crate::services::domain_dns_service::via(h)),
+    )
+    .await;
+    let vias: HashMap<String, crate::services::domain_dns_service::Via> =
+        hosts.into_iter().zip(found).collect();
     let mut domains: Vec<Value> = vec![];
     let mut choices: Vec<Value> = vec![];
     for row in &services {
@@ -124,6 +139,7 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
                 "maintenance": maintenance,
                 "status": status,
                 "writable": writable,
+                "via": vias.get(&domain.host).copied(),
             }));
         }
         // A Compose service's removed since it deployed: served still.
@@ -207,4 +223,33 @@ fn target(base: &str, snapshot: &Snapshot, container: Option<&str>, port: i32) -
         _ => base.to_owned(),
     };
     format!("http://{host}:{port}/")
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct Lookup {
+    /// Optional here: checked after the permission (a refusal says nothing).
+    #[serde(default)]
+    pub host: String,
+}
+
+/// Where a host leads (`server`, `cloudflare`, `elsewhere`, `none`): the
+/// domain form's advice (through Cloudflare, its HTTPS is Cloudflare's).
+pub async fn dns(
+    State(app): State<AppState>,
+    auth: Auth,
+    Query(lookup): Query<Lookup>,
+) -> AppResult<Json<Value>> {
+    use crate::services::access_service::admits;
+    if !admits(app.db(), auth.principal(), "service_domains.view_any").await? {
+        return Err(AppError::Forbidden);
+    }
+    let host = lookup.host.trim().to_ascii_lowercase();
+    if !crate::services::deploy_rules_service::valid_hostname(&host) {
+        return Err(rustcms::ValidationErrors::field("host", "is not a host name").into());
+    }
+    Ok(Json(json!({
+        "host": host,
+        "via": crate::services::domain_dns_service::via(&host).await,
+        "tunnel": crate::services::tunnel_service::enabled(&app),
+    })))
 }

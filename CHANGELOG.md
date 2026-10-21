@@ -3,8 +3,10 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
-## Unreleased
+## 0.5.2 — 2026-10-21
 
+- A domain whose name leads to Cloudflare is marked "via Cloudflare". With the tunnel on, its
+  form suggests turning HTTPS off: through the tunnel, Cloudflare already gives it HTTPS.
 - The installer no longer leaves Traefik a moment without the panel's route when it runs again.
 
 ## 0.5.1 — 2026-10-20

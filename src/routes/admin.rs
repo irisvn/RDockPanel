@@ -81,6 +81,7 @@ pub fn routes() -> AdminRoutes {
             AdminRoutes::scope()
                 .get("/overview", member(), apps::overview)
                 .get("/domains", member(), domains::index)
+                .get("/domains/dns", member(), domains::dns)
                 .get(
                     "/traefik/resolvers",
                     AdminAccess::can("system.manage"),

@@ -16,6 +16,7 @@ pub mod deploy_rules_service;
 pub mod deploy_service;
 pub mod deployment_service;
 pub mod docker_service;
+pub mod domain_dns_service;
 pub mod dotenv;
 pub mod github_service;
 pub mod live_service;
