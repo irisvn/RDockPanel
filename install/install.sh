@@ -278,7 +278,10 @@ if [ -n "$DOMAIN" ]; then
   APP_URL="https://$DOMAIN"
   ORIGINS="[\"https://$DOMAIN\"]"
   # The panel's own route (not a service's: the panel never prunes it).
-  cat > "$ETC/traefik/dynamic/rdockpanel.yml" <<YAML
+  # Written beside, then renamed (Traefik never reads it half written), and
+  # only when it changes (no reload for nothing).
+  ROUTE="$ETC/traefik/dynamic/rdockpanel.yml"
+  cat > "$ETC/traefik/dynamic/.rdockpanel.yml.tmp" <<YAML
 http:
   routers:
     rdockpanel:
@@ -303,6 +306,12 @@ http:
       loadBalancer:
         servers: [{ url: "http://rdockpanel:3000" }]
 YAML
+  if cmp -s "$ETC/traefik/dynamic/.rdockpanel.yml.tmp" "$ROUTE"; then
+    rm -f "$ETC/traefik/dynamic/.rdockpanel.yml.tmp"
+  else
+    chmod 0644 "$ETC/traefik/dynamic/.rdockpanel.yml.tmp"
+    mv -f "$ETC/traefik/dynamic/.rdockpanel.yml.tmp" "$ROUTE"
+  fi
 else
   APP_URL="http://$ADDRESS:3000"
   ORIGINS="[\"http://$ADDRESS:3000\"]"

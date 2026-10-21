@@ -3,6 +3,10 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## Unreleased
+
+- The installer no longer leaves Traefik a moment without the panel's route when it runs again.
+
 ## 0.5.1 — 2026-10-20
 
 - Release notes in Settings → Version are shown formatted (bold, code, lists, links).
