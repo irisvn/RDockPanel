@@ -19,6 +19,7 @@ pub mod docker_service;
 pub mod domain_dns_service;
 pub mod dotenv;
 pub mod github_service;
+pub mod home_service;
 pub mod live_service;
 pub mod notify_service;
 pub mod panel_domain_service;

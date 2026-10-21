@@ -8,10 +8,10 @@ use rustcms::prelude::*;
 use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
     branding_controller as branding, deploy_controller as deploy, docker_controller as docker,
-    domains_controller as domains, git_controller as git, members_controller as members,
-    notifications_controller as notifications, server_controller as server,
-    system_controller as system, templates_controller as templates, tokens_controller as tokens,
-    traefik_controller as traefik, tunnel_controller as tunnel,
+    domains_controller as domains, git_controller as git, home_controller as home,
+    members_controller as members, notifications_controller as notifications,
+    server_controller as server, system_controller as system, templates_controller as templates,
+    tokens_controller as tokens, traefik_controller as traefik, tunnel_controller as tunnel,
 };
 
 /// Every admin route, with the access it requires.
@@ -93,6 +93,9 @@ pub fn routes() -> AdminRoutes {
                     traefik::apply,
                 )
                 .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                // The homepage at `/` (Settings → Panel): on or off.
+                .get("/home", AdminAccess::can("system.manage"), home::show)
+                .put("/home", AdminAccess::can("system.manage"), home::update)
                 // Branding (Settings): the panel's name, color and images.
                 .get(
                     "/branding",

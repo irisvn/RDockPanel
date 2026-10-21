@@ -139,6 +139,13 @@ pages build the DOM with elements and text nodes, never `innerHTML` with Docker 
 `<style>` elements that scripts create into constructed stylesheets instead. Parsed markup is
 untouched, so injected HTML still cannot add styles. The policy itself is unchanged.
 
+The homepage at `/` is public: one static page (English or Vietnamese), its stylesheets, images
+and favicon, all built into the panel. It has a policy of its own, stricter still
+(`default-src 'none'; style-src 'self'; img-src 'self'`, no script at all), and nothing of the
+installation: no version, address, domain or project (its screenshots are of a demo server). Only
+the brand color of Settings → Branding comes from the database. Settings → Panel turns it off
+(`system.manage`, audited as `home.update`): `/` then redirects to `/admin`.
+
 ## Live data limits
 
 Log lines are cut to 16 KiB. A log request (the last lines) stops reading after about 2 MiB of text;

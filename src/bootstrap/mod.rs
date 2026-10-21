@@ -13,5 +13,16 @@ pub fn build(config: Config) -> AppBuilder {
     // Mounted and listed by `rustcms route:list` from the same declarations.
     api.register(&mut app);
     admin.register(&mut app);
+    // The homepage (public: nothing of this installation on it).
+    app.routes(|router| {
+        use crate::http::controllers::home_controller as home;
+        use rustcms::axum::routing::get;
+        router
+            .route("/", get(home::page))
+            .route("/home/home.css", get(home::css))
+            .route("/home/brand.css", get(home::brand))
+            .route("/home/favicon.svg", get(home::favicon))
+            .route("/home/img/{name}", get(home::image))
+    });
     app
 }

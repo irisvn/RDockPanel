@@ -121,6 +121,10 @@ window.rustcms?.registerTranslations?.("vi", {
   "Applied when saved, while the service runs.": "Áp dụng ngay khi lưu, khi service đang chạy.",
   "Saved. It applies while the service runs.": "Đã lưu. Sẽ áp dụng khi service đang chạy.",
   "Saved.": "Đã lưu.",
+  Homepage: "Trang chủ",
+  "The page at the panel's address: what RDockPanel is and a link to GitHub, nothing of this server. Off: the address opens the panel's sign-in.":
+    "Trang ở địa chỉ của panel: giới thiệu RDockPanel và link GitHub, không có thông tin nào của máy chủ này. Tắt: địa chỉ mở thẳng trang đăng nhập của panel.",
+  "Show the homepage": "Hiện trang chủ",
   "This panel runs from source (development), not from install.sh: its address comes from APP_URL. The command below is for a server installed with install.sh.": "Panel này chạy từ mã nguồn (môi trường dev), không cài bằng install.sh: địa chỉ lấy từ APP_URL. Lệnh bên dưới dành cho server đã cài bằng install.sh.",
   "Empty: the installed panel answers at http://<server-ip>:3000. Point the domain's DNS (A record) to the server first.": "Để trống: panel đã cài sẽ chạy ở http://<ip-server>:3000. Trỏ DNS (bản ghi A) của domain về server trước.",
   "Certificate resolvers": "Certificate resolver",

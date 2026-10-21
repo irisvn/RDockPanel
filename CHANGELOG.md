@@ -3,6 +3,13 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.5.4 — 2026-10-21
+
+- A homepage at the panel's address: what RDockPanel is, real screens, how to install it and a
+  link to GitHub, in English or Vietnamese. It can be turned off in Settings → Panel.
+- RustCMS Core 0.8.2 (the Stop/Start error page fixed at its source) and TLS security updates
+  (rustls-webpki, webpki-roots).
+
 ## 0.5.3 — 2026-10-21
 
 - Stop, Start or another action from a service's tab no longer shows "Something went wrong" for

@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use crate::models::{branding_image, panel_setting};
 
 const NAME_KEY: &str = "branding.name";
-const PRIMARY_KEY: &str = "branding.primary";
+pub const PRIMARY_KEY: &str = "branding.primary";
 /// The images, by kind.
 pub const KINDS: [&str; 3] = ["logo", "logo-dark", "favicon"];
 

@@ -17,6 +17,7 @@ mod docker_routes;
 mod domains;
 mod git;
 mod health;
+mod home;
 mod live;
 mod members;
 mod notifications;

@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { type PageProps } from "@rustcms/admin-sdk";
 import { useAdminQuery } from "../lib/query";
-import { Alert, Button, CodeBlock, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
+import { Alert, Button, CodeBlock, ErrorState, Input, Loading, Switch } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Facts, Field, Section } from "../lib/ui";
 import { Controls, SystemFooter } from "./Controls";
 
@@ -137,8 +137,55 @@ export function Panel(props: PageProps<unknown>) {
         </div>
       )}
     </Section>
+    <Homepage {...props} url={c.url} />
     <Controls {...props} />
     <SystemFooter {...props} />
     </>
+  );
+}
+
+/** The homepage at `/` (what RDockPanel is, a link to GitHub): on or off. */
+function Homepage(props: PageProps<unknown> & { url: string }) {
+  const t = props.t;
+  const home = useAdminQuery<{ enabled: boolean }>(props, "/apps/home");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const root = `${props.url.replace(/\/+$/, "")}/`;
+  return (
+    <Section
+      title={t("Homepage")}
+      description={t("The page at the panel's address: what RDockPanel is and a link to GitHub, nothing of this server. Off: the address opens the panel's sign-in.")}
+    >
+      {home.data && (
+        <label className="rdp2-row">
+          <Switch
+            checked={home.data.enabled}
+            disabled={busy}
+            onCheckedChange={async (enabled) => {
+              setBusy(true);
+              setError(null);
+              try {
+                await props.api.put("/apps/home", { enabled });
+                await home.refetch();
+                props.toast.success(t("Saved."));
+              } catch (err) {
+                setError(err);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />{" "}
+          {t("Show the homepage")}
+        </label>
+      )}
+      <ErrorNote error={home.error ?? error} />
+      {home.data?.enabled && (
+        <p className="rdp2-small">
+          <a href={root} target="_blank" rel="noreferrer">
+            {root}
+          </a>
+        </p>
+      )}
+    </Section>
   );
 }

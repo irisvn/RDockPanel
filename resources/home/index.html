@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<link rel="icon" href="/home/favicon.svg?v={{v}}" type="image/svg+xml">
+<link rel="stylesheet" href="/home/home.css?v={{v}}">
+<link rel="stylesheet" href="/home/brand.css">
+</head>
+<body>
+<a class="skip" href="#main">{{skip}}</a>
+<header><div class="wrap bar">
+  <a class="brand" href="/"><span class="logo" aria-hidden="true"><i></i></span>RDockPanel</a>
+  <nav aria-label="{{nav_main}}">
+    <a class="wide" href="#features">{{nav_features}}</a>
+    <a class="wide" href="#screens">{{nav_screens}}</a>
+    <a class="wide" href="#install">{{nav_install}}</a>
+    <a href="https://github.com/irisvn/rdockpanel">GitHub</a>
+    <a href="{{other_href}}" lang="{{other_lang}}" hreflang="{{other_lang}}">{{other_label}}</a>
+    <a class="btn primary" href="/admin">{{sign_in}}</a>
+  </nav>
+</div></header>
+<main id="main">
+<div class="wrap hero">
+  <div>
+    <p class="eyebrow">{{eyebrow}}</p>
+    <h1>{{headline}}</h1>
+    <p class="lead">{{lead}}</p>
+    <div class="actions">
+      <a class="btn primary" href="/admin">{{sign_in}}</a>
+      <a class="btn" href="https://github.com/irisvn/rdockpanel">{{view_github}}</a>
+      <a class="btn" href="#install">{{install_cta}}</a>
+    </div>
+    <p class="cue">{{cue}}</p>
+  </div>
+  <figure class="shot">
+    <img class="light-only" src="/home/img/dashboard.jpg?v={{v}}" width="1440" height="900" alt="{{alt_dashboard}}">
+    <img class="dark-only" src="/home/img/dashboard-dark.jpg?v={{v}}" width="1440" height="900" alt="{{alt_dashboard}}">
+  </figure>
+</div>
+<section id="features"><div class="wrap">
+  <h2>{{features_title}}</h2>
+  <p class="sub">{{features_sub}}</p>
+  <div class="grid">
+    <div class="feat"><h3><i></i>{{f1_title}}</h3><p>{{f1}}</p></div>
+    <div class="feat"><h3><i></i>{{f2_title}}</h3><p>{{f2}}</p></div>
+    <div class="feat"><h3><i></i>{{f3_title}}</h3><p>{{f3}}</p></div>
+    <div class="feat"><h3><i></i>{{f4_title}}</h3><p>{{f4}}</p></div>
+    <div class="feat"><h3><i></i>{{f5_title}}</h3><p>{{f5}}</p></div>
+    <div class="feat"><h3><i></i>{{f6_title}}</h3><p>{{f6}}</p></div>
+    <div class="feat"><h3><i></i>{{f7_title}}</h3><p>{{f7}}</p></div>
+    <div class="feat"><h3><i></i>{{f8_title}}</h3><p>{{f8}}</p></div>
+  </div>
+</div></section>
+<section id="screens"><div class="wrap">
+  <h2>{{screens_title}}</h2>
+  <p class="sub">{{screens_sub}}</p>
+  <div class="gallery">
+    <figure class="shot"><a href="/home/img/service.jpg?v={{v}}"><img src="/home/img/service.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s1}}"></a><figcaption>{{s1}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/templates.jpg?v={{v}}"><img src="/home/img/templates.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s2}}"></a><figcaption>{{s2}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/deployments.jpg?v={{v}}"><img src="/home/img/deployments.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s3}}"></a><figcaption>{{s3}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/domains.jpg?v={{v}}"><img src="/home/img/domains.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s4}}"></a><figcaption>{{s4}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/containers.jpg?v={{v}}"><img src="/home/img/containers.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s5}}"></a><figcaption>{{s5}}</figcaption></figure>
+    <figure class="shot"><a href="/home/img/actions.jpg?v={{v}}"><img src="/home/img/actions.jpg?v={{v}}" width="1440" height="900" loading="lazy" alt="{{s6}}"></a><figcaption>{{s6}}</figcaption></figure>
+  </div>
+</div></section>
+<section id="install"><div class="wrap">
+  <h2>{{install_title}}</h2>
+  <p class="sub">{{install_sub}}</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh \
+  | sudo sh -s -- --admin-email you@example.com</code></pre>
+  <p class="note">{{install_note}} <a href="https://github.com/irisvn/rdockpanel/blob/main/docs/install.md">{{install_guide}}</a>.</p>
+  <p class="warn">{{early}}</p>
+</div></section>
+</main>
+<footer><div class="wrap">
+  <span>{{footer}}</span>
+  <nav aria-label="{{nav_footer}}">
+    <a href="https://github.com/irisvn/rdockpanel">GitHub</a>
+    <a href="https://github.com/irisvn/rdockpanel/tree/main/docs">{{docs}}</a>
+    <a href="/admin">{{sign_in}}</a>
+  </nav>
+</div></footer>
+</body>
+</html>

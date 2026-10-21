@@ -76,6 +76,9 @@ feature is free: no project limits, no paid tiers.
   if the new version does not start), its history, and its old versions removed.
 - **Settings → Panel** has EasyPanel's menus: the panel's logs and restart; Refresh IP and Reboot
   for the server; Traefik's logs and restart; Docker prunes that never touch the services' data.
+- **A homepage** at the panel's address (`/`): what RDockPanel is, its screens, the install command
+  and a link to GitHub, in English or Vietnamese, with nothing of this server on it. Settings → Panel
+  turns it off (`/` then opens the sign-in).
 - **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:
   credentials generated, data on a volume, health-checked), with their connection URL to copy.
 - **EasyPanel templates**: the 800+ templates of easypanel.io in one click (searched, filled in by
