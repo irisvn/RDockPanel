@@ -1181,6 +1181,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "The CPU is busy ({p}%)": "CPU đang bận ({p}%)",
   "For a while": "Tạm thêm",
   Total: "Tổng",
+  Left: "Còn lại",
   Close: "Đóng",
   More: "Sẽ thêm",
   "Estimated from": "Ước tính từ",

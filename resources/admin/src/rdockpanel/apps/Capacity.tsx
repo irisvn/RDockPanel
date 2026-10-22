@@ -115,9 +115,15 @@ export function CapacityNotice(props: { t: T; report: Capacity | null | undefine
               <i className="rdp2-cap-dot rdp2-cap-more" />
               {rolling ? t("For a while") : t("More")} <b>~{more}</b>
             </span>
-            <span>
-              {t("Total")} <b>{bytes(h.mem_total)}</b>
-            </span>
+            {report.level === "short" ? (
+              <span>
+                {t("Total")} <b>{bytes(h.mem_total)}</b>
+              </span>
+            ) : (
+              <span>
+                {t("Left")} <b>~{bytes(Math.max(0, h.mem_available - report.memory))}</b>
+              </span>
+            )}
           </div>
         </>
       )}

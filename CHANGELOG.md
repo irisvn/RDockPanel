@@ -6,6 +6,7 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
 ## 0.9.1 — 2026-10-22
 
 - The memory estimate now recognizes an image written with or without `:latest` as the same one.
+- The memory warning looks like its design: lighter colors, smaller text, bullets for the reasons.
 
 ## 0.9.0 — 2026-10-22
 
