@@ -22,8 +22,10 @@ Status: **approved 2026-10-20**; [ui-redesign.md](ui-redesign.md) is the plan th
   `--rdp-ok` (green), `--rdp-busy` (amber), `--rdp-bad` (red), `--rdp-off` (= `--muted-foreground`,
   so a stopped dot keeps 4.8:1 contrast on a card), and `--rdp-terminal-bg` / `--rdp-terminal-fg`
   for logs and the terminal. Each tone keeps at least 3:1 against `--card` in both themes.
-- Status colors only fill a dot. The label beside it stays in the normal text color (green or
-  amber text would fall under 4.5:1), and the state is always written, never shown by color alone.
+- Status colors only fill a dot, or a segment of a bar beside its written value (the memory bar
+  of the capacity warning: in use `--muted-foreground`, what comes more in the level's tone). The
+  label beside it stays in the normal text color (green or amber text would fall under 4.5:1),
+  and the state is always written, never shown by color alone.
 - Primary (the brand color, Settings → Branding) is for the one main action of a view and the
   selected state. Nothing else is colored.
 

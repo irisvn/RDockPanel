@@ -15,13 +15,6 @@
   --rdp-text-base: 1rem;
   --rdp-text-lg: 1.25rem;
   --rdp-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --rdp-cap-warn: #f59e0b;
-  --rdp-cap-warn-bg: #fffbeb;
-  --rdp-cap-warn-bd: #fde68a;
-  --rdp-cap-bad: #ef4444;
-  --rdp-cap-bad-bg: #fef2f2;
-  --rdp-cap-bad-bd: #fecaca;
-  --rdp-cap-used: #a1a1aa;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-scheme="light"]) {
@@ -30,13 +23,6 @@
     --rdp-bad: #f87171;
     --rdp-terminal-bg: #0b0b0e;
     --rdp-terminal-fg: #e4e4e7;
-    --rdp-cap-warn: #fbbf24;
-    --rdp-cap-warn-bg: #2a1f05;
-    --rdp-cap-warn-bd: #5c4410;
-    --rdp-cap-bad: #f87171;
-    --rdp-cap-bad-bg: #2a0d0d;
-    --rdp-cap-bad-bd: #5c1d1d;
-    --rdp-cap-used: #52525b;
   }
 }
 :root[data-scheme="dark"] {
@@ -45,13 +31,6 @@
   --rdp-bad: #f87171;
   --rdp-terminal-bg: #0b0b0e;
   --rdp-terminal-fg: #e4e4e7;
-  --rdp-cap-warn: #fbbf24;
-  --rdp-cap-warn-bg: #2a1f05;
-  --rdp-cap-warn-bd: #5c4410;
-  --rdp-cap-bad: #f87171;
-  --rdp-cap-bad-bg: #2a0d0d;
-  --rdp-cap-bad-bd: #5c1d1d;
-  --rdp-cap-used: #52525b;
 }
 
 /* Page frame */
@@ -324,27 +303,22 @@
 .rdp2-logo { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .rdp2-logo img { height: 2.5rem; max-width: 10rem; object-fit: contain; border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.25rem; background: var(--background); }
 
-/* Room on the server (apps/Capacity.tsx): amber when little stays free, red when it does not fit. */
-.rdp2-cap { --cap: var(--rdp-cap-warn); display: flex; flex-direction: column; gap: 0.625rem; padding: 0.75rem 0.875rem; border: 1px solid var(--rdp-cap-warn-bd); border-radius: 0.625rem; background: var(--rdp-cap-warn-bg); color: var(--foreground); font-size: var(--rdp-text-sm); line-height: 1.45; }
-.rdp2-cap-bad { --cap: var(--rdp-cap-bad); border-color: var(--rdp-cap-bad-bd); background: var(--rdp-cap-bad-bg); }
-.rdp2-cap-head { display: flex; gap: 0.5rem; align-items: flex-start; }
-.rdp2-cap-head strong { display: block; font-size: var(--rdp-text-sm); font-weight: 600; }
-.rdp2-cap-head p { margin: 0.125rem 0 0; font-size: 0.8125rem; line-height: 1.45; color: var(--muted-foreground); }
-.rdp2-cap-icon { flex: none; width: 1.125rem; height: 1.125rem; margin-top: 0.0625rem; border-radius: 50%; display: grid; place-items: center; background: var(--cap); color: #fff; font-size: 0.75rem; font-weight: 700; line-height: 1; }
-.rdp2-cap-bar { display: flex; height: 0.625rem; overflow: hidden; border: 1px solid var(--border); border-radius: 999px; background: var(--muted); }
+/* Room on the server (apps/Capacity.tsx), inside the kit's Alert: the memory bar's segments are
+   filled like status dots (in use: muted, more: the level's tone). */
+.rdp2-cap { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.rdp2-cap p { margin: 0; }
+/* The kit's destructive Alert colors all its text: only the icon and the title keep its tone. */
+.rdp2-cap > :not(.rdp2-cap-head) { color: var(--foreground); }
+.rdp2-cap-head .rdp2-cap > p { color: var(--muted-foreground); }
+.rdp2-cap .rdp2-muted { color: var(--muted-foreground); }
+.rdp2-cap-head { align-items: flex-start; }
+.rdp2-cap-head > svg { flex: none; margin-top: 0.125rem; }
+.rdp2-cap-head .rdp2-cap { gap: 0.25rem; }
+.rdp2-cap-bar { display: flex; height: 0.5rem; overflow: hidden; border-radius: calc(var(--radius) - 2px); background: var(--muted); }
 .rdp2-cap-bar i { display: block; height: 100%; }
-.rdp2-cap-used { background: var(--rdp-cap-used); }
-.rdp2-cap-more { background: var(--cap); }
-.rdp2-cap-legend { display: flex; flex-wrap: wrap; gap: 0.875rem; font-size: 0.78rem; color: var(--muted-foreground); }
-.rdp2-cap-legend b { color: var(--foreground); font-weight: 600; }
-.rdp2-cap-dot { display: inline-block; width: 0.5rem; height: 0.5rem; margin-right: 0.3rem; border-radius: 2px; vertical-align: middle; }
-.rdp2-cap-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
-.rdp2-cap-table th, .rdp2-cap-table td { padding: 0.3rem 0; text-align: left; border-bottom: 1px solid var(--border); }
-.rdp2-cap-table th { color: var(--muted-foreground); font-weight: 500; }
-.rdp2-cap-table .rdp2-num { text-align: right; font-variant-numeric: tabular-nums; }
-.rdp2-cap-table tfoot td { font-weight: 600; border-bottom: 0; }
-.rdp2-cap-source { padding: 0.0625rem 0.45rem; border: 1px solid var(--border); border-radius: 999px; font-size: 0.72rem; color: var(--muted-foreground); white-space: nowrap; }
-.rdp2-cap-reasons { margin: 0; padding-left: 1.125rem; list-style: disc; font-size: var(--rdp-text-sm); }
-.rdp2-cap-reasons li { margin: 0.125rem 0; }
-.rdp2-cap-note { margin: 0; font-size: 0.78rem; color: var(--muted-foreground); }
-.rdp2-cap-ack { display: flex; gap: 0.5rem; align-items: center; padding-top: 0.5rem; border-top: 1px solid var(--rdp-cap-bad-bd); font-weight: 500; }
+.rdp2-cap-used { background: var(--muted-foreground); }
+.rdp2-cap-more { background: var(--rdp-busy); }
+.rdp2-cap-bad .rdp2-cap-more { background: var(--rdp-bad); }
+.rdp2-cap-legend { gap: 0.25rem 1rem; }
+.rdp2-cap-dot { display: inline-block; flex: none; width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+.rdp2-cap-reasons { margin: 0; padding-left: 1rem; list-style: disc; }

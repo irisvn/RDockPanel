@@ -4,7 +4,8 @@
 // enough" asks to be confirmed; only a reservation Swarm cannot place stops.
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type AdminApi } from "@rustcms/admin-sdk";
-import { Button, Checkbox, Dialog } from "@rustcms/admin-sdk/ui";
+import { Alert, Button, Checkbox, Dialog, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@rustcms/admin-sdk/ui";
+import { Icon } from "../lib/icons";
 import { bytes } from "../lib/ui";
 
 type T = (s: string) => string;
@@ -91,86 +92,84 @@ export function CapacityNotice(props: { t: T; report: Capacity | null | undefine
   const used = h ? h.mem_total - h.mem_available : 0;
   const pct = (n: number) => (h ? `${Math.min(100, (n / h.mem_total) * 100)}%` : "0");
   const table = props.table || report.needs.length > 1;
+  const left = Math.max(0, (h?.mem_available ?? 0) - report.memory);
   return (
-    <div className={bad ? "rdp2-cap rdp2-cap-bad" : "rdp2-cap"} role="alert">
-      <div className="rdp2-cap-head">
-        <span className="rdp2-cap-icon">{report.level === "impossible" ? "✕" : "!"}</span>
-        <div>
-          <strong>{title}</strong>
-          <p>{detail}</p>
+    <Alert variant={bad ? "destructive" : "warning"}>
+      <div className={bad ? "rdp2-cap rdp2-cap-bad" : "rdp2-cap"}>
+        <div className="rdp2-row rdp2-cap-head">
+          <Icon name="warning" />
+          <div className="rdp2-cap">
+            <strong className="rdp2-strong">{title}</strong>
+            <p>{detail}</p>
+          </div>
         </div>
-      </div>
-      {h && report.level !== "impossible" && (
-        <>
-          <div className="rdp2-cap-bar" aria-hidden>
-            <i className="rdp2-cap-used" style={{ width: pct(used) }} />
-            <i className="rdp2-cap-more" style={{ width: pct(Math.min(report.memory, h.mem_available)) }} />
-          </div>
-          <div className="rdp2-cap-legend">
-            <span>
-              <i className="rdp2-cap-dot rdp2-cap-used" />
-              {t("In use")} <b>{bytes(used)}</b>
-            </span>
-            <span>
-              <i className="rdp2-cap-dot rdp2-cap-more" />
-              {rolling ? t("For a while") : t("More")} <b>~{more}</b>
-            </span>
-            {report.level === "short" ? (
-              <span>
-                {t("Total")} <b>{bytes(h.mem_total)}</b>
+        {h && report.level !== "impossible" && (
+          <div className="rdp2-cap">
+            <div className="rdp2-cap-bar" aria-hidden>
+              <i className="rdp2-cap-used" style={{ width: pct(used) }} />
+              <i className="rdp2-cap-more" style={{ width: pct(Math.min(report.memory, h.mem_available)) }} />
+            </div>
+            <div className="rdp2-row rdp2-wrap rdp2-cap-legend rdp2-small">
+              <span className="rdp2-row">
+                <i className="rdp2-cap-dot rdp2-cap-used" />
+                <span className="rdp2-muted">{t("In use")}</span> <span className="rdp2-strong">{bytes(used)}</span>
               </span>
-            ) : (
-              <span>
-                {t("Left")} <b>~{bytes(Math.max(0, h.mem_available - report.memory))}</b>
+              <span className="rdp2-row">
+                <i className="rdp2-cap-dot rdp2-cap-more" />
+                <span className="rdp2-muted">{rolling ? t("For a while") : t("More")}</span> <span className="rdp2-strong">~{more}</span>
               </span>
-            )}
+              <span className="rdp2-row">
+                <span className="rdp2-muted">{report.level === "short" ? t("Total") : t("Left")}</span>{" "}
+                <span className="rdp2-strong">{report.level === "short" ? bytes(h.mem_total) : `~${bytes(left)}`}</span>
+              </span>
+            </div>
           </div>
-        </>
-      )}
-      {table && (
-        <table className="rdp2-cap-table">
-          <thead>
-            <tr>
-              <th>{t("Service")}</th>
-              <th>{t("Estimated from")}</th>
-              <th className="rdp2-num">{t("Memory")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.needs.map((n) => (
-              <tr key={n.name}>
-                <td>
-                  {n.name} <span className="rdp2-muted">{n.kind}</span>
-                </td>
-                <td>
-                  <span className="rdp2-cap-source">{t(SOURCES[n.source])}</span>
-                </td>
-                <td className="rdp2-num">{n.source === "unknown" ? "?" : bytes(n.memory + n.temporary)}</td>
-              </tr>
+        )}
+        {table && (
+          <Table className="rdp2-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("Service")}</TableHead>
+                <TableHead>{t("Estimated from")}</TableHead>
+                <TableHead className="rdp2-right rdp2-num">{t("Memory")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {report.needs.map((n) => (
+                <TableRow key={n.name}>
+                  <TableCell className="rdp2-strong-cell">
+                    {n.name} <span className="rdp2-muted rdp2-small">{n.kind}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="rdp2-badge">{t(SOURCES[n.source])}</span>
+                  </TableCell>
+                  <TableCell className="rdp2-right rdp2-num">{n.source === "unknown" ? "?" : bytes(n.memory + n.temporary)}</TableCell>
+                </TableRow>
+              ))}
+              <TableRow>
+                <TableCell className="rdp2-strong" colSpan={2}>
+                  {t("Total")}
+                </TableCell>
+                <TableCell className="rdp2-strong rdp2-right rdp2-num">{more}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        )}
+        {reasons.length > 0 && (
+          <ul className="rdp2-cap-reasons">
+            {reasons.map((r) => (
+              <li key={r}>{r}</li>
             ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colSpan={2}>{t("Total")}</td>
-              <td className="rdp2-num">{more}</td>
-            </tr>
-          </tfoot>
-        </table>
-      )}
-      {reasons.length > 0 && (
-        <ul className="rdp2-cap-reasons">
-          {reasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-      )}
-      {!table && report.needs[0] && report.level !== "impossible" && <p className="rdp2-cap-note">{sourceNote(t, report.needs[0])}</p>}
-      {report.level === "short" && props.onAck && (
-        <label className="rdp2-cap-ack">
-          <Checkbox checked={!!props.ack} onChange={(e) => props.onAck?.(e.target.checked)} /> {t("I understand, deploy anyway")}
-        </label>
-      )}
-    </div>
+          </ul>
+        )}
+        {!table && report.needs[0] && report.level !== "impossible" && <p className="rdp2-small rdp2-muted">{sourceNote(t, report.needs[0])}</p>}
+        {report.level === "short" && props.onAck && (
+          <label className="rdp2-row">
+            <Checkbox checked={!!props.ack} onChange={(e) => props.onAck?.(e.target.checked)} /> {t("I understand, deploy anyway")}
+          </label>
+        )}
+      </div>
+    </Alert>
   );
 }
 
