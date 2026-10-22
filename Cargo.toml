@@ -1,6 +1,6 @@
 [package]
 name = "rdockpanel"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 description = "Free, self-hosted server panel like EasyPanel: server monitoring and Docker management (Swarm deployment in progress)."
 license = "MIT OR Apache-2.0"

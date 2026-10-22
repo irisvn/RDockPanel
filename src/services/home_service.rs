@@ -209,7 +209,7 @@ const EN: Texts = &[
     ("f4_title", "Domains and HTTPS"),
     (
         "f4",
-        "Domains through Traefik with Let's Encrypt, redirects, basic auth and maintenance pages.",
+        "Domains through Traefik with Let's Encrypt, redirects, rate limits, basic auth and maintenance pages.",
     ),
     ("f5_title", "Databases and templates"),
     (
@@ -317,7 +317,7 @@ const VI: Texts = &[
     ("f4_title", "Tên miền và HTTPS"),
     (
         "f4",
-        "Tên miền qua Traefik với Let's Encrypt, chuyển hướng, basic auth và trang bảo trì.",
+        "Tên miền qua Traefik với Let's Encrypt, chuyển hướng, giới hạn request, basic auth và trang bảo trì.",
     ),
     ("f5_title", "Database và template"),
     (

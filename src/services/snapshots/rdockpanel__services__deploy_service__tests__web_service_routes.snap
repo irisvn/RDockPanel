@@ -11,7 +11,7 @@ http:
       service: shop_web-80
       tls:
         certResolver: letsencrypt
-      priority: 10024
+      priority: 40096
     shop_web-0-http:
       rule: Host(`shop.example.com`)
       entryPoints:
@@ -19,7 +19,7 @@ http:
       service: shop_web-80
       middlewares:
       - shop_web-https
-      priority: 10024
+      priority: 40096
     shop_web-1:
       rule: Host(`shop.example.com`) && PathPrefix(`/api`)
       entryPoints:
@@ -27,7 +27,7 @@ http:
       service: shop_web-8080
       tls:
         certResolver: letsencrypt
-      priority: 10046
+      priority: 40184
     shop_web-1-http:
       rule: Host(`shop.example.com`) && PathPrefix(`/api`)
       entryPoints:
@@ -35,13 +35,13 @@ http:
       service: shop_web-8080
       middlewares:
       - shop_web-https
-      priority: 10046
+      priority: 40184
     shop_web-2:
       rule: Host(`shop.localhost`)
       entryPoints:
       - web
       service: shop_web-80
-      priority: 10022
+      priority: 40088
   services:
     shop_web-80:
       loadBalancer:

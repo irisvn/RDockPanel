@@ -30,11 +30,20 @@ pub const ENTRYPOINT: &str = "tunnel";
 pub const PORT: u16 = 8081;
 const TOKEN_KEY: &str = "tunnel.token";
 const ENABLED_KEY: &str = "tunnel.enabled";
-/// Traefik's argument for the entrypoint. Its forwarded headers are never
-/// trusted (Traefik is on every project's network: any container reaches
-/// it): the client's address there is cloudflared's; Cloudflare's own
-/// `Cf-Connecting-Ip` holds the visitor's, and `Cf-Visitor` their scheme.
+/// Traefik's argument for the entrypoint. Its forwarded headers are
+/// trusted from the tunnel's network only ([`trust_arg`]): Traefik is on
+/// every project's network, any container reaches it, and theirs are
+/// dropped. cloudflared names the visitor (`X-Forwarded-For`,
+/// `Cf-Connecting-Ip`) and their scheme (`Cf-Visitor`).
 const TRAEFIK_ARG: &str = "--entrypoints.tunnel.address=:8081";
+/// The argument's prefix trusting the tunnel's network.
+const TRUST_PREFIX: &str = "--entrypoints.tunnel.forwardedHeaders.trustedIPs=";
+
+/// Traefik's argument trusting the forwarded headers of `subnets` (the
+/// tunnel's network: cloudflared and Traefik only).
+fn trust_arg(subnets: &[String]) -> String {
+    format!("{TRUST_PREFIX}{}", subnets.join(","))
+}
 /// Its aliasing header names dropped (the installer's, kept).
 const TRAEFIK_ALIAS_ARG: &str = "--entrypoints.tunnel.http.aliasHeadersStrategy=delete";
 /// Cloudflare's header for a visitor who came over plain HTTP (routed to
@@ -250,36 +259,7 @@ pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> App
         })
         .await
         .map_err(docker_err)?;
-    traefik
-        .attach(docker, NETWORK, &network.id)
-        .await
-        .map_err(docker_err)?;
-    traefik
-        .update_service(docker.engine(), |spec| {
-            let args = spec
-                .task_template
-                .get_or_insert_with(Default::default)
-                .container_spec
-                .get_or_insert_with(Default::default)
-                .args
-                .get_or_insert_with(Vec::new);
-            let before = args.len();
-            // Its address, and nothing else of the entrypoint (no trust).
-            // The installer gives Traefik both: then nothing changes.
-            args.retain(|a| {
-                !a.starts_with("--entrypoints.tunnel.")
-                    || a == TRAEFIK_ARG
-                    || a == TRAEFIK_ALIAS_ARG
-            });
-            let mut changed = args.len() != before;
-            if !args.iter().any(|a| a == TRAEFIK_ARG) {
-                args.push(TRAEFIK_ARG.to_owned());
-                changed = true;
-            }
-            changed
-        })
-        .await
-        .map_err(docker_err)?;
+    entrypoint(docker, &traefik, &network.id).await?;
     // The token as a secret of its own content's name (a new token: a new secret).
     use sha2::Digest;
     let digest: String = sha2::Sha256::digest(token.as_bytes())[..6]
@@ -365,6 +345,61 @@ pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> App
 }
 
 /// Stops cloudflared (its token kept), and the routes' tunnel routers.
+/// Traefik on the tunnel's network (`id`), with the tunnel's entrypoint
+/// trusting that network's forwarded headers, and nothing else of it.
+/// Restarted only when that changes.
+async fn entrypoint(docker: &Docker, traefik: &Traefik, id: &str) -> AppResult<()> {
+    // Swarm gives a new overlay its subnet a moment after creating it.
+    let mut subnets = vec![];
+    for _ in 0..20 {
+        subnets = docker
+            .engine()
+            .network_subnets(NETWORK)
+            .await
+            .map_err(docker_err)?;
+        if !subnets.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    if subnets.is_empty() {
+        return Err(AppError::internal("the tunnel's network has no subnet"));
+    }
+    let trust = trust_arg(&subnets);
+    traefik
+        .attach(docker, NETWORK, id)
+        .await
+        .map_err(docker_err)?;
+    traefik
+        .update_service(docker.engine(), |spec| {
+            let args = spec
+                .task_template
+                .get_or_insert_with(Default::default)
+                .container_spec
+                .get_or_insert_with(Default::default)
+                .args
+                .get_or_insert_with(Vec::new);
+            let before = args.clone();
+            // The installer gives Traefik the address and the alias
+            // strategy: then only the trust changes.
+            args.retain(|a| {
+                !a.starts_with("--entrypoints.tunnel.")
+                    || a == TRAEFIK_ARG
+                    || a == TRAEFIK_ALIAS_ARG
+                    || *a == trust
+            });
+            for arg in [TRAEFIK_ARG, trust.as_str()] {
+                if !args.iter().any(|a| a == arg) {
+                    args.push(arg.to_owned());
+                }
+            }
+            *args != before
+        })
+        .await
+        .map_err(docker_err)?;
+    Ok(())
+}
+
 pub async fn disable(app: &AppState, docker: &Docker) -> AppResult<()> {
     // Off first (routes without the tunnel), then cloudflared stopped.
     panel_setting::set(app.db(), ENABLED_KEY, "false").await?;
@@ -432,7 +467,19 @@ pub fn reconcile(app: &AppState) {
                 remove_secrets(&docker, None).await;
                 Ok(())
             }
-            (true, true) => Ok(()),
+            // Traefik's entrypoint as now (an older panel's trusted nobody).
+            (true, true) => match app.service::<Traefik>() {
+                Some(traefik) if !traefik.service.is_empty() => {
+                    match docker.engine().networks().await {
+                        Ok(networks) => match networks.into_iter().find(|n| n.name == NETWORK) {
+                            Some(network) => entrypoint(&docker, &traefik, &network.id).await,
+                            None => enable(&app, &docker, None).await,
+                        },
+                        Err(err) => Err(docker_err(err)),
+                    }
+                }
+                _ => Ok(()),
+            },
         };
         if let Err(err) = result {
             tracing::warn!(%err, "the tunnel not reconciled");

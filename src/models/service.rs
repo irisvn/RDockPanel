@@ -58,6 +58,15 @@ pub struct Model {
     pub maintenance: bool,
     pub maintenance_title: Option<String>,
     pub maintenance_subtitle: Option<String>,
+    /// Its rate limit on its domains: `average` requests per `period`
+    /// (`1s`, `1m`, `1h`) by visitor, `burst` at once (`None`: off), but
+    /// for the exempt addresses (IPs or networks, one a line). Applied when
+    /// saved.
+    pub rate_limit_average: Option<i32>,
+    pub rate_limit_period: Option<String>,
+    pub rate_limit_burst: Option<i32>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub rate_limit_exempt: Option<String>,
     /// Linux capabilities added and dropped (`NET_ADMIN, SYS_TIME`), and
     /// sysctls (`net.ipv4.ip_forward=1`, one a line): adding ones needs
     /// `system.manage`.

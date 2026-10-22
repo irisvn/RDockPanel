@@ -3,6 +3,14 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.7.0 — 2026-10-22
+
+- **Rate limit** in a service's Security tab: requests per visitor (their IP) on its domains, with
+  presets or your own numbers, and addresses exempt from it (a VPN, a monitor). Visitors through
+  Cloudflare (a proxied record or the tunnel) are counted by their own address. Applied when saved.
+- Traefik now trusts `X-Forwarded-For` from Cloudflare's edges and from the tunnel: services see
+  their visitors' address there. Upgrading restarts Traefik once.
+
 ## 0.6.1 — 2026-10-22
 
 - The Firewall page no longer says ufw is on when it is installed but disabled.

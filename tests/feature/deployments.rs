@@ -1658,6 +1658,93 @@ db_test!(
 );
 
 db_test!(
+    a_rate_limit_applies_when_saved,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let url = format!("{}/{id}", records(&app, "services"));
+        let patch = |body: serde_json::Value| {
+            let admin = &admin;
+            let url = url.clone();
+            async move {
+                admin
+                    .send(rustcms::axum::http::Method::PATCH, &url, Some(&body))
+                    .await
+            }
+        };
+        // Refused: out of bounds, another period, Cloudflare's or every address.
+        for (body, field) in [
+            (json!({"rate_limit_average": 0}), "rate_limit_average"),
+            (json!({"rate_limit_burst": 100_001}), "rate_limit_burst"),
+            (json!({"rate_limit_period": "1d"}), "rate_limit_period"),
+            (
+                json!({"rate_limit_exempt": "104.16.0.1"}),
+                "rate_limit_exempt",
+            ),
+            (
+                json!({"rate_limit_exempt": "0.0.0.0/0"}),
+                "rate_limit_exempt",
+            ),
+            (json!({"rate_limit_exempt": "nope"}), "rate_limit_exempt"),
+        ] {
+            patch(body).await.assert_validation_error(field);
+        }
+        patch(json!({
+            "rate_limit_average": 5,
+            "rate_limit_period": "1m",
+            "rate_limit_burst": 10,
+            "rate_limit_exempt": "10.8.0.7/24\n10.8.0.9, 2001:db8::1",
+        }))
+        .await
+        .assert_status(StatusCode::OK);
+        // Kept canonical; shown on the service's page.
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        assert_eq!(page["service"]["rate_limit_average"], 5);
+        assert_eq!(page["service"]["rate_limit_period"], "1m");
+        assert_eq!(
+            page["service"]["rate_limit_exempt"],
+            "10.8.0.0/24\n10.8.0.9/32\n2001:db8::1/128"
+        );
+        // Applied when saved (its job): no deployment, nothing to deploy.
+        publish_routes(&app, id).await;
+        assert_eq!(aside(&app, &admin, id).await["pending"], json!(false));
+        let read =
+            || std::fs::read_to_string(support::traefik_dir(&app).join("shop_web.yml")).unwrap();
+        let routes = read();
+        assert!(
+            routes.contains("shop_web-ratelimit:")
+                && routes.contains("shop_web-ratelimit-proxied:"),
+            "{routes}"
+        );
+        assert!(
+            routes.contains("period: 1m") && routes.contains("burst: 10"),
+            "{routes}"
+        );
+        assert!(
+            routes.contains("ClientIP(`10.8.0.9/32`)")
+                && routes.contains("ClientIP(`173.245.48.0/20`)"),
+            "{routes}"
+        );
+        // Off: gone at once.
+        patch(json!({"rate_limit_average": null, "rate_limit_exempt": null}))
+            .await
+            .assert_status(StatusCode::OK);
+        publish_routes(&app, id).await;
+        let routes = read();
+        assert!(
+            !routes.contains("ratelimit") && !routes.contains("ClientIP"),
+            "{routes}"
+        );
+    }
+);
+
+db_test!(
     a_signed_github_push_deploys,
     migrate = Migrator,
     |db: TestDb| async move {

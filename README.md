@@ -64,9 +64,10 @@ feature is free: no project limits, no paid tiers.
   configuration, for history and rollback, and the page shows changes not deployed yet.
 - **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
   redirects its HTTP to HTTPS; wildcard domains (`*.example.com`, for administrators) and custom
-  Traefik middlewares; redirects (regular expressions), HTTP basic authentication, and a maintenance page.
+  Traefik middlewares; redirects (regular expressions), a rate limit by visitor (their real address
+  through Cloudflare too, with exempt addresses), HTTP basic authentication, and a maintenance page.
   A **Domains** page lists every service's domains, where they lead and whether they are served.
-  Domains, redirects, basic authentication and maintenance **apply when saved** (no Deploy, the
+  Domains, redirects, rate limits, basic authentication and maintenance **apply when saved** (no Deploy, the
   running containers untouched); image, environment, ports, mounts and resources need a Deploy.
   A certificate resolver per domain (Settings → Certificates: Let's Encrypt over HTTP or over DNS with
   a Cloudflare, DigitalOcean, Hetzner, Vultr or Linode token), applied to Traefik without SSH; or a

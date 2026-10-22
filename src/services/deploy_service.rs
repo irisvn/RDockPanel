@@ -114,6 +114,9 @@ pub struct Snapshot {
     /// themselves stay in their table, read when the routes are written).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub basic_auth: Vec<String>,
+    /// Its rate limit on its domains (`None`: off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<crate::services::rate_limit_service::RateLimit>,
 }
 
 /// A redirect: Traefik's `redirectRegex`.
@@ -427,6 +430,7 @@ impl Snapshot {
             // Set from their tables ([`Snapshot::with_access`]).
             redirects: vec![],
             basic_auth: vec![],
+            rate_limit: crate::services::rate_limit_service::RateLimit::of(service),
             compose: (service.kind == "compose").then(|| Compose {
                 inline: (service.source != "git")
                     .then(|| service.compose.clone())
@@ -534,7 +538,7 @@ impl Snapshot {
 
     /// [`Self::hash`] of what only a deployment applies: without the
     /// routes' own settings (domains, redirects, basic authentication,
-    /// maintenance), applied when saved. The primary domain stays when the
+    /// rate limit, maintenance), applied when saved. The primary domain stays when the
     /// environment names it (`$(PRIMARY_DOMAIN)`: `primary`). A Compose
     /// service's domains stay: they name its file's services, checked as it
     /// deploys.
@@ -548,6 +552,7 @@ impl Snapshot {
         }
         container.redirects.clear();
         container.basic_auth.clear();
+        container.rate_limit = None;
         container.maintenance = false;
         container.hash()
     }
@@ -1322,13 +1327,18 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
             }
         }
     }
+    // Priorities: exact hosts before wildcards, longer rules first (the
+    // logical route's, times 4: room for its variants below, never above
+    // another route's).
     for router in http.routers.values_mut() {
         let length = router.rule.len() as i64;
-        router.priority = Some(if router.rule.starts_with("HostRegexp") {
-            length
-        } else {
-            10_000 + length
-        });
+        router.priority = Some(
+            4 * if router.rule.starts_with("HostRegexp") {
+                length
+            } else {
+                10_000 + length
+            },
+        );
     }
     // A tunnel's redirect just above the router it redirects for (by the
     // rule without its header: never above a longer path's).
@@ -1344,7 +1354,75 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
             http.routers.get_mut(&name).unwrap().priority = Some(priority + 1);
         }
     }
+    if let Some(limit) = snapshot
+        .rate_limit
+        .as_ref()
+        .filter(|_| !snapshot.maintenance)
+    {
+        rate_limited(&mut http, &base, snapshot.domains.len(), limit);
+    }
     Some(TraefikFile { http })
+}
+
+/// `limit` on the routers serving a service's domains (not its redirects):
+/// - straight to Traefik: counted by the peer (`{base}-ratelimit`), but for
+///   the exempt peers (`-exempt`: the same router without it);
+/// - from a Cloudflare edge (`-cf`, above `-exempt`: never exempt) and the
+///   tunnel: counted by the visitor they name (`{base}-ratelimit-proxied`).
+fn rate_limited(
+    http: &mut TraefikHttp,
+    base: &str,
+    domains: usize,
+    limit: &crate::services::rate_limit_service::RateLimit,
+) {
+    let direct = format!("{base}-ratelimit");
+    let proxied = format!("{base}-ratelimit-proxied");
+    http.middlewares.insert(direct.clone(), limit.direct());
+    http.middlewares.insert(proxied.clone(), limit.proxied());
+    let any = |cidrs: &mut dyn Iterator<Item = String>| {
+        cidrs
+            .map(|c| format!("ClientIP(`{c}`)"))
+            .collect::<Vec<_>>()
+            .join(" || ")
+    };
+    for index in 0..domains {
+        let name = format!("{base}-{index}");
+        let Some(serving) = http.routers.get(&name).cloned() else {
+            continue;
+        };
+        let priority = serving.priority.unwrap_or_default();
+        if !limit.exempt.is_empty() {
+            let mut exempt = serving.clone();
+            exempt.rule = format!(
+                "({}) && ({})",
+                serving.rule,
+                any(&mut limit.exempt.iter().cloned())
+            );
+            exempt.priority = Some(priority + 1);
+            http.routers.insert(format!("{name}-exempt"), exempt);
+        }
+        let mut edge = serving.clone();
+        edge.rule = format!(
+            "({}) && ({})",
+            serving.rule,
+            any(&mut crate::services::rate_limit_service::CLOUDFLARE
+                .iter()
+                .map(|c| c.to_string()))
+        );
+        edge.middlewares.insert(0, proxied.clone());
+        edge.priority = Some(priority + 2);
+        http.routers.insert(format!("{name}-cf"), edge);
+        http.routers
+            .get_mut(&name)
+            .unwrap()
+            .middlewares
+            .insert(0, direct.clone());
+        for tunnel in [format!("{name}-tunnel"), format!("{name}-tunnel-secure")] {
+            if let Some(router) = http.routers.get_mut(&tunnel) {
+                router.middlewares.insert(0, proxied.clone());
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1534,6 +1612,7 @@ mod tests {
             maintenance: false,
             redirects: vec![],
             basic_auth: vec![],
+            rate_limit: None,
         }
     }
 
@@ -1630,6 +1709,204 @@ mod tests {
         // Off: none.
         let off = routes_of(&plain);
         assert!(!off.http.routers.keys().any(|k| k.ends_with("-tunnel")));
+    }
+
+    #[test]
+    fn a_rate_limit_counts_visitors_by_how_they_came() {
+        use crate::services::rate_limit_service::RateLimit;
+        let mut limited = snapshot();
+        limited.domains[1].https = false;
+        limited.redirects = vec![Redirect {
+            regex: "^x".into(),
+            replacement: "y".into(),
+            permanent: false,
+        }];
+        limited.basic_auth = vec!["u:h".into()];
+        limited.rate_limit = Some(RateLimit {
+            average: 5,
+            period: "1m".into(),
+            burst: 10,
+            exempt: vec!["10.8.0.0/24".into(), "2001:db8::/64".into()],
+        });
+        let options = DeployOptions {
+            tunnel: true,
+            ..production()
+        };
+        let mut unlimited = limited.clone();
+        unlimited.rate_limit = None;
+        let plain = routes(&unlimited, &options).unwrap();
+        let file = routes(&limited, &options).unwrap();
+        let base = limited.service_name();
+        let direct = format!("{base}-ratelimit");
+        let proxied = format!("{base}-ratelimit-proxied");
+        let m = |name: &str| serde_json::to_value(&file.http.middlewares[name]).unwrap();
+        assert_eq!(
+            m(&direct)["rateLimit"]["sourceCriterion"]["ipStrategy"],
+            json!({"ipv6Subnet": 64})
+        );
+        assert_eq!(
+            m(&proxied)["rateLimit"]["sourceCriterion"]["ipStrategy"],
+            json!({"depth": 1, "ipv6Subnet": 64})
+        );
+        assert_eq!(m(&direct)["rateLimit"]["period"], "1m");
+        let r = |name: String| file.http.routers[&name].clone();
+        for index in 0..limited.domains.len() {
+            let name = format!("{base}-{index}");
+            let serving = r(name.clone());
+            // Limited first: before the redirects and the authentication.
+            assert_eq!(serving.middlewares[0], direct, "{index}");
+            assert_eq!(
+                serving.middlewares[1..],
+                plain.http.routers[&name].middlewares[..],
+                "{index}"
+            );
+            // Exempt peers: the same router, unlimited, just above.
+            let exempt = r(format!("{name}-exempt"));
+            assert_eq!(
+                exempt.rule,
+                format!(
+                    "({}) && (ClientIP(`10.8.0.0/24`) || ClientIP(`2001:db8::/64`))",
+                    serving.rule
+                )
+            );
+            assert_eq!(exempt.middlewares, serving.middlewares[1..]);
+            assert_eq!(exempt.priority, serving.priority.map(|p| p + 1));
+            assert_eq!(
+                (&exempt.entry_points, &exempt.service, &exempt.tls),
+                (&serving.entry_points, &serving.service, &serving.tls)
+            );
+            // Cloudflare's edges: by the visitor they name, never exempt.
+            let edge = r(format!("{name}-cf"));
+            assert!(
+                edge.rule.starts_with(&format!(
+                    "({}) && (ClientIP(`173.245.48.0/20`) || ",
+                    serving.rule
+                )),
+                "{}",
+                edge.rule
+            );
+            assert!(edge.rule.ends_with("ClientIP(`2c0f:f248::/32`))"));
+            assert_eq!(edge.middlewares[0], proxied);
+            assert_eq!(edge.middlewares[1..], serving.middlewares[1..]);
+            assert_eq!(edge.priority, serving.priority.map(|p| p + 2));
+            // The tunnel: by the visitor cloudflared names.
+            for tunnel in [format!("{name}-tunnel"), format!("{name}-tunnel-secure")] {
+                if let Some(router) = file.http.routers.get(&tunnel) {
+                    assert_eq!(router.middlewares[0], proxied, "{tunnel}");
+                    assert!(!router.middlewares.contains(&direct));
+                }
+            }
+            // Redirects to HTTPS: not limited.
+            for redirect in [format!("{name}-http"), format!("{name}-tunnel-http")] {
+                if let Some(router) = file
+                    .http
+                    .routers
+                    .get(&redirect)
+                    .filter(|_| limited.domains[index].https)
+                {
+                    assert!(
+                        !router.middlewares.iter().any(|m| m.contains("ratelimit")),
+                        "{redirect}"
+                    );
+                }
+            }
+            assert!(
+                !file
+                    .http
+                    .routers
+                    .contains_key(&format!("{name}-tunnel-exempt"))
+            );
+        }
+        // Variants stay under any longer route: `/api` above `/`'s.
+        let root = r(format!("{base}-0-cf")).priority.unwrap();
+        let api = r(format!("{base}-1")).priority.unwrap();
+        assert!(api > root, "{api} {root}");
+        // Off: no limiter; in maintenance: none either.
+        assert!(
+            !plain
+                .http
+                .middlewares
+                .keys()
+                .any(|k| k.contains("ratelimit"))
+        );
+        assert!(
+            !plain
+                .http
+                .routers
+                .keys()
+                .any(|k| k.ends_with("-cf") || k.ends_with("-exempt"))
+        );
+        let mut down = limited.clone();
+        down.maintenance = true;
+        let down = routes(
+            &down,
+            &DeployOptions {
+                internal_url: "http://panel:3000".into(),
+                ..options
+            },
+        )
+        .unwrap();
+        assert!(
+            !down
+                .http
+                .middlewares
+                .keys()
+                .any(|k| k.contains("ratelimit"))
+        );
+        // Not exempt: no exempt routers.
+        limited.rate_limit.as_mut().unwrap().exempt.clear();
+        let file = routes(&limited, &production()).unwrap();
+        assert!(!file.http.routers.keys().any(|k| k.ends_with("-exempt")));
+        // Applied when saved: not a container change.
+        assert_eq!(
+            limited.container_hash(false),
+            unlimited.container_hash(false)
+        );
+        assert_ne!(limited.hash(), unlimited.hash());
+    }
+
+    /// Writes a limited service's routes and an unlimited one's on the same
+    /// host (`RDP_RL_DUMP=<dir>`), for a real Traefik to load.
+    #[test]
+    #[ignore]
+    fn rate_limit_dump() {
+        let Ok(dir) = std::env::var("RDP_RL_DUMP") else {
+            return;
+        };
+        let plain = |service: &str, path: &str| {
+            let mut s = snapshot();
+            s.service = service.into();
+            s.domains = vec![Domain {
+                host: "shop.test".into(),
+                path: path.into(),
+                port: 80,
+                https: false,
+                compose_service: None,
+                middlewares: vec![],
+                cert_resolver: None,
+                certificate: None,
+            }];
+            s
+        };
+        let mut web = plain("web", "/");
+        web.rate_limit = Some(crate::services::rate_limit_service::RateLimit {
+            average: 1,
+            period: "1m".into(),
+            burst: 2,
+            exempt: vec!["10.99.0.50/32".into()],
+        });
+        let api = plain("api", "/api");
+        let options = DeployOptions {
+            tunnel: true,
+            ..DeployOptions::default()
+        };
+        for s in [web, api] {
+            std::fs::write(
+                format!("{dir}/{}.yml", s.service_name()),
+                routes(&s, &options).unwrap().to_yaml(),
+            )
+            .unwrap();
+        }
     }
 
     fn routes_of(snapshot: &Snapshot) -> TraefikFile {

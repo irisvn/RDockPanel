@@ -1,12 +1,12 @@
 // A service's Redirects, Security, Maintenance and Scripts tabs, like
 // EasyPanel's: redirects of its domains (a regular expression and its
-// replacement), the users of its HTTP basic authentication, its maintenance
-// page, and named commands run in its container. They apply on the next
-// deployment (scripts at once).
+// replacement), its rate limit and the users of its HTTP basic
+// authentication, its maintenance page, and named commands run in its
+// container. They apply when saved.
 import { type ReactNode, useState } from "react";
 import { type PageProps } from "@rustcms/admin-sdk";
-import { Button, Dialog, Input, Switch } from "@rustcms/admin-sdk/ui";
-import { EmptyState, ErrorNote, Field, RowActions, Section, TableScroll, useAsk } from "../lib/ui";
+import { Button, Dialog, Input, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
+import { EmptyState, ErrorNote, Field, RowActions, Section, Stack, TableScroll, useAsk } from "../lib/ui";
 import { ResourceError, resources } from "../lib/resources";
 import type { ServiceDetail } from "./types";
 
@@ -196,7 +196,124 @@ export function RedirectsTab(props: Props) {
   );
 }
 
+type Period = "1s" | "1m" | "1h";
+/** The limits offered: requests per second on average, and at once. */
+const PRESETS: Record<"normal" | "strict", { average: number; period: Period; burst: number }> = {
+  normal: { average: 50, period: "1s", burst: 200 },
+  strict: { average: 10, period: "1s", burst: 30 },
+};
+
+/** Which choice a saved limit is (a preset's numbers: that preset). */
+function presetOf(s: ServiceDetail["service"]): "off" | "normal" | "strict" | "custom" {
+  if (s.rate_limit_average == null) return "off";
+  for (const name of ["normal", "strict"] as const) {
+    const p = PRESETS[name];
+    if (p.average === s.rate_limit_average && p.period === (s.rate_limit_period ?? "1s") && p.burst === s.rate_limit_burst) return name;
+  }
+  return "custom";
+}
+
+/** The rate limit: requests by visitor (their IP), on every domain. */
+function RateLimitSection(props: Props) {
+  const { t, d } = props;
+  const s = d.service;
+  const [choice, setChoice] = useState(presetOf(s));
+  const [average, setAverage] = useState(String(s.rate_limit_average ?? 50));
+  const [period, setPeriod] = useState<Period>(s.rate_limit_period ?? "1s");
+  const [burst, setBurst] = useState(String(s.rate_limit_burst ?? 200));
+  const [exempt, setExempt] = useState(s.rate_limit_exempt ?? "");
+  const [error, setError] = useState<unknown>(null);
+  const fields = error instanceof ResourceError ? error.fieldErrors : {};
+  const per: Record<Period, string> = { "1s": t("second"), "1m": t("minute"), "1h": t("hour") };
+  const shown = choice === "normal" || choice === "strict" ? PRESETS[choice] : null;
+  return (
+    <Section
+      title={t("Rate limit")}
+      description={t("Limits how often one visitor (their IP address) sends requests to the service's domains. Over the limit, they get 429 Too Many Requests. Applied when saved.")}
+    >
+      <form
+        className="rdp2-form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setError(null);
+          const limit =
+            choice === "off"
+              ? { rate_limit_average: null, rate_limit_period: null, rate_limit_burst: null }
+              : shown
+                ? { rate_limit_average: shown.average, rate_limit_period: shown.period, rate_limit_burst: shown.burst }
+                : { rate_limit_average: Number(average), rate_limit_period: period, rate_limit_burst: Number(burst) };
+          try {
+            await resources.update("services", s.id, { ...limit, rate_limit_exempt: exempt.trim() || null });
+            props.onSaved();
+          } catch (err) {
+            setError(err);
+          }
+        }}
+      >
+        {d.domains.length === 0 && <p className="rdp2-muted">{t("The service has no domain yet: the limit applies once it has one.")}</p>}
+        <Field
+          label={t("Limit")}
+          help={shown ? t("{average} requests a second on average, bursts of {burst}").replace("{average}", String(shown.average)).replace("{burst}", String(shown.burst)) : undefined}
+          error={choice === "custom" ? undefined : fields.rate_limit_average}
+        >
+          <NativeSelect value={choice} onChange={(e) => setChoice(e.target.value as typeof choice)} disabled={!d.can.update}>
+            <option value="off">{t("Off")}</option>
+            <option value="normal">{t("Normal (websites)")}</option>
+            <option value="strict">{t("Strict (APIs)")}</option>
+            <option value="custom">{t("Custom")}</option>
+          </NativeSelect>
+        </Field>
+        {choice === "custom" && (
+          <div className="rdp2-grid2">
+            <Field label={t("Requests on average")} help={t("1 to 100000")} error={fields.rate_limit_average}>
+              <div className="rdp2-row">
+                <Input type="number" min={1} max={100000} value={average} onChange={(e) => setAverage(e.target.value)} disabled={!d.can.update} />
+                <span className="rdp2-muted">{t("per")}</span>
+                <NativeSelect aria-label={t("Period")} value={period} onChange={(e) => setPeriod(e.target.value as Period)} disabled={!d.can.update}>
+                  {(["1s", "1m", "1h"] as const).map((p) => <option key={p} value={p}>{per[p]}</option>)}
+                </NativeSelect>
+              </div>
+            </Field>
+            <Field label={t("Burst")} help={t("Requests a visitor may send at once (a page with many images and scripts needs more)")} error={fields.rate_limit_burst}>
+              <Input type="number" min={1} max={100000} value={burst} onChange={(e) => setBurst(e.target.value)} disabled={!d.can.update} />
+            </Field>
+          </div>
+        )}
+        {choice !== "off" && (
+          <Field
+            label={t("Exempt addresses")}
+            help={t("IPs or networks never limited, one a line (a VPN, a monitor). They match visitors reaching the server directly, not through Cloudflare.")}
+            error={fields.rate_limit_exempt}
+          >
+            <Textarea className="rdp2-mono" rows={3} value={exempt} placeholder={"203.0.113.7\n10.8.0.0/24"} onChange={(e) => setExempt(e.target.value)} disabled={!d.can.update} />
+          </Field>
+        )}
+        {choice !== "off" && (
+          <p className="rdp2-muted">
+            {t("Counted per visitor and per domain. Visitors through Cloudflare (a proxied record or the tunnel) are counted by their own IP; IPv6 visitors by their /64.")}
+          </p>
+        )}
+        {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+        {d.can.update && (
+          <div className="rdp2-row rdp2-end">
+            <Button type="submit">{t("Save")}</Button>
+          </div>
+        )}
+      </form>
+    </Section>
+  );
+}
+
 export function SecurityTab(props: Props) {
+  return (
+    <Stack>
+      <RateLimitSection {...props} />
+      <BasicAuthSection {...props} />
+    </Stack>
+  );
+}
+
+function BasicAuthSection(props: Props) {
   const { t, d } = props;
   const [adding, setAdding] = useState(false);
   const [username, setUsername] = useState("");

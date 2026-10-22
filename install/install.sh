@@ -246,12 +246,17 @@ RESOLVER=""
 # The tunnel's entrypoint is always there (never published; routed only while
 # the tunnel is on): turning it on changes nothing of Traefik. Header names
 # that alias others (`X_Forwarded_For`) are dropped: some backends (PHP, WSGI)
-# read them as the real ones.
+# read them as the real ones. Cloudflare's edges (a proxied DNS record) are
+# trusted to name the visitor (`X-Forwarded-For`: rate limits count them);
+# anyone else's is dropped. The panel keeps the same list.
+CLOUDFLARE_IPS="173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32"
 TRAEFIK_ARGS="--entrypoints.web.address=:80 --entrypoints.websecure.address=:443 \
 --entrypoints.tunnel.address=:8081 \
 --entrypoints.web.http.aliasHeadersStrategy=delete \
 --entrypoints.websecure.http.aliasHeadersStrategy=delete \
 --entrypoints.tunnel.http.aliasHeadersStrategy=delete \
+--entrypoints.web.forwardedHeaders.trustedIPs=$CLOUDFLARE_IPS \
+--entrypoints.websecure.forwardedHeaders.trustedIPs=$CLOUDFLARE_IPS \
 --providers.file.directory=/etc/traefik/dynamic --providers.file.watch=true --log.level=WARN"
 if [ -n "$EMAIL" ]; then
   RESOLVER=letsencrypt
@@ -263,6 +268,8 @@ fi
 # its own: kept as they are).
 installer_arg() {
   case "$1" in
+    # The tunnel's network, trusted by the panel (made when the tunnel is on).
+    --entrypoints.tunnel.forwardedHeaders.*) return 1 ;;
     --entrypoints.web.*|--entrypoints.websecure.*|--entrypoints.tunnel.*|--providers.file.*|--log.level=*|--certificatesresolvers.letsencrypt.*) return 0 ;;
   esac
   return 1

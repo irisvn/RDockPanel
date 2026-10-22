@@ -277,6 +277,12 @@ actions (`POST /admin/api/resources/services/actions/{name}`, `…/deployments/a
 that run a deployment (all but Republish) answer 409 `deployment_in_progress` while another one of the
 service is under way.
 
+A service's rate limit is four fields of the `services` resource (`PATCH
+/admin/api/resources/services/{id}`, `services.update`), applied when saved:
+`rate_limit_average` (1–100000 requests; `null`: off), `rate_limit_period` (`1s`, `1m` or `1h`),
+`rate_limit_burst` (1–100000) and `rate_limit_exempt` (IPs or networks, one a line, at most 50; not
+every address, none of Cloudflare's; kept canonical).
+
 ## Deployment trigger (public)
 
 `POST /api/v1/deploy/{id}?token={token}` (no session, no CSRF: the token is the secret) queues a Deploy of

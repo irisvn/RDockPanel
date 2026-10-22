@@ -336,6 +336,10 @@ pub trait DockerApi: Send + Sync {
     /// Creates the network unless one of that name exists; the network as it
     /// is (callers check it: [`Docker::ensure_network`]).
     async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem>;
+    /// The subnets of the network `name` (its IPAM's; none known: empty).
+    async fn network_subnets(&self, _name: &str) -> DockerResult<Vec<String>> {
+        Ok(vec![])
+    }
     async fn inspect_image(&self, reference: &str) -> DockerResult<ImageDetails>;
     /// The Swarm service of that name, if any.
     async fn inspect_service(&self, name: &str) -> DockerResult<Option<SwarmService>>;

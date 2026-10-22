@@ -3,6 +3,7 @@
 //! entrypoint and network; administrators only.
 
 use rdockpanel::database::migrations::Migrator;
+use rdockpanel::services::docker_service::DockerApi;
 use rustcms::axum::http::StatusCode;
 use rustcms_testing::{TestDb, db_test};
 use serde_json::json;
@@ -163,11 +164,31 @@ db_test!(
             )
             .await
             .assert_status(StatusCode::OK);
-        let traefik = spec(&fake, "rdp-traefik").unwrap();
-        let args: Vec<String> =
+        let args = || -> Vec<String> {
+            let traefik = spec(&fake, "rdp-traefik").unwrap();
             serde_json::from_value(traefik["TaskTemplate"]["ContainerSpec"]["Args"].clone())
-                .unwrap();
-        assert_eq!(args, installed);
+                .unwrap()
+        };
+        // Kept as they are, the tunnel's network trusted (cloudflared names
+        // the visitor; a project's container is not on it).
+        let subnets = fake.network_subnets("rdp-tunnel").await.unwrap();
+        let mut want: Vec<String> = installed.iter().map(|a| a.to_string()).collect();
+        want.push(format!(
+            "--entrypoints.tunnel.forwardedHeaders.trustedIPs={}",
+            subnets.join(",")
+        ));
+        assert_eq!(args(), want);
+        // Again: nothing changes.
+        let version = fake.services.lock().unwrap()["rdp-traefik"].version.clone();
+        admin
+            .post_json(&app.admin_api("x/apps/tunnel/enable"), &json!({}))
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(args(), want);
+        assert_eq!(
+            fake.services.lock().unwrap()["rdp-traefik"].version,
+            version
+        );
     }
 );
 

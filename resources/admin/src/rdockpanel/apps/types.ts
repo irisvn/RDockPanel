@@ -77,6 +77,12 @@ export type ServiceDetail = {
     maintenance: boolean;
     maintenance_title: string | null;
     maintenance_subtitle: string | null;
+    /** Its rate limit: average requests per period by visitor, burst at once (average null: off). */
+    rate_limit_average: number | null;
+    rate_limit_period: "1s" | "1m" | "1h" | null;
+    rate_limit_burst: number | null;
+    /** Addresses not limited (IPs or networks, one a line). */
+    rate_limit_exempt: string | null;
     webhook_set: boolean;
     compose_file: string | null;
     deploy_key_public: string | null;

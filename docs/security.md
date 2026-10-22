@@ -98,6 +98,15 @@ there is checked (hosts, paths and names by their character sets; redirects may 
 or `}}`), so a user's value never runs a template (which could read Traefik's environment).
 Basic authentication hashes are written there but never kept in a deployment's snapshot.
 
+## Rate limits and the visitor's address
+
+A rate limit counts visitors by an address nobody can choose: the peer, or the `X-Forwarded-For` of
+a proxy Traefik trusts (Cloudflare's edges on 80/443, cloudflared's network on the tunnel's
+entrypoint). Traefik drops that header from anyone else, a project's container included. A service
+then sees its Cloudflare visitors' address first in `X-Forwarded-For` (`X-Real-Ip` stays the peer's).
+Exempt addresses match the peer only. A Cloudflare Worker fetching a site names its own visitor;
+Cloudflare's cache answers without reaching the server; a published port bypasses Traefik.
+
 ## Compose services
 
 A Compose file can run privileged containers and mount any host directory: creating or editing a

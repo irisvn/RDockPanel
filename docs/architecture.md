@@ -224,6 +224,29 @@ in so at once. A deployment's snapshot records them (users as a digest of their 
 Regular expressions are checked as Go's (inline flags `i`, `m`, `s`, `U` only), and no value
 written to Traefik's files may contain `{{` or `}}` (Traefik reads them as Go templates). Templates' `basicAuth` and `redirects` are created with the service.
 
+### Rate limit
+
+The Security tab's Rate limit (`services.rate_limit_*`: an average per second, minute or hour, a
+burst, exempt addresses) becomes Traefik's `rateLimit` on the routers serving each domain, before the
+redirects and the authentication; the redirects to HTTPS are not limited. It applies when saved, like
+basic authentication. Who the visitor is depends on the peer, so each serving router gets variants:
+
+| Router | Matches | Counted by |
+|---|---|---|
+| `<name>` | anyone else | the peer (`ipStrategy.ipv6Subnet: 64`: an IPv6 visitor by their /64) |
+| `<name>-exempt` | an exempt peer (`ClientIP`) | not limited |
+| `<name>-cf` | a Cloudflare edge (`ClientIP` of its ranges) | the visitor it names (`depth: 1`, the last `X-Forwarded-For` entry) |
+| `<name>-tunnel`, `-tunnel-secure` | cloudflared, on the `tunnel` entrypoint | the visitor it names |
+
+Traefik keeps `X-Forwarded-For` only from peers it trusts (`forwardedHeaders.trustedIPs`):
+Cloudflare's ranges on `web` and `websecure` (the installer's arguments, and the panel's at boot), the
+tunnel's network on `tunnel` (set when the tunnel is turned on: Traefik is on every project's network,
+so a container could reach that entrypoint, and its header is dropped). Anyone else's is dropped, so
+nobody picks their own key, and the exempt addresses match the peer only (never a Cloudflare edge,
+whose ranges they may not overlap). Every service router's priority is its rule's (exact hosts first,
+then length) times 4, the variants +1 and +2: never above another route. Counters are Traefik's, in
+memory: per router (so per domain), reset when Traefik restarts or reloads.
+
 ### Compose services
 
 A service of kind `compose` (made by the panel's administrators only:
@@ -397,7 +420,7 @@ action buttons and the latest deployment, its log followed live over SSE.
 writes it whole (a hidden temporary file, then renamed) after each deployment and whenever a route's
 own setting is saved: the containers of the deployment that made the service what it is (its
 configuration hash; a failed deployment leaves what still runs), with its domains, redirects, basic
-authentication and maintenance **as saved**. Saving one of those queues a `deploy.publish` job (from
+authentication, rate limit and maintenance **as saved**. Saving one of those queues a `deploy.publish` job (from
 the resources' `after_save` and the basic authentication routes, in the same transaction): it is
 applied without a deployment, the containers untouched, and does not count as a pending change (only
 what is in the Swarm service does: image, environment, ports, mounts, resources…). A Compose

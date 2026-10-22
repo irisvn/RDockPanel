@@ -235,7 +235,8 @@ pub async fn snapshot_without_env<C: ConnectionTrait>(
 
 /// Whether the configuration changed since the last successful deployment,
 /// in what only a deployment applies (domains, redirects, basic
-/// authentication and maintenance are applied when saved: not counted).
+/// authentication, rate limit and maintenance are applied when saved: not
+/// counted).
 /// An environment that cannot be opened counts as a change.
 pub async fn has_pending_changes<C: ConnectionTrait>(
     db: &C,

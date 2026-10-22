@@ -496,6 +496,29 @@ window.rustcms?.registerTranslations?.("vi", {
   "Permanent (301)": "Vĩnh viễn (301)",
   permanent: "vĩnh viễn",
   temporary: "tạm thời",
+  "Rate limit": "Giới hạn request",
+  "Limits how often one visitor (their IP address) sends requests to the service's domains. Over the limit, they get 429 Too Many Requests. Applied when saved.":
+    "Giới hạn số request mỗi khách (theo địa chỉ IP) gửi tới các domain của service. Vượt giới hạn, khách nhận 429 Too Many Requests. Áp dụng ngay khi lưu.",
+  "The service has no domain yet: the limit applies once it has one.": "Service chưa có domain: giới hạn áp dụng khi có domain.",
+  Limit: "Mức giới hạn",
+  "Normal (websites)": "Thường (website)",
+  "Strict (APIs)": "Chặt (API)",
+  "{average} requests a second on average, bursts of {burst}": "Trung bình {average} request/giây, dồn tối đa {burst}",
+  "Requests on average": "Số request trung bình",
+  "1 to 100000": "1 đến 100000",
+  per: "mỗi",
+  Period: "Khoảng thời gian",
+  second: "giây",
+  minute: "phút",
+  hour: "giờ",
+  Burst: "Dồn tối đa",
+  "Requests a visitor may send at once (a page with many images and scripts needs more)":
+    "Số request một khách được gửi dồn cùng lúc (trang có nhiều ảnh, script cần nhiều hơn)",
+  "Exempt addresses": "Địa chỉ được miễn",
+  "IPs or networks never limited, one a line (a VPN, a monitor). They match visitors reaching the server directly, not through Cloudflare.":
+    "IP hoặc dải mạng không bị giới hạn, mỗi dòng một địa chỉ (VPN, máy monitoring). Chỉ áp dụng cho khách kết nối thẳng tới server, không qua Cloudflare.",
+  "Counted per visitor and per domain. Visitors through Cloudflare (a proxied record or the tunnel) are counted by their own IP; IPv6 visitors by their /64.":
+    "Đếm theo từng khách và từng domain. Khách đi qua Cloudflare (bản ghi bật proxy hoặc Tunnel) được đếm theo IP thật của họ; khách IPv6 đếm theo dải /64.",
   "Basic authentication": "Xác thực cơ bản",
   "Visitors of the service's domains sign in with one of these users. Passwords are stored hashed.":
     "Người truy cập domain của service phải đăng nhập bằng một trong các user này. Mật khẩu được lưu dạng băm.",

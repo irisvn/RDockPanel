@@ -327,6 +327,7 @@ impl ServiceProvider for AppServiceProvider {
         }
         crate::services::tunnel_service::sync_panel_route(state).await;
         crate::services::tunnel_service::reconcile(state);
+        crate::services::rate_limit_service::reconcile(state);
         firewall_watch(state);
         // Traefik's routes, written again from the database.
         if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {

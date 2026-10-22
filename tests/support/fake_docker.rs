@@ -415,6 +415,13 @@ impl DockerApi for FakeDocker {
         self.record(format!("resize {exec_id} {}x{}", size.cols, size.rows));
         Ok(())
     }
+    async fn network_subnets(&self, name: &str) -> DockerResult<Vec<String>> {
+        let networks = self.networks.lock().unwrap();
+        match networks.iter().position(|n| n.name == name) {
+            Some(i) => Ok(vec![format!("10.0.{}.0/24", 100 + i)]),
+            None => Err(DockerError::NotFound),
+        }
+    }
     async fn ensure_network(&self, request: NetworkRequest) -> DockerResult<NetworkItem> {
         let mut networks = self.networks.lock().unwrap();
         if let Some(found) = networks.iter().find(|n| n.name == request.name) {

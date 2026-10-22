@@ -17,6 +17,7 @@ use crate::services::build_service::{inside, valid_git_url, valid_ref};
 use crate::services::deploy_rules_service::{valid_image_reference, valid_name};
 use crate::services::deploy_service::{command_args, valid_env_name};
 use crate::services::deployment_service::{self, Trigger};
+use crate::services::rate_limit_service;
 
 pub struct ServiceResource;
 
@@ -26,6 +27,8 @@ const CPU_MILLIS: std::ops::RangeInclusive<i64> = 10..=256_000;
 const MEM_MB: std::ops::RangeInclusive<i64> = 4..=1_048_576;
 const HEALTH_INTERVAL_S: std::ops::RangeInclusive<i64> = 1..=3600;
 const HEALTH_RETRIES: std::ops::RangeInclusive<i64> = 1..=20;
+/// A rate limit's average and burst.
+const RATE: std::ops::RangeInclusive<i64> = 1..=rate_limit_service::MAX as i64;
 
 #[async_trait]
 impl Resource for ServiceResource {
@@ -80,6 +83,10 @@ impl Resource for ServiceResource {
             Field::column(service::Column::Maintenance),
             Field::column(service::Column::MaintenanceTitle).max_length(200),
             Field::column(service::Column::MaintenanceSubtitle).max_length(1000),
+            Field::column(service::Column::RateLimitAverage),
+            Field::column(service::Column::RateLimitPeriod),
+            Field::column(service::Column::RateLimitBurst),
+            Field::column(service::Column::RateLimitExempt).max_length(4000),
             Field::column(service::Column::Command).max_length(1000),
             Field::column(service::Column::Replicas).required(),
             Field::column(service::Column::CpuLimitMillis),
@@ -307,8 +314,8 @@ impl Resource for ServiceResource {
         Ok(data)
     }
 
-    /// Its maintenance applied without a deployment: its routes written
-    /// again (once this commits).
+    /// Its maintenance and rate limit applied without a deployment: its
+    /// routes written again (once this commits).
     async fn after_save(
         ctx: &Ctx,
         txn: &DatabaseTransaction,
@@ -402,10 +409,21 @@ pub(crate) fn privileged(service: &service::Model) -> bool {
             .is_some_and(|g| !g.trim().is_empty())
 }
 
-/// The image as Docker takes it (no surrounding spaces).
+/// The image as Docker takes it (no surrounding spaces); exempt addresses
+/// canonical, one a line (refused ones left as given: [`check`] says why).
 fn normalize(mut data: Data) -> Data {
     if let Some(image) = text(&data, "image").map(|i| i.trim().to_owned()) {
         data.insert("image".to_owned(), serde_json::Value::String(image));
+    }
+    if let Some(Ok(exempt)) =
+        text(&data, "rate_limit_exempt").map(|e| rate_limit_service::exempt(Some(e)))
+    {
+        let value = if exempt.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(exempt.join("\n"))
+        };
+        data.insert("rate_limit_exempt".to_owned(), value);
     }
     data
 }
@@ -571,6 +589,18 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
     range("mem_reservation_mb", MEM_MB, &mut errors);
     range("healthcheck_interval_s", HEALTH_INTERVAL_S, &mut errors);
     range("healthcheck_retries", HEALTH_RETRIES, &mut errors);
+    range("rate_limit_average", RATE, &mut errors);
+    range("rate_limit_burst", RATE, &mut errors);
+    if let Some(period) = text(data, "rate_limit_period")
+        && !rate_limit_service::PERIODS.contains(&period)
+    {
+        errors.add("rate_limit_period", ctx.t("must be 1s, 1m or 1h"));
+    }
+    if let Some(Err(why)) =
+        text(data, "rate_limit_exempt").map(|e| rate_limit_service::exempt(Some(e)))
+    {
+        errors.add("rate_limit_exempt", why);
+    }
     // A reservation within its limit (the values after this write).
     let value = |field: &str, old: Option<i32>| {
         if data.contains_key(field) {

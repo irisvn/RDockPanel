@@ -33,6 +33,7 @@ mod m20261020_050000_create_project_members;
 mod m20261020_060000_create_branding_images;
 mod m20261021_000000_builds_use_a_dockerfile;
 mod m20261022_000000_create_firewall_tables;
+mod m20261023_000000_add_rate_limit_to_services;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -72,6 +73,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261020_060000_create_branding_images::Migration),
             Box::new(m20261021_000000_builds_use_a_dockerfile::Migration),
             Box::new(m20261022_000000_create_firewall_tables::Migration),
+            Box::new(m20261023_000000_add_rate_limit_to_services::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

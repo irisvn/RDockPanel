@@ -697,6 +697,7 @@ async fn desired_specs_run_on_a_real_swarm() {
         maintenance: false,
         redirects: vec![],
         basic_auth: vec![],
+        rate_limit: None,
     };
     // An environment, as a deployment opens it.
     let env = std::collections::BTreeMap::from([("GREETING".to_owned(), "hello".to_owned())]);

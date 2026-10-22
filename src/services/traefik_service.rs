@@ -340,10 +340,10 @@ pub async fn deployed_snapshot<C: sea_orm::ConnectionTrait>(
 }
 
 /// The routes a service has now: its domains, redirects, basic
-/// authentication and maintenance as saved (applied without a deployment),
-/// to the containers of the deployment that made it what it is (its
-/// configuration hash, kept when a later deployment failed), when that one
-/// runs it. `None` when it does not route (never deployed, stopped,
+/// authentication, rate limit and maintenance as saved (applied without a
+/// deployment), to the containers of the deployment that made it what it is
+/// (its configuration hash, kept when a later deployment failed), when that
+/// one runs it. `None` when it does not route (never deployed, stopped,
 /// destroyed, no domain).
 pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
     db: &C,
@@ -361,6 +361,7 @@ pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
     }
     snapshot.redirects = now.redirects;
     snapshot.maintenance = now.maintenance;
+    snapshot.rate_limit = now.rate_limit;
     // Its users with their hashes (never kept in a snapshot).
     let mut users: Vec<String> = crate::models::service_basic_auth::Entity::find()
         .filter(crate::models::service_basic_auth::Column::ServiceId.eq(row.id))

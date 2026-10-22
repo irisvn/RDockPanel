@@ -725,6 +725,24 @@ impl DockerApi for BollardDocker {
         })
     }
 
+    async fn network_subnets(&self, name: &str) -> DockerResult<Vec<String>> {
+        let found = self
+            .client
+            .inspect_network(
+                name,
+                None::<::bollard::query_parameters::InspectNetworkOptions>,
+            )
+            .await
+            .map_err(map_err)?;
+        Ok(found
+            .ipam
+            .and_then(|ipam| ipam.config)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|c| c.subnet)
+            .collect())
+    }
+
     async fn inspect_image(&self, reference: &str) -> DockerResult<ImageDetails> {
         let image = self
             .client
