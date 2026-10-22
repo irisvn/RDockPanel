@@ -5,7 +5,7 @@
 // container. They apply when saved.
 import { type ReactNode, useState } from "react";
 import { type PageProps } from "@rustcms/admin-sdk";
-import { Button, Dialog, Input, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
+import { Alert, Button, Dialog, Input, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
 import { EmptyState, ErrorNote, Field, FilePicker, RowActions, Section, Stack, TableScroll, useAsk } from "../lib/ui";
 import { HtmlEditor, Preview, fromLocalInput, localInput } from "./MaintenancePage";
 import { ResourceError, resources } from "../lib/resources";
@@ -223,6 +223,7 @@ function RateLimitSection(props: Props) {
   const [period, setPeriod] = useState<Period>(s.rate_limit_period ?? "1s");
   const [burst, setBurst] = useState(String(s.rate_limit_burst ?? 200));
   const [exempt, setExempt] = useState(s.rate_limit_exempt ?? "");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const fields = error instanceof ResourceError ? error.fieldErrors : {};
   const per: Record<Period, string> = { "1s": t("second"), "1m": t("minute"), "1h": t("hour") };
@@ -243,18 +244,30 @@ function RateLimitSection(props: Props) {
               : shown
                 ? { rate_limit_average: shown.average, rate_limit_period: shown.period, rate_limit_burst: shown.burst }
                 : { rate_limit_average: Number(average), rate_limit_period: period, rate_limit_burst: Number(burst) };
+          setBusy(true);
           try {
             await resources.update("services", s.id, { ...limit, rate_limit_exempt: exempt.trim() || null });
             props.onSaved();
           } catch (err) {
             setError(err);
+          } finally {
+            setBusy(false);
           }
         }}
       >
-        {d.domains.length === 0 && <p className="rdp2-muted">{t("The service has no domain yet: the limit applies once it has one.")}</p>}
+        {d.domains.length === 0 && <Alert>{t("The service has no domain yet: the limit applies once it has one.")}</Alert>}
         <Field
           label={t("Limit")}
-          help={shown ? t("{average} requests a second on average, bursts of {burst}").replace("{average}", String(shown.average)).replace("{burst}", String(shown.burst)) : undefined}
+          help={
+            choice === "off"
+              ? undefined
+              : [
+                  shown && t("{average} requests a second on average, bursts of {burst}").replace("{average}", String(shown.average)).replace("{burst}", String(shown.burst)) + ".",
+                  t("Counted per visitor and per domain. Visitors through Cloudflare (a proxied record or the tunnel) are counted by their own IP; IPv6 visitors by their /64."),
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+          }
           error={choice === "custom" ? undefined : fields.rate_limit_average}
         >
           <NativeSelect value={choice} onChange={(e) => setChoice(e.target.value as typeof choice)} disabled={!d.can.update}>
@@ -289,15 +302,12 @@ function RateLimitSection(props: Props) {
             <Textarea className="rdp2-mono" rows={3} value={exempt} placeholder={"203.0.113.7\n10.8.0.0/24"} onChange={(e) => setExempt(e.target.value)} disabled={!d.can.update} />
           </Field>
         )}
-        {choice !== "off" && (
-          <p className="rdp2-muted">
-            {t("Counted per visitor and per domain. Visitors through Cloudflare (a proxied record or the tunnel) are counted by their own IP; IPv6 visitors by their /64.")}
-          </p>
-        )}
         {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
         {d.can.update && (
           <div className="rdp2-row rdp2-end">
-            <Button type="submit">{t("Save")}</Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? t("Saving…") : t("Save")}
+            </Button>
           </div>
         )}
       </form>
@@ -446,7 +456,9 @@ export function MaintenanceTab(props: Props) {
   const [logo, setLogo] = useState<string | null>(d.maintenance.logo);
   // Bumped when the logo changes: the preview is made again.
   const [logoRevision, setLogoRevision] = useState(0);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const ask = useAsk();
   const fields = error instanceof ResourceError ? error.fieldErrors : {};
   const when = fromLocalInput(eta);
   const can = d.can.update;
@@ -481,6 +493,17 @@ export function MaintenanceTab(props: Props) {
         onSubmit={async (e) => {
           e.preventDefault();
           setError(null);
+          // Turned on: the site goes down for its visitors.
+          if (on && !s.maintenance && d.domains.length > 0) {
+            const ok = await ask({
+              title: t("Turn maintenance on?"),
+              body: t("Visitors of the service's domains get the maintenance page (503) until it is turned off; the addresses let through still reach it."),
+              action: t("Turn maintenance on"),
+              destructive: true,
+            });
+            if (!ok) return;
+          }
+          setBusy(true);
           try {
             await resources.update("services", s.id, {
               maintenance: on,
@@ -496,6 +519,8 @@ export function MaintenanceTab(props: Props) {
             props.onSaved();
           } catch (err) {
             setError(err);
+          } finally {
+            setBusy(false);
           }
         }}
       >
@@ -540,8 +565,8 @@ export function MaintenanceTab(props: Props) {
               </Field>
             </div>
             <Field label={t("Logo")} help={t("PNG, JPEG or WebP up to 256 KB. None: the panel's logo (Branding).")} error={fields.data}>
-              <div className="rdp2-logo">
-                {logo && <img src={logo} alt="" />}
+              <div className="rdp2-row rdp2-wrap">
+                {logo && <img src={logo} alt="" className="rdp2-brand-preview" />}
                 {can && <FilePicker label={logo ? t("Replace") : t("Upload")} accept="image/png,image/jpeg,image/webp" onFile={(file) => void uploadLogo(file)} />}
                 {can && logo && (
                   <Button type="button" variant="ghost" size="sm" onClick={() => void removeLogo()}>
@@ -560,12 +585,6 @@ export function MaintenanceTab(props: Props) {
             >
               <Textarea className="rdp2-mono" rows={3} value={bypass} placeholder={"203.0.113.7\n10.8.0.0/24"} onChange={(e) => setBypass(e.target.value)} disabled={!can} />
             </Field>
-            {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
-            {can && (
-              <div className="rdp2-row rdp2-end">
-                <Button type="submit">{t("Save")}</Button>
-              </div>
-            )}
           </div>
           <Preview
             {...props}
@@ -583,6 +602,14 @@ export function MaintenanceTab(props: Props) {
             }}
           />
         </div>
+        {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+        {can && (
+          <div className="rdp2-row rdp2-end">
+            <Button type="submit" disabled={busy}>
+              {busy ? t("Saving…") : t("Save")}
+            </Button>
+          </div>
+        )}
       </form>
     </Section>
   );

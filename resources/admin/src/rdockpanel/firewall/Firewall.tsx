@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { type PageProps } from "@rustcms/admin-sdk";
 import { useAdminQuery } from "../lib/query";
 import { Alert, Button, CodeBlock, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
-import { EmptyState, ErrorNote, Facts, Field, Page, RowActions, Section, StatusBadge, TableScroll, type MenuItem, useConfirm } from "../lib/ui";
+import { EmptyState, ErrorNote, Facts, Field, Page, Pager, RowActions, Section, StatusBadge, TableScroll, type MenuItem, useConfirm, usePaged } from "../lib/ui";
 import { fieldErrors } from "@rustcms/admin-sdk";
 
 type Port = {
@@ -60,6 +60,8 @@ export function Firewall(props: PageProps<unknown>) {
   const [blocking, setBlocking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [confirm, confirmDialog] = useConfirm(t);
+  // Up to a thousand: 25 a page.
+  const paged = usePaged(report.data?.available ? report.data.blocked : []);
   const header = {
     title: props.title,
     eyebrow: t("Workspace"),
@@ -87,7 +89,8 @@ export function Firewall(props: PageProps<unknown>) {
     refresh();
   };
   const saveOpening = (o: OpeningRow, enabled: boolean) =>
-    call(() =>
+    call(
+      () =>
       props.api.patch(`/apps/firewall/openings/${o.id}`, {
         ports: ports(o),
         protocol: o.protocol,
@@ -98,10 +101,11 @@ export function Firewall(props: PageProps<unknown>) {
         note: o.note,
         enabled,
       }),
+      enabled ? "Opening turned on: apply the rules." : "Opening turned off: apply the rules.",
     );
   const removeOpening = async (o: OpeningRow) => {
     const ok = await confirm({ title: t("Remove this opening?"), body: t("The port closes at the next apply."), action: t("Remove"), destructive: true });
-    if (ok) await call(() => props.api.delete(`/apps/firewall/openings/${o.id}`));
+    if (ok) await call(() => props.api.delete(`/apps/firewall/openings/${o.id}`), "Opening removed: apply the rules.");
   };
   const disable = async () => {
     const ok = await confirm({
@@ -117,16 +121,27 @@ export function Firewall(props: PageProps<unknown>) {
     <Page
       {...header}
       actions={
-        r.enabled && !r.pending && (
-          <Button variant="outline" onClick={() => void disable()}>
-            {t("Turn off")}
-          </Button>
+        !r.pending && (
+          <>
+            {r.enabled && (
+              <Button variant="outline" onClick={() => void disable()}>
+                {t("Turn off")}
+              </Button>
+            )}
+            {!unsupported && (r.changed || !r.enabled) && <Button onClick={() => setApplying(true)}>{r.enabled ? t("Apply…") : t("Turn on…")}</Button>}
+          </>
         )
       }
     >
       {confirmDialog}
       <ErrorNote error={error} />
+
+      <Section
+        title={t("Firewall")}
+        description={t("The panel's own nftables table (inet rdockpanel). It closes every new inbound connection except SSH, 80, 443 and the ports opened below; Docker's, ufw's and firewalld's rules still apply alongside.")}
+      >
       {r.pending && <Pending t={t} pending={r.pending} api={props.api} onDone={refresh} onError={setError} toast={props.toast} />}
+      {!r.pending && r.enabled && r.changed && <Alert>{t("The rules changed since they were applied: apply them to use them.")}</Alert>}
       {r.host.boot_failed && (
         <Alert variant="destructive">
           {r.host.boot_failed === "both"
@@ -135,11 +150,6 @@ export function Firewall(props: PageProps<unknown>) {
         </Alert>
       )}
       {r.drift && !r.pending && <Alert variant="warning">{t("The server's table differs from the confirmed one (changed outside the panel): it is reloaded within two minutes.")}</Alert>}
-
-      <Section
-        title={t("Firewall")}
-        description={t("The panel's own nftables table (inet rdockpanel). It closes every new inbound connection except SSH, 80, 443 and the ports opened below; Docker's, ufw's and firewalld's rules still apply alongside.")}
-      >
         <Facts
           items={[
             [t("State"), r.enabled ? <StatusBadge tone="ok" label={t("On")} /> : <StatusBadge tone="off" label={t("Off")} />],
@@ -186,7 +196,7 @@ export function Firewall(props: PageProps<unknown>) {
                   <td>
                     {(p.state === "closed" || p.state === "open") && !p.swarm && (
                       <RowActions label={t("Actions for port {port}").replace("{port}", String(p.port))}>
-                        <Button size="sm" variant="outline" onClick={() => setOpening({ port: p.port, protocol: p.protocol, published: p.published })}>
+                        <Button size="sm" variant="ghost" onClick={() => setOpening({ port: p.port, protocol: p.protocol, published: p.published })}>
                           {t("Open for…")}
                         </Button>
                       </RowActions>
@@ -244,10 +254,10 @@ export function Firewall(props: PageProps<unknown>) {
                       {ports(o)}/{o.protocol}
                     </td>
                     <td>{o.target === "host" ? t("This server") : t("A published port")}</td>
-                    <td className="rdp2-mono rdp2-ellipsis">{o.anywhere ? <span className="rdp2-error">{t("Anywhere")}</span> : o.sources.split(",").join(", ")}</td>
+                    <td className="rdp2-mono rdp2-ellipsis">{o.anywhere ? t("Anywhere") : o.sources.split(",").join(", ")}</td>
                     <td className="rdp2-hide-sm">{o.note ?? ""}</td>
                     <td>
-                      <Switch checked={o.enabled} aria-label={t("On")} onCheckedChange={(on) => void saveOpening(o, on)} />
+                      <Switch checked={o.enabled} aria-label={t("Opening {ports} on").replace("{ports}", `${ports(o)}/${o.protocol}`)} onCheckedChange={(on) => void saveOpening(o, on)} />
                     </td>
                     <td>
                       <RowActions label={t("Actions for port {port}").replace("{port}", ports(o))} menu={menu} />
@@ -268,33 +278,47 @@ export function Firewall(props: PageProps<unknown>) {
             {t("Block an address")}
           </Button>
         }
+        flush={r.blocked.length > 0}
       >
         {r.blocked.length === 0 ? (
           <EmptyState title={t("No blocked address")} />
         ) : (
-          <div className="rdp2-chips">
-            {r.blocked.map((b) => (
-              <span key={b.id} className="rdp2-chip" title={b.note ?? undefined}>
-                <span className="rdp2-mono">{b.cidr}</span>
-                <button
-                  type="button"
-                  aria-label={t("Unblock {cidr}").replace("{cidr}", b.cidr)}
-                  onClick={() => void call(() => props.api.delete(`/apps/firewall/blocked/${b.id}`))}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
+          <TableScroll>
+            <table className="rdp2-table">
+              <thead>
+                <tr>
+                  <th>{t("Address or network")}</th>
+                  <th>{t("Note")}</th>
+                  <th className="rdp2-right">
+                    <span className="rdp2-sr">{t("Actions")}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {paged.page.map((b) => (
+                  <tr key={b.id}>
+                    <td className="rdp2-mono">{b.cidr}</td>
+                    <td className="rdp2-muted">{b.note ?? ""}</td>
+                    <td>
+                      <RowActions label={t("Actions for {cidr}").replace("{cidr}", b.cidr)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={t("Unblock {cidr}").replace("{cidr}", b.cidr)}
+                          onClick={() => void call(() => props.api.delete(`/apps/firewall/blocked/${b.id}`), "Address unblocked: apply the rules.")}
+                        >
+                          {t("Unblock")}
+                        </Button>
+                      </RowActions>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
         )}
+        {r.blocked.length > 25 && <Pager total={r.blocked.length} at={paged.at} onPage={paged.set} t={t} />}
       </Section>
-
-      {!r.pending && !unsupported && (r.changed || !r.enabled) && (
-        <div className="rdp2-applybar">
-          <span className="rdp2-muted">{r.enabled ? t("The rules changed since they were applied.") : t("The firewall is off.")}</span>
-          <Button onClick={() => setApplying(true)}>{r.enabled ? t("Apply…") : t("Turn on…")}</Button>
-        </div>
-      )}
 
       {opening && (
         <OpeningDialog
@@ -344,7 +368,7 @@ function PortState(props: { t: (s: string) => string; p: Port; enabled: boolean 
     case "opened":
       return (
         <StatusBadge
-          tone="busy"
+          tone={p.openings.some((o) => o.anywhere) ? "bad" : "ok"}
           label={
             p.openings.some((o) => o.anywhere)
               ? t("Open to everyone")
@@ -370,14 +394,14 @@ function Pending(props: {
 }) {
   const { t, pending } = props;
   const [now, setNow] = useState(() => Date.now());
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"keep" | "revert" | null>(null);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
   const left = pending.deadline ? Math.max(0, Math.round((new Date(pending.deadline).getTime() - now) / 1000)) : 0;
-  const act = async (path: string, done: string) => {
-    setBusy(true);
+  const act = async (what: "keep" | "revert", path: string, done: string) => {
+    setBusy(what);
     props.onError(null);
     try {
       await props.api.post(path, { txid: pending.txid });
@@ -385,7 +409,7 @@ function Pending(props: {
     } catch (err) {
       props.onError(err);
     } finally {
-      setBusy(false);
+      setBusy(null);
       props.onDone();
     }
   };
@@ -396,25 +420,25 @@ function Pending(props: {
     }
   }, [left, props.onDone]);
   return (
-    <div className="rdp2-pending" role="status">
-      <div>
-        <strong>{t("Trying the new rules.")}</strong>{" "}
-        {left > 0
-          ? t("Unless you keep them, the server goes back to the previous rules in {s} s.").replace("{s}", String(left))
-          : t("Time is up: the server is going back to the previous rules.")}
-        <div className="rdp2-small">
-          {t("Before keeping them, check that you still reach the panel and SSH from a new connection (a private window, a new SSH session).")}
+    <Alert variant="warning" role="status">
+      <div className="rdp2-form">
+        <div>
+          <strong className="rdp2-strong">{t("Trying the new rules.")}</strong>{" "}
+          {left > 0
+            ? t("Unless you keep them, the server goes back to the previous rules in {s} s.").replace("{s}", String(left))
+            : t("Time is up: the server is going back to the previous rules.")}
+        </div>
+        <p>{t("Before keeping them, check that you still reach the panel and SSH from a new connection (a private window, a new SSH session).")}</p>
+        <div className="rdp2-row rdp2-wrap rdp2-end">
+          <Button variant="outline" disabled={busy !== null} onClick={() => void act("revert", "/apps/firewall/revert", "Previous rules restored.")}>
+            {busy === "revert" ? t("Going back…") : t("Go back now")}
+          </Button>
+          <Button disabled={busy !== null || left === 0} onClick={() => void act("keep", "/apps/firewall/keep", "Rules kept.")}>
+            {busy === "keep" ? t("Keeping…") : t("Keep these rules")}
+          </Button>
         </div>
       </div>
-      <div className="rdp2-row">
-        <Button variant="outline" disabled={busy} onClick={() => void act("/apps/firewall/revert", "Previous rules restored.")}>
-          {t("Go back now")}
-        </Button>
-        <Button disabled={busy || left === 0} onClick={() => void act("/apps/firewall/keep", "Rules kept.")}>
-          {t("Keep these rules")}
-        </Button>
-      </div>
-    </div>
+    </Alert>
   );
 }
 
@@ -460,7 +484,7 @@ function OpeningDialog(props: {
         }}
       >
         <Field label={t("Port or range")} help={t("5432, or 8000-8100")} error={fields.ports}>
-          <Input value={portsText} onChange={(e) => setPorts(e.target.value)} placeholder="5432" />
+          <Input autoFocus value={portsText} onChange={(e) => setPorts(e.target.value)} placeholder="5432" />
         </Field>
         <div className="rdp2-grid2">
           <Field label={t("Protocol")} error={fields.protocol}>
@@ -499,12 +523,12 @@ function OpeningDialog(props: {
         </Field>
         <p className="rdp2-small rdp2-muted">{t("SSH, 80 and 443 are always open: nothing to add for them. The change applies when you apply the rules.")}</p>
         <ErrorNote error={Object.keys(fields).length ? null : error} />
-        <div className="rdp2-row rdp2-end">
-          <Button type="button" variant="outline" onClick={props.onClose}>
+        <div className="rdp2-dialog-foot">
+          <Button type="button" variant="ghost" onClick={props.onClose}>
             {t("Cancel")}
           </Button>
           <Button type="submit" disabled={busy}>
-            {row ? t("Save") : t("Open the port")}
+            {busy ? t("Saving…") : row ? t("Save") : t("Open the port")}
           </Button>
         </div>
       </form>
@@ -538,18 +562,18 @@ function BlockDialog(props: { t: (s: string) => string; api: PageProps<unknown>[
         }}
       >
         <Field label={t("Address or network")} help={t("198.51.100.7, 203.0.113.0/24 or 2001:db8::/32")} error={fields.cidr}>
-          <Input value={cidr} onChange={(e) => setCidr(e.target.value)} className="rdp2-mono" />
+          <Input autoFocus value={cidr} onChange={(e) => setCidr(e.target.value)} className="rdp2-mono" />
         </Field>
         <Field label={t("Note")} error={fields.note}>
           <Input value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
         <ErrorNote error={Object.keys(fields).length ? null : error} />
-        <div className="rdp2-row rdp2-end">
-          <Button type="button" variant="outline" onClick={props.onClose}>
+        <div className="rdp2-dialog-foot">
+          <Button type="button" variant="ghost" onClick={props.onClose}>
             {t("Cancel")}
           </Button>
           <Button type="submit" disabled={busy}>
-            {t("Block")}
+            {busy ? t("Blocking…") : t("Block")}
           </Button>
         </div>
       </form>
@@ -562,9 +586,10 @@ function ApplyDialog(props: PageProps<unknown> & { enabled: boolean; onClose: ()
   const t = props.t;
   const preview = useAdminQuery<Preview>(props, "/apps/firewall/preview");
   const [busy, setBusy] = useState(false);
+  const [ruleset, setRuleset] = useState(false);
   const [error, setError] = useState<unknown>(null);
   return (
-    <Dialog open onClose={props.onClose} title={props.enabled ? t("Apply the rules?") : t("Turn the firewall on?")}>
+    <Dialog open onClose={props.onClose} title={props.enabled ? t("Apply the rules?") : t("Turn the firewall on?")} className={ruleset ? "rdp2-wide" : undefined}>
       <div className="rdp2-form">
         {preview.isLoading && <Loading />}
         <ErrorNote error={preview.error ?? error} />
@@ -576,19 +601,21 @@ function ApplyDialog(props: PageProps<unknown> & { enabled: boolean; onClose: ()
                 {preview.data.closes.map((p) => `${p.port}/${p.protocol} (${t(p.owner)})`).join(", ")}
               </Alert>
             ) : (
-              <p className="rdp2-small">{t("No listening port closes: only SSH, the web and the opened ports stay reachable.")}</p>
+              <p>{t("No listening port closes: only SSH, the web and the opened ports stay reachable.")}</p>
             )}
-            <p className="rdp2-small">
+            <p>
               {t("The server tries the new rules and goes back to the previous ones by itself in two minutes unless you keep them: check from a new connection, then press Keep.")}
             </p>
-            <details>
-              <summary className="rdp2-small">{t("The table loaded on the server")}</summary>
-              <CodeBlock code={preview.data.ruleset} label={t("Ruleset")} />
-            </details>
+            <div className="rdp2-row">
+              <Button type="button" size="sm" variant="outline" onClick={() => setRuleset(!ruleset)}>
+                {ruleset ? t("Hide the table") : t("Show the table loaded on the server")}
+              </Button>
+            </div>
+            {ruleset && <CodeBlock code={preview.data.ruleset} label={t("Ruleset")} />}
           </>
         )}
-        <div className="rdp2-row rdp2-end">
-          <Button type="button" variant="outline" onClick={props.onClose}>
+        <div className="rdp2-dialog-foot">
+          <Button type="button" variant="ghost" autoFocus onClick={props.onClose}>
             {t("Cancel")}
           </Button>
           <Button
@@ -606,7 +633,7 @@ function ApplyDialog(props: PageProps<unknown> & { enabled: boolean; onClose: ()
               }
             }}
           >
-            {props.enabled ? t("Apply") : t("Turn on")}
+            {busy ? t("Applying…") : props.enabled ? t("Apply") : t("Turn on")}
           </Button>
         </div>
       </div>

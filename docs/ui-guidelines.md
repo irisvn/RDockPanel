@@ -164,6 +164,7 @@ lines up with `sm` buttons. Its `aria-label` names the target ("Logs of demo_web
 | Action (pull, backup, prune) | Done | Queued, Running | Failed | — |
 | Container | Running | Restarting | Dead | Exited, Paused, Created |
 | Tunnel, Traefik, health | Connected, Healthy | Starting | Unhealthy, Not connected | Off |
+| Firewall port | Open for (its sources) | — | Open to everyone | Closed, Always open |
 
 Raw values (`exited (0)`) stay available in a tooltip or a detail view, not as the badge.
 

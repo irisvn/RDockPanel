@@ -3,8 +3,8 @@
 // with its placeholders. Used by a service's Maintenance tab and Settings.
 import { useEffect, useRef, useState } from "react";
 import { type PageProps } from "@rustcms/admin-sdk";
-import { Button, Textarea } from "@rustcms/admin-sdk/ui";
-import { adminHref } from "../lib/ui";
+import { Button, Skeleton, Textarea } from "@rustcms/admin-sdk/ui";
+import { adminHref, useAsk } from "../lib/ui";
 
 /** What a preview renders (nothing saved). */
 export type PreviewBody = {
@@ -50,7 +50,7 @@ export function Preview(props: PageProps<unknown> & { body: PreviewBody; label: 
         <span>{props.label}</span>
         {failed && <span className="rdp2-error">{props.t("The preview could not be made.")}</span>}
       </div>
-      {src ? <iframe sandbox="" src={src} title={props.label} /> : <div className="rdp2-preview-empty" />}
+      {src ? <iframe sandbox="" src={src} title={props.label} /> : <Skeleton className="rdp2-preview-empty" />}
     </div>
   );
 }
@@ -67,7 +67,16 @@ export function HtmlEditor(props: {
   error?: string[];
 }) {
   const { t } = props;
+  const ask = useAsk();
   const area = useRef<HTMLTextAreaElement>(null);
+  // What was written is replaced: asked first.
+  const start = async () => {
+    if (props.value.trim() && props.value !== props.starter) {
+      const ok = await ask({ title: t("Start from the default page?"), body: t("The HTML written here is replaced."), action: t("Replace it"), destructive: true });
+      if (!ok) return;
+    }
+    props.onChange(props.starter);
+  };
   const insert = (name: string) => {
     const text = `{{${name}}}`;
     const el = area.current;
@@ -82,22 +91,24 @@ export function HtmlEditor(props: {
   return (
     <div className="rdp2-field">
       <div className="rdp2-row rdp2-between">
-        <span className="rdp2-field-label">HTML</span>
+        <label className="rdp2-field-label" htmlFor="rdp2-maintenance-html">
+          {t("HTML")}
+        </label>
         {!props.disabled && (
-          <Button type="button" variant="outline" size="sm" onClick={() => props.onChange(props.starter)}>
+          <Button type="button" variant="outline" size="sm" onClick={() => void start()}>
             {t("Start from the default page")}
           </Button>
         )}
       </div>
       <Textarea
         ref={area}
+        id="rdp2-maintenance-html"
         className="rdp2-mono"
         rows={16}
         spellCheck={false}
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         disabled={props.disabled}
-        aria-label="HTML"
       />
       {props.error && <p className="rdp2-field-error">{props.error.join(", ")}</p>}
       <p className="rdp2-field-help">
@@ -105,9 +116,9 @@ export function HtmlEditor(props: {
       </p>
       <div className="rdp2-chips">
         {props.placeholders.map((name) => (
-          <button key={name} type="button" className="rdp2-insert rdp2-mono" disabled={props.disabled} onClick={() => insert(name)}>
+          <Button key={name} type="button" size="sm" variant="outline" className="rdp2-mono" disabled={props.disabled} onClick={() => insert(name)}>
             {`{{${name}}}`}
-          </button>
+          </Button>
         ))}
       </div>
     </div>

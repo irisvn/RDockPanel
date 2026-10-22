@@ -5,8 +5,13 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
 
 ## 0.9.1 — 2026-10-22
 
+- The memory warning is drawn like the rest of the panel, in light and dark.
 - The memory estimate now recognizes an image written with or without `:latest` as the same one.
-- The memory warning looks like its design: lighter colors, smaller text, bullets for the reasons.
+- Firewall: blocked addresses are a table with Unblock; Apply moves to the page header; the change
+  being tried shows inside the Firewall section; buttons say when they are working.
+- Maintenance: turning it on asks first; replacing your HTML with the default page asks first; a
+  service's logo shows at its size again; Save sits at the bottom of the section.
+- Rate limit: Save cannot be pressed twice; the help text moves under the limit.
 
 ## 0.9.0 — 2026-10-22
 

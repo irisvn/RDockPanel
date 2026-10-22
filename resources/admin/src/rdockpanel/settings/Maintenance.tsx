@@ -53,12 +53,14 @@ export function MaintenanceSettings(props: PageProps<unknown>) {
               <Input value={contactValue} onChange={(e) => setContact(e.target.value)} placeholder="support@example.com" />
             </Field>
             <HtmlEditor t={t} value={html} onChange={setTemplate} starter={c.starter} placeholders={c.placeholders} error={fields.template} />
-            {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
-            <div className="rdp2-row rdp2-end">
-              <Button type="submit" disabled={busy}>{t("Save")}</Button>
-            </div>
           </div>
           <Preview {...props} label={t("Preview")} body={{ title: "", subtitle: "", contact: contactValue, html }} />
+        </div>
+        {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+        <div className="rdp2-row rdp2-end">
+          <Button type="submit" disabled={busy}>
+            {busy ? t("Saving…") : t("Save")}
+          </Button>
         </div>
       </form>
     </Section>
