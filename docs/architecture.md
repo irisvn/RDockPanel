@@ -525,7 +525,7 @@ edited as `.env` text (`services/dotenv.rs`): `PUT /apps/services/{id}/env` seal
 clear needs `services.secrets` and is audited.
 
 The sidebar: Dashboard (the panel's home, `AdminProvider::home`, RustCMS 0.5.1), Domains, Firewall
-(`system.manage`, [firewall.md](firewall.md)), Actions, Settings (its tabs: Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Git,
+(`system.manage`, [firewall.md](firewall.md)), Actions, Settings (its tabs: Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Maintenance page, Git,
 Backups, Notifications, API tokens, each by its permission), then the Docker pages, then RustCMS's System. The resources (projects, services,
 domains, …) have no sidebar entry (`navigation(false)`): their routes and API stay, as the React pages
 write through them, and an administrator can still open `/admin/r/<slug>`. The panel is light by default,

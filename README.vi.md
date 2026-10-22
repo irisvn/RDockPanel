@@ -25,7 +25,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Trang chủ** ở địa chỉ của panel (`/`): giới thiệu RDockPanel, ảnh giao diện, lệnh cài đặt và link GitHub, bằng tiếng Anh hoặc tiếng Việt, không có thông tin nào của máy chủ. Tắt được trong Settings → Panel (khi đó `/` mở trang đăng nhập).
 - **Trang Domains** liệt kê domain của mọi service, nơi chúng trỏ tới và domain nào đang được phục vụ.
 - Domain, redirect, giới hạn request, basic auth và maintenance **áp dụng ngay khi lưu** (không cần Deploy, container của khách không bị khởi động lại); image, env, port, mount, tài nguyên… mới cần Deploy.
-- **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** có các tab Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Git, Backups, Notifications và API tokens; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
+- **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** có các tab Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Trang bảo trì, Git, Backups, Notifications và API tokens; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
 - Mọi trang theo chung một bộ quy tắc thiết kế ([docs/ui-guidelines.md](docs/ui-guidelines.md)): nút cùng cỡ, thao tác phụ của từng dòng gom vào menu ⋯, trạng thái cùng chữ và màu, hộp thoại của panel thay cho của trình duyệt, bảng dùng được trên điện thoại.
 
 **Server và Docker**

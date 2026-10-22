@@ -23,9 +23,9 @@ feature is free: no project limits, no paid tiers.
   Overview, Credentials (databases), Backups (databases and services with volumes), Deployments,
   Environment, Domains, Redirects, Security, Maintenance, Scripts, Source, Storage, Advanced.
 - **Actions** lists deployments, backups and Docker actions; **Settings** has the tabs Panel,
-  Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Git, Backups, Notifications and
-  API tokens; **⌘K** finds a project or a service. Light by default, with a Light / Dark /
-  System switch per user; in English and Vietnamese.
+  Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Maintenance page, Git, Backups,
+  Notifications and API tokens; **⌘K** finds a project or a service. Light by default, with a
+  Light / Dark / System switch per user; in English and Vietnamese.
 - Every page follows one set of design rules ([docs/ui-guidelines.md](docs/ui-guidelines.md)): the
   same button sizes, extra row actions in a ⋯ menu, the same status words and colors, the panel's own dialogs,
   tables that work on a phone.

@@ -24,7 +24,7 @@ tabs), `server.view` (its server metrics only) or `apps.access` (a member's proj
 `projects.view_any` or `apps.access` (a member's projects' actions); Domains
 `service_domains.view_any` or `apps.access`; Firewall `system.manage`; Settings any of `storage_providers.view_any` (its
 Backups tab), `notification_channels.view_any` (Notifications), `system.manage` (Panel, Version,
-Traefik, Certificates, Cloudflare Tunnel, Branding, Git), `projects.view_any` or `apps.access`:
+Traefik, Certificates, Cloudflare Tunnel, Branding, Maintenance page, Git), `projects.view_any` or `apps.access`:
 each tab shows with its own, and API tokens (each user's own) needs none. The resources behind them have no
 sidebar entry, so give a role that manages services `projects.view_any` as well (their routes,
 `/admin/r/<slug>`, still answer to the resource's own permissions).
