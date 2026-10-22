@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use crate::jobs::run_deployment::RunDeployment;
 use crate::models::project;
+use crate::policies::permissions;
 use crate::services::creation_service;
 use crate::services::deploy_rules_service::config;
 use crate::services::deployment_service::{self, Trigger};
@@ -214,11 +215,18 @@ async fn apply(
     // or their role's there.
     use crate::services::access_service;
     access_service::project(app.db(), principal, project_id, "services.create").await?;
-    if deploy && !access_service::can(app.db(), principal, project_id, "services.deploy").await? {
+    if deploy
+        && !access_service::can(
+            app.db(),
+            principal,
+            project_id,
+            permissions::SERVICES_DEPLOY,
+        )
+        .await?
+    {
         return Err(AppError::Forbidden);
     }
-    let compose_allowed =
-        principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION);
+    let compose_allowed = principal.can(permissions::SYSTEM_MANAGE);
     let txn = rustcms::db::begin_write(app.db()).await?;
     let project = project::Entity::find_by_id(project_id)
         .one(&txn)
@@ -303,7 +311,7 @@ async fn apply(
             "project": project.name,
             "services": services.iter().map(|s| json!({ "name": s.name, "kind": s.kind })).collect::<Vec<_>>(),
             "warnings": warnings,
-            "capacity": crate::services::capacity_service::json(&report, principal.can("server.view")),
+            "capacity": crate::services::capacity_service::json(&report, principal.can(permissions::SERVER_VIEW)),
         })));
     }
     let mut created = vec![];

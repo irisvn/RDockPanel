@@ -17,14 +17,12 @@ use serde_json::Value;
 
 use crate::jobs::pull_image::PullImage;
 use crate::models::action;
+use crate::policies::permissions;
 use crate::services::action_service::{self, Initiator};
 use crate::services::docker_service::{
     ContainerAction, Docker, LogQuery, Scope, TermSize, session_token,
 };
 use crate::services::live_service::Live;
-
-/// Sees and touches the panel's own containers, volumes and networks.
-pub const SYSTEM_PERMISSION: &str = "system.manage";
 
 /// Lines a log request returns at most, and its bytes (one line is cut to
 /// `MAX_LOG_LINE_BYTES`).
@@ -46,7 +44,7 @@ pub fn scope(auth: &Auth) -> Scope {
 }
 
 pub fn scope_of(principal: &Principal) -> Scope {
-    if principal.can(SYSTEM_PERMISSION) {
+    if principal.can(permissions::SYSTEM_MANAGE) {
         Scope::System
     } else {
         Scope::User
@@ -286,7 +284,7 @@ pub async fn exec(
             let token = session_token();
             let mut log = ExecLog::start(db, &by, &id, &token).await;
             log.audit(&by, &id).await;
-            let allowed = |principal: &Principal| principal.can("docker.exec");
+            let allowed = |principal: &Principal| principal.can(permissions::DOCKER_EXEC);
             log.error = terminal(&shell, &id, size, &token, &mut socket, &allowed)
                 .await
                 .err();
@@ -727,8 +725,8 @@ fn valid_image_reference(image: &str) -> bool {
 
 /// The permissions a service's logs, and its terminal, need: the service's
 /// own (a role's, or its project role's), or Docker's.
-const SERVICE_LOGS: &[&str] = &["services.logs", "docker.logs"];
-const SERVICE_EXEC: &[&str] = &["services.exec", "docker.exec"];
+const SERVICE_LOGS: &[&str] = &[permissions::SERVICES_LOGS, permissions::DOCKER_LOGS];
+const SERVICE_EXEC: &[&str] = &[permissions::SERVICES_EXEC, permissions::DOCKER_EXEC];
 
 /// The service `id`, for `permissions`, as the panel deployed it: its Swarm
 /// service's name, only when that service is the panel's own deployment of

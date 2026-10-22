@@ -5,6 +5,7 @@
 //! `resources/admin/js/rdockpanel/dashboard.js`. It reads
 //! `/admin/api/x/apps/...` and writes through the resources' API.
 
+use crate::policies::permissions;
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
 use rustcms::{AppResult, async_trait};
 use serde_json::{Value, json};
@@ -20,7 +21,11 @@ impl PanelPage for DashboardPage {
             .icon("dashboard")
             // The server's metrics with `server.view`; the projects a role
             // sees, or a member's own (`apps.access`).
-            .permission_any(["projects.view_any", "server.view", "apps.access"])
+            .permission_any([
+                "projects.view_any",
+                permissions::SERVER_VIEW,
+                permissions::APPS_ACCESS,
+            ])
     }
 
     fn view() -> PageView {

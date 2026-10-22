@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use rustcms::admin::*;
 use rustcms::{AppResult, ValidationErrors, async_trait};
-use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::DatabaseTransaction;
 
-use crate::admin::{int, text};
-use crate::models::{database_backup, storage_provider};
+use crate::admin::text;
+use crate::models::storage_provider;
+use crate::policies::storage_provider_policy::StorageProviderPolicy;
 use crate::services::storage_service::valid_endpoint;
 
 pub struct StorageProviderResource;
@@ -158,33 +159,5 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&storage_provider::Model>) -> Ap
         Ok(())
     } else {
         Err(errors.into())
-    }
-}
-
-/// The permissions, and no delete while a backup uses the provider.
-struct StorageProviderPolicy;
-
-#[async_trait]
-impl Policy for StorageProviderPolicy {
-    async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
-        if !ctx.can(&format!("storage_providers.{ability}")) {
-            return false;
-        }
-        match (ability, record.and_then(|r| int(r, "id"))) {
-            ("delete", Some(id)) => database_backup::Entity::find()
-                .filter(database_backup::Column::StorageProviderId.eq(id))
-                .count(&ctx.conn())
-                .await
-                .is_ok_and(|n| n == 0),
-            _ => true,
-        }
-    }
-
-    async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {
-        ctx.can(&format!("storage_providers.{ability}"))
-    }
-
-    fn view_depends_on_record(&self) -> bool {
-        false
     }
 }

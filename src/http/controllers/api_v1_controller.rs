@@ -10,6 +10,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, TransactionTrai
 use serde_json::Value;
 
 use crate::models::{deployment, project, service, service_domain};
+use crate::policies::permissions;
 use crate::services::api_token_service::{ApiCaller, caller};
 use crate::services::deployment_service::{self, Trigger, summary};
 
@@ -199,10 +200,13 @@ async fn queue(
         .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
-    if !who.can(&txn, row.project_id, "services.deploy").await? {
+    if !who
+        .can(&txn, row.project_id, permissions::SERVICES_DEPLOY)
+        .await?
+    {
         return Err(AppError::NotFound);
     }
-    if row.kind == "compose" || crate::admin::resources::service_resource::privileged(row) {
+    if row.kind == "compose" || crate::models::service::privileged(row) {
         crate::http::controllers::apps_controller::forbid_privileged_of(&who.principal, row)?;
     }
     let user = who.principal.id.parse().ok();
@@ -226,7 +230,7 @@ pub async fn deploy(
     Path(id): Path<String>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let who = caller(&app, &auth).await?;
-    let (row, _) = find(&app, &who, &id, "services.deploy").await?;
+    let (row, _) = find(&app, &who, &id, permissions::SERVICES_DEPLOY).await?;
     let queued = queue(&app, &who, &row, Trigger::Deploy).await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "deployment": queued }))))
 }
@@ -239,7 +243,7 @@ pub async fn restart(
     Path(id): Path<String>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let who = caller(&app, &auth).await?;
-    let (row, _) = find(&app, &who, &id, "services.deploy").await?;
+    let (row, _) = find(&app, &who, &id, permissions::SERVICES_DEPLOY).await?;
     let queued = queue(&app, &who, &row, Trigger::Restart).await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "deployment": queued }))))
 }
@@ -275,13 +279,7 @@ pub async fn env(
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     let who = caller(&app, &auth).await?;
-    let (row, _) = find(
-        &app,
-        &who,
-        &id,
-        crate::http::controllers::apps_controller::SECRETS_PERMISSION,
-    )
-    .await?;
+    let (row, _) = find(&app, &who, &id, permissions::SERVICES_SECRETS).await?;
     let env =
         crate::services::deployment_service::service_env(&row, app.keyring()).map_err(|_| {
             AppError::BadRequest(

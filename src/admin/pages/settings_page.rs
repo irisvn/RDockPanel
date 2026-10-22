@@ -2,6 +2,7 @@
 //! providers for backups (notifications next). A React page of the same
 //! bundle as the dashboard: `resources/admin/src/rdockpanel/settings/`.
 
+use crate::policies::permissions;
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
 use rustcms::{AppResult, async_trait};
 use serde_json::{Value, json};
@@ -19,10 +20,10 @@ impl PanelPage for SettingsPage {
             .permission_any([
                 "storage_providers.view_any",
                 "notification_channels.view_any",
-                "system.manage",
+                permissions::SYSTEM_MANAGE,
                 // Their own API tokens (Settings → API tokens).
                 "projects.view_any",
-                "apps.access",
+                permissions::APPS_ACCESS,
             ])
     }
 

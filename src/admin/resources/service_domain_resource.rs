@@ -9,6 +9,8 @@ use serde_json::Value;
 
 use crate::admin::{int, is_set, text};
 use crate::models::service_domain;
+use crate::policies::domain_policy::DomainPolicy;
+use crate::policies::permissions;
 use crate::services::deploy_rules_service::{
     valid_domain_host, valid_middleware, valid_port, valid_route_path,
 };
@@ -80,7 +82,7 @@ impl Resource for ServiceDomainResource {
         ctx: &Ctx,
     ) -> sea_orm::Select<<Self as Resource>::Entity> {
         use sea_orm::{ColumnTrait, QueryFilter};
-        match crate::admin::resources::guard::members_only(ctx, "service_domains") {
+        match crate::policies::members_only(ctx, "service_domains") {
             Some(user) => query.filter(
                 crate::models::service_domain::Column::ServiceId
                     .in_subquery(crate::services::access_service::member_services(user)),
@@ -106,7 +108,7 @@ impl Resource for ServiceDomainResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(ctx, txn, &data, None, "service_domains").await?;
+        crate::policies::write(ctx, txn, &data, None, "service_domains").await?;
         let data = check(ctx, data)?;
         check_container(ctx, txn, &data, None).await?;
         check_certificate(ctx, txn, &data, None).await?;
@@ -120,19 +122,10 @@ impl Resource for ServiceDomainResource {
         data: Data,
     ) -> AppResult<Data> {
         // A wildcard stays its administrators' (whatever is changed).
-        if record.host.starts_with("*.")
-            && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
-        {
+        if record.host.starts_with("*.") && !ctx.can(permissions::SYSTEM_MANAGE) {
             return Err(rustcms::AppError::Forbidden);
         }
-        crate::admin::resources::guard::write(
-            ctx,
-            txn,
-            &data,
-            Some(record.service_id),
-            "service_domains",
-        )
-        .await?;
+        crate::policies::write(ctx, txn, &data, Some(record.service_id), "service_domains").await?;
         let data = check(ctx, data)?;
         check_container(ctx, txn, &data, Some(record)).await?;
         check_certificate(ctx, txn, &data, Some(record)).await?;
@@ -186,7 +179,7 @@ async fn check_certificate(
     data: &Data,
     record: Option<&service_domain::Model>,
 ) -> AppResult<()> {
-    let admin = ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION);
+    let admin = ctx.can(permissions::SYSTEM_MANAGE);
     let resolver = if data.contains_key("cert_resolver_id") {
         int(data, "cert_resolver_id")
     } else {
@@ -280,7 +273,7 @@ fn check(ctx: &Ctx, mut data: Data) -> AppResult<Data> {
     let mut errors = ValidationErrors::new();
     // A wildcard takes every name under it: the panel's administrators'.
     if text(&data, "host").is_some_and(|h| h.starts_with("*."))
-        && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+        && !ctx.can(permissions::SYSTEM_MANAGE)
     {
         errors.add("host", ctx.t("a wildcard needs system.manage"));
     }
@@ -319,38 +312,5 @@ fn check(ctx: &Ctx, mut data: Data) -> AppResult<Data> {
         Ok(data)
     } else {
         Err(errors.into())
-    }
-}
-
-/// The service's records' policy, and a wildcard changed or removed by the
-/// panel's administrators only.
-struct DomainPolicy;
-
-#[async_trait]
-impl Policy for DomainPolicy {
-    async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
-        let base = crate::admin::resources::guard::ChildPolicy("service_domains");
-        if !base.allows(ctx, ability, record).await {
-            return false;
-        }
-        // A wildcard, or a domain with its own certificate resolver: changed
-        // or removed by the panel's administrators only.
-        matches!(ability, "view" | "view_any")
-            || !(record
-                .and_then(|r| text(r, "host"))
-                .is_some_and(|h| h.starts_with("*."))
-                || record
-                    .is_some_and(|r| is_set(r, "cert_resolver_id") || is_set(r, "certificate_id")))
-            || ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
-    }
-
-    async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {
-        crate::admin::resources::guard::ChildPolicy("service_domains")
-            .admits(ctx, ability)
-            .await
-    }
-
-    fn view_depends_on_record(&self) -> bool {
-        false
     }
 }

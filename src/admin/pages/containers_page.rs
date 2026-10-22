@@ -2,6 +2,7 @@
 //! `resources/admin/src/rdockpanel/docker/Containers.tsx` (React), which calls the routes of
 //! `routes/admin.rs`.
 
+use crate::policies::permissions;
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
 use rustcms::{AppResult, async_trait};
 use serde_json::{Value, json};
@@ -17,7 +18,7 @@ impl PanelPage for ContainersPage {
             .icon("container")
             .group("Docker")
             .sort(10)
-            .permission("docker.view")
+            .permission(permissions::DOCKER_VIEW)
     }
 
     fn view() -> PageView {
@@ -27,8 +28,8 @@ impl PanelPage for ContainersPage {
     /// What the script may offer (the routes check again).
     async fn data(ctx: &Ctx) -> AppResult<Value> {
         Ok(
-            json!({ "can": { "docker.manage": ctx.can("docker.manage"), "docker.logs": ctx.can("docker.logs"),
-            "docker.exec": ctx.can("docker.exec"), "system.manage": ctx.can("system.manage") } }),
+            json!({ "can": { permissions::DOCKER_MANAGE: ctx.can(permissions::DOCKER_MANAGE), permissions::DOCKER_LOGS: ctx.can(permissions::DOCKER_LOGS),
+            permissions::DOCKER_EXEC: ctx.can(permissions::DOCKER_EXEC), permissions::SYSTEM_MANAGE: ctx.can(permissions::SYSTEM_MANAGE) } }),
         )
     }
 }

@@ -51,7 +51,7 @@ impl Resource for ServiceScriptResource {
     }
 
     fn policy() -> std::sync::Arc<dyn Policy> {
-        std::sync::Arc::new(crate::admin::resources::guard::ChildPolicy(
+        std::sync::Arc::new(crate::policies::child_policy::ChildPolicy(
             "service_scripts",
         ))
     }
@@ -63,7 +63,7 @@ impl Resource for ServiceScriptResource {
         ctx: &Ctx,
     ) -> sea_orm::Select<<Self as Resource>::Entity> {
         use sea_orm::{ColumnTrait, QueryFilter};
-        match crate::admin::resources::guard::members_only(ctx, "service_scripts") {
+        match crate::policies::members_only(ctx, "service_scripts") {
             Some(user) => query.filter(
                 crate::models::service_script::Column::ServiceId
                     .in_subquery(crate::services::access_service::member_services(user)),
@@ -86,7 +86,7 @@ impl Resource for ServiceScriptResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(ctx, txn, &data, None, "service_scripts").await?;
+        crate::policies::write(ctx, txn, &data, None, "service_scripts").await?;
         check(ctx, &data)?;
         Ok(data)
     }
@@ -97,14 +97,7 @@ impl Resource for ServiceScriptResource {
         record: &service_script::Model,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(
-            ctx,
-            txn,
-            &data,
-            Some(record.service_id),
-            "service_scripts",
-        )
-        .await?;
+        crate::policies::write(ctx, txn, &data, Some(record.service_id), "service_scripts").await?;
         check(ctx, &data)?;
         Ok(data)
     }

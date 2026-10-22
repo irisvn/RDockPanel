@@ -14,9 +14,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::models::project_member;
+use crate::policies::permissions::PROJECTS_MEMBERS;
 use crate::services::access_service::{self, ROLES};
-
-const MEMBERS: &str = "projects.members";
 
 fn audit_context(auth: &Auth, request: RequestMeta) -> AuditContext {
     AuditContext::new(AuditActor::user(auth.principal()), request)
@@ -55,7 +54,7 @@ pub async fn index(
     auth: Auth,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    access_service::project(app.db(), auth.principal(), id, MEMBERS).await?;
+    access_service::project(app.db(), auth.principal(), id, PROJECTS_MEMBERS).await?;
     Ok(Json(json!({
         "members": shown(app.db(), id).await?,
         "roles": ROLES,
@@ -111,7 +110,7 @@ pub async fn add(
     Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
     // Allowed first, then the body read (a refusal says nothing of it).
-    access_service::project(app.db(), auth.principal(), id, MEMBERS).await?;
+    access_service::project(app.db(), auth.principal(), id, PROJECTS_MEMBERS).await?;
     let body: NewMember = parse(body)?;
     let role = body.role.trim();
     check_role(role)?;
@@ -125,7 +124,7 @@ pub async fn add(
         .ok_or(AppError::NotFound)?;
     // Again under the project's lock: a change of the caller's own role
     // committed meanwhile counts.
-    if !access_service::can(&txn, auth.principal(), id, MEMBERS).await? {
+    if !access_service::can(&txn, auth.principal(), id, PROJECTS_MEMBERS).await? {
         return Err(AppError::Forbidden);
     }
     let user = rustcms::models::user::Entity::find()
@@ -173,7 +172,7 @@ pub struct Role {
 /// The project keeps an admin: its last one is changed or removed only by
 /// whoever manages every project's members (else nobody of the project could).
 fn last_admin_guard(auth: &Auth, was_admin: bool, others: u64) -> AppResult<()> {
-    if was_admin && others == 0 && !auth.principal().can(MEMBERS) {
+    if was_admin && others == 0 && !auth.principal().can(PROJECTS_MEMBERS) {
         return Err(ValidationErrors::field("role", "the project keeps one admin at least").into());
     }
     Ok(())
@@ -186,7 +185,7 @@ pub async fn update(
     Path((id, user)): Path<(i64, i64)>,
     Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
-    access_service::project(app.db(), auth.principal(), id, MEMBERS).await?;
+    access_service::project(app.db(), auth.principal(), id, PROJECTS_MEMBERS).await?;
     let body: Role = parse(body)?;
     let role = body.role.trim();
     check_role(role)?;
@@ -198,7 +197,7 @@ pub async fn update(
         .ok_or(AppError::NotFound)?;
     // Again under the project's lock: a change of the caller's own role
     // committed meanwhile counts.
-    if !access_service::can(&txn, auth.principal(), id, MEMBERS).await? {
+    if !access_service::can(&txn, auth.principal(), id, PROJECTS_MEMBERS).await? {
         return Err(AppError::Forbidden);
     }
     let row = project_member::Entity::find()
@@ -233,7 +232,7 @@ pub async fn remove(
     request: RequestMeta,
     Path((id, user)): Path<(i64, i64)>,
 ) -> AppResult<Json<Value>> {
-    access_service::project(app.db(), auth.principal(), id, MEMBERS).await?;
+    access_service::project(app.db(), auth.principal(), id, PROJECTS_MEMBERS).await?;
     let txn = app.db().begin().await?;
     crate::models::project::Entity::find_by_id(id)
         .lock_exclusive()
@@ -242,7 +241,7 @@ pub async fn remove(
         .ok_or(AppError::NotFound)?;
     // Again under the project's lock: a change of the caller's own role
     // committed meanwhile counts.
-    if !access_service::can(&txn, auth.principal(), id, MEMBERS).await? {
+    if !access_service::can(&txn, auth.principal(), id, PROJECTS_MEMBERS).await? {
         return Err(AppError::Forbidden);
     }
     let row = project_member::Entity::find()

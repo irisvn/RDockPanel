@@ -12,7 +12,9 @@ use sea_orm::{DatabaseTransaction, EntityTrait, QuerySelect};
 use crate::admin::{int, is_set, text};
 use crate::jobs::publish_routes::PublishRoutes;
 use crate::jobs::run_deployment::RunDeployment;
-use crate::models::service::{self, NEW};
+use crate::models::service::{self, NEW, privileged};
+use crate::policies::permissions;
+use crate::policies::service_policy::ServicePolicy;
 use crate::services::build_service::{inside, valid_git_url, valid_ref};
 use crate::services::deploy_rules_service::{valid_image_reference, valid_name};
 use crate::services::deploy_service::{command_args, valid_env_name};
@@ -250,7 +252,7 @@ impl Resource for ServiceResource {
         ctx: &Ctx,
     ) -> sea_orm::Select<<Self as Resource>::Entity> {
         use sea_orm::{ColumnTrait, QueryFilter};
-        match crate::admin::resources::guard::members_only(ctx, "services") {
+        match crate::policies::members_only(ctx, "services") {
             Some(user) => query.filter(
                 crate::models::service::Column::ProjectId
                     .in_subquery(crate::services::access_service::member_projects(user)),
@@ -298,8 +300,7 @@ impl Resource for ServiceResource {
             .ok_or(rustcms::AppError::NotFound)?;
         // A Compose file runs anything on the host, as a service with added
         // capabilities or sysctls does: its administrators only.
-        if (record.kind == "compose" || privileged(&record))
-            && !ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+        if (record.kind == "compose" || privileged(&record)) && !ctx.can(permissions::SYSTEM_MANAGE)
         {
             return Err(rustcms::AppError::Forbidden);
         }
@@ -399,23 +400,6 @@ async fn check_git_provider(
     Ok(())
 }
 
-/// Whether a service runs with added capabilities or sysctls.
-pub(crate) fn privileged(service: &service::Model) -> bool {
-    service.kind == "compose"
-        || service
-            .cap_add
-            .as_deref()
-            .is_some_and(|c| !c.trim().is_empty())
-        || service
-            .sysctls
-            .as_deref()
-            .is_some_and(|s| !s.trim().is_empty())
-        || service
-            .groups
-            .as_deref()
-            .is_some_and(|g| !g.trim().is_empty())
-}
-
 /// The image as Docker takes it (no surrounding spaces); exempt addresses
 /// canonical, one a line (refused ones left as given: [`check`] says why).
 fn normalize(mut data: Data) -> Data {
@@ -484,7 +468,7 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
         after("source", record.map(|r| r.source.as_str())).unwrap_or_else(|| "image".to_owned());
     // Capabilities and sysctls: added ones reach the host's kernel, for the
     // panel's administrators only (dropping is anyone's).
-    let system = ctx.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION);
+    let system = ctx.can(permissions::SYSTEM_MANAGE);
     for field in ["cap_add", "cap_drop"] {
         if let Some(caps) = text(data, field) {
             if !crate::services::deploy_service::valid_capabilities(caps) {
@@ -719,40 +703,4 @@ fn deployment_action(name: &'static str, trigger: Trigger, label: &str) -> Actio
     })
     .label(label)
     .ability("deploy")
-}
-
-/// The permissions, and no delete once deployed (Destroy first).
-struct ServicePolicy;
-
-#[async_trait]
-impl Policy for ServicePolicy {
-    async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
-        let permission = format!("services.{ability}");
-        let allowed = match record {
-            Some(_) => crate::admin::resources::guard::may(ctx, &permission, record).await,
-            None => crate::admin::resources::guard::admits(ctx, &permission).await,
-        };
-        if !allowed {
-            return false;
-        }
-        // A privileged service (added capabilities, sysctls or groups):
-        // acted on by the panel's administrators only.
-        if !matches!(ability, "view" | "view_any")
-            && let Some(id) = record.and_then(|r| int(r, "id"))
-            && !crate::admin::resources::guard::parent_ok(ctx, &ctx.conn(), id).await
-        {
-            return false;
-        }
-        // Deployed, deploying, or left by a failed first run: Destroy first.
-        !(ability == "delete"
-            && record.is_some_and(|r| r.get("status").and_then(|s| s.as_str()) != Some(NEW)))
-    }
-
-    async fn admits(&self, ctx: &Ctx, ability: &str) -> bool {
-        crate::admin::resources::guard::admits(ctx, &format!("services.{ability}")).await
-    }
-
-    fn view_depends_on_record(&self) -> bool {
-        false
-    }
 }

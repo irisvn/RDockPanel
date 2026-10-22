@@ -10,8 +10,9 @@ use rustcms::admin::*;
 use rustcms::{AppResult, ValidationErrors, async_trait};
 use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter};
 
-use crate::admin::{int, is_set, text};
+use crate::admin::{is_set, text};
 use crate::models::cert_resolver::{self, DNS_PROVIDERS, dns_provider, valid_name};
+use crate::policies::resolver_policy::ResolverPolicy;
 
 pub struct CertResolverResource;
 
@@ -249,38 +250,6 @@ fn valid_email(email: &str) -> bool {
         && email
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "@.-_+".contains(c))
-}
-
-/// `system.manage` for everything (they change Traefik), and no delete while
-/// a domain or a deployed route uses the resolver.
-struct ResolverPolicy;
-
-#[async_trait]
-impl Policy for ResolverPolicy {
-    async fn allows(&self, ctx: &Ctx, ability: &str, record: Option<&Data>) -> bool {
-        if !ctx.can("system.manage") {
-            return false;
-        }
-        match (ability, record) {
-            ("delete", Some(r)) => {
-                let (Some(id), Some(name)) = (int(r, "id"), text(r, "name")) else {
-                    return false;
-                };
-                crate::services::cert_service::in_use(&ctx.conn(), id, name)
-                    .await
-                    .is_ok_and(|used| !used)
-            }
-            _ => true,
-        }
-    }
-
-    async fn admits(&self, ctx: &Ctx, _ability: &str) -> bool {
-        ctx.can("system.manage")
-    }
-
-    fn view_depends_on_record(&self) -> bool {
-        false
-    }
 }
 
 #[cfg(test)]

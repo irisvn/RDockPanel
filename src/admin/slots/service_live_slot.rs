@@ -8,6 +8,7 @@ use sea_orm::EntityTrait;
 use serde_json::{Value, json};
 
 use crate::models::service;
+use crate::policies::permissions;
 use crate::services::deploy_service::Snapshot;
 use crate::services::deployment_service::{
     has_pending_changes, latest, snapshot_without_env, summary,
@@ -61,8 +62,8 @@ impl PanelSlot for ServiceLiveSlot {
             "latest": latest.as_ref().map(summary),
             "can": {
                 "deployments": ctx.can("deployments.view"),
-                "deploy": ctx.can("services.deploy"),
-                "destroy": ctx.can("services.destroy"),
+                "deploy": ctx.can(permissions::SERVICES_DEPLOY),
+                "destroy": ctx.can(permissions::SERVICES_DESTROY),
             },
         }))
     }

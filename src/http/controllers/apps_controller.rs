@@ -14,15 +14,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::models::{deployment, project, service, service_domain, service_mount, service_port};
+use crate::policies::permissions;
 use crate::services::creation_service::{self, DatabaseOptions, NewService};
 use crate::services::database_service::Engine;
 use crate::services::deployment_service::{
     has_pending_changes, placeholder_vars, service_env, snapshot_without_env, summary,
 };
 use crate::services::dotenv;
-
-/// Reading environment values (an audited read): the Environment tab.
-pub const SECRETS_PERMISSION: &str = "services.secrets";
 
 /// The most variables a service takes.
 const MAX_ENV: usize = 100;
@@ -96,10 +94,10 @@ pub async fn overview(State(app): State<AppState>, auth: Auth) -> AppResult<Json
             "role": may.role(),
             "can": {
                 "create_service": may.can("services.create"),
-                "deploy": may.can("services.deploy"),
+                "deploy": may.can(permissions::SERVICES_DEPLOY),
                 "update": may.can("projects.update"),
                 "delete": may.can("projects.delete"),
-                "members": may.can("projects.members"),
+                "members": may.can(permissions::PROJECTS_MEMBERS),
             },
         }));
     }
@@ -155,8 +153,8 @@ pub(crate) fn forbid_privileged_of(
     principal: &rustcms::Principal,
     row: &service::Model,
 ) -> AppResult<()> {
-    if (row.kind == "compose" || crate::admin::resources::service_resource::privileged(row))
-        && !principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+    if (row.kind == "compose" || crate::models::service::privileged(row))
+        && !principal.can(permissions::SYSTEM_MANAGE)
     {
         return Err(AppError::Forbidden);
     }
@@ -361,7 +359,7 @@ pub async fn service(
         "latest": latest,
         "deployments": deployments,
         // The certificate resolvers a domain may choose (the panel's administrators').
-        "cert_resolvers": if principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION) {
+        "cert_resolvers": if principal.can(permissions::SYSTEM_MANAGE) {
             use sea_orm::QueryOrder;
             crate::models::cert_resolver::Entity::find()
                 .order_by_asc(crate::models::cert_resolver::Column::Name)
@@ -374,7 +372,7 @@ pub async fn service(
             vec![]
         },
         // The uploaded certificates a domain may choose (the panel's administrators').
-        "certificates": if principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION) {
+        "certificates": if principal.can(permissions::SYSTEM_MANAGE) {
             use sea_orm::QueryOrder;
             crate::models::certificate::Entity::find()
                 .order_by_asc(crate::models::certificate::Column::Name)
@@ -392,21 +390,21 @@ pub async fn service(
         // Its project's permissions the caller holds (a role's, or their
         // role's there): what its tabs offer.
         "permissions": crate::services::access_service::project_permissions()
-            .chain(["docker.exec", "docker.logs"])
+            .chain([permissions::DOCKER_EXEC, permissions::DOCKER_LOGS])
             .filter(|p| may.can(p))
             .collect::<Vec<_>>(),
         "can": {
             "update": may.can("services.update"),
             "delete": may.can("services.delete"),
-            "deploy": may.can("services.deploy"),
-            "destroy": may.can("services.destroy"),
-            "secrets": may.can(SECRETS_PERMISSION),
+            "deploy": may.can(permissions::SERVICES_DEPLOY),
+            "destroy": may.can(permissions::SERVICES_DESTROY),
+            "secrets": may.can(permissions::SERVICES_SECRETS),
             // The service's logs and terminal (`/apps/services/{id}/…`).
-            "logs": may.can("services.logs") || may.can("docker.logs"),
-            "exec": may.can("services.exec") || may.can("docker.exec"),
-            "members": may.can("projects.members"),
+            "logs": may.can(permissions::SERVICES_LOGS) || may.can(permissions::DOCKER_LOGS),
+            "exec": may.can(permissions::SERVICES_EXEC) || may.can(permissions::DOCKER_EXEC),
+            "members": may.can(permissions::PROJECTS_MEMBERS),
             "deployments": can_deployments,
-            "system": principal.can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION),
+            "system": principal.can(permissions::SYSTEM_MANAGE),
             "domains": {
                 "view": may.can("service_domains.view_any"),
                 "create": may.can("service_domains.create"),
@@ -438,7 +436,7 @@ pub async fn env(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let row = service_for(&app, &auth, id, "services.secrets").await?;
+    let row = service_for(&app, &auth, id, permissions::SERVICES_SECRETS).await?;
     let env = service_env(&row, app.keyring()).map_err(|_| {
         AppError::BadRequest(
             "the environment cannot be read (sealed with another APP_KEY): set it again".into(),
@@ -489,10 +487,8 @@ pub async fn put_env(
     let body: EnvText = read_body(body)?;
     // A Compose file reads its environment (`${VAR}`, even in its volumes):
     // the panel's administrators only, as the file itself.
-    if (row.kind == "compose" || crate::admin::resources::service_resource::privileged(&row))
-        && !auth
-            .principal()
-            .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
+    if (row.kind == "compose" || crate::models::service::privileged(&row))
+        && !auth.principal().can(permissions::SYSTEM_MANAGE)
     {
         return Err(AppError::Forbidden);
     }
@@ -596,7 +592,7 @@ pub async fn credentials(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let db = app.db();
-    let row = service_for(&app, &auth, id, "services.secrets").await?;
+    let row = service_for(&app, &auth, id, permissions::SERVICES_SECRETS).await?;
     let engine = Engine::parse(&row.kind).ok_or(AppError::NotFound)?;
     let env = service_env(&row, app.keyring()).map_err(|_| {
         AppError::BadRequest("the credentials cannot be read (sealed with another APP_KEY)".into())
@@ -655,11 +651,7 @@ pub async fn create_service(
     let body: NewServiceBody = read_body(body)?;
     // A Compose file runs anything on the host (privileged containers, host
     // directories): the panel's own administrators only.
-    if body.kind == "compose"
-        && !auth
-            .principal()
-            .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION)
-    {
+    if body.kind == "compose" && !auth.principal().can(permissions::SYSTEM_MANAGE) {
         return Err(AppError::Forbidden);
     }
     let txn = app.db().begin().await?;
@@ -763,7 +755,7 @@ pub async fn trigger(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let row = service_for(&app, &auth, id, "services.deploy").await?;
+    let row = service_for(&app, &auth, id, permissions::SERVICES_DEPLOY).await?;
     forbid_privileged(&auth, &row)?;
     let token = crate::services::database_service::random_string(40);
     let txn = rustcms::db::begin_write(app.db()).await?;
@@ -929,7 +921,9 @@ pub async fn stats(
     // this service's logs or terminal.
     let may = crate::services::access_service::checker(app.db(), auth.principal(), row.project_id)
         .await?;
-    let show_ids = may.can("docker.view") || may.can("services.logs") || may.can("services.exec");
+    let show_ids = may.can(permissions::DOCKER_VIEW)
+        || may.can(permissions::SERVICES_LOGS)
+        || may.can(permissions::SERVICES_EXEC);
     let snapshot = snapshot_without_env(app.db(), &row).await?;
     let name = snapshot.service_name();
     let docker = app
@@ -1114,7 +1108,7 @@ pub async fn github_webhook(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let row = service_for(&app, &auth, id, "services.deploy").await?;
+    let row = service_for(&app, &auth, id, permissions::SERVICES_DEPLOY).await?;
     forbid_privileged(&auth, &row)?;
     let secret = crate::services::database_service::random_string(40);
     let sealed = Encrypted::seal(app.keyring(), &service::webhook_secret_context(), &secret)?;
@@ -1166,9 +1160,13 @@ pub async fn run_script(
     use futures_util::StreamExt;
     // Nowhere allowed: refused before any id is looked up.
     // Its own permission (a role's, or a project role's), or Docker's.
-    if !auth.principal().can("docker.exec")
-        && !crate::services::access_service::admits(app.db(), auth.principal(), "services.exec")
-            .await?
+    if !auth.principal().can(permissions::DOCKER_EXEC)
+        && !crate::services::access_service::admits(
+            app.db(),
+            auth.principal(),
+            permissions::SERVICES_EXEC,
+        )
+        .await?
     {
         return Err(AppError::Forbidden);
     }
@@ -1182,7 +1180,7 @@ pub async fn run_script(
         app.db(),
         auth.principal(),
         script.service_id,
-        &["services.exec", "docker.exec"],
+        &[permissions::SERVICES_EXEC, permissions::DOCKER_EXEC],
     )
     .await?;
     if script.command != body.command {

@@ -61,7 +61,7 @@ impl Resource for ServicePortResource {
     }
 
     fn policy() -> std::sync::Arc<dyn Policy> {
-        std::sync::Arc::new(crate::admin::resources::guard::ChildPolicy("service_ports"))
+        std::sync::Arc::new(crate::policies::child_policy::ChildPolicy("service_ports"))
     }
 
     /// A member sees their projects' records only (a role seeing every
@@ -71,7 +71,7 @@ impl Resource for ServicePortResource {
         ctx: &Ctx,
     ) -> sea_orm::Select<<Self as Resource>::Entity> {
         use sea_orm::{ColumnTrait, QueryFilter};
-        match crate::admin::resources::guard::members_only(ctx, "service_ports") {
+        match crate::policies::members_only(ctx, "service_ports") {
             Some(user) => query.filter(
                 crate::models::service_port::Column::ServiceId
                     .in_subquery(crate::services::access_service::member_services(user)),
@@ -97,7 +97,7 @@ impl Resource for ServicePortResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(ctx, txn, &data, None, "service_ports").await?;
+        crate::policies::write(ctx, txn, &data, None, "service_ports").await?;
         check(ctx, &data)?;
         Ok(data)
     }
@@ -108,14 +108,7 @@ impl Resource for ServicePortResource {
         record: &service_port::Model,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(
-            ctx,
-            txn,
-            &data,
-            Some(record.service_id),
-            "service_ports",
-        )
-        .await?;
+        crate::policies::write(ctx, txn, &data, Some(record.service_id), "service_ports").await?;
         check(ctx, &data)?;
         Ok(data)
     }

@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::http::controllers::apps_controller::{read_body, service_for};
 use crate::models::project;
+use crate::policies::permissions;
 use crate::services::capacity_service::{self as capacity, Action, Planned};
 
 #[derive(Debug, Deserialize)]
@@ -43,7 +44,7 @@ pub async fn check(
     Json(body): Json<Value>,
 ) -> AppResult<Json<Value>> {
     let body: CapacityBody = read_body(body)?;
-    let show_host = auth.principal().can("server.view");
+    let show_host = auth.principal().can(permissions::SERVER_VIEW);
     let report = match (body.service_id, body.project_id) {
         (Some(id), None) => {
             let action = body
@@ -53,7 +54,7 @@ pub async fn check(
                 .ok_or_else(|| {
                     AppError::BadRequest("action: deploy, start, restart or rebuild".into())
                 })?;
-            let row = service_for(&app, &auth, id, "services.deploy").await?;
+            let row = service_for(&app, &auth, id, permissions::SERVICES_DEPLOY).await?;
             let snapshot =
                 crate::services::deployment_service::snapshot_without_env(app.db(), &row).await?;
             capacity::for_action(&app, &row, &snapshot, action).await

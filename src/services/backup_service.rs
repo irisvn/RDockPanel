@@ -765,7 +765,7 @@ async fn restore(
         .await
         .map_err(|e| e.to_string())?
         .ok_or("the service is gone")?;
-    if crate::admin::resources::service_resource::privileged(&service) && !run.elevated {
+    if crate::models::service::privileged(&service) && !run.elevated {
         return Err("the service became privileged: ask for the restore again".to_owned());
     }
     let key = run.file.clone().unwrap_or_default();

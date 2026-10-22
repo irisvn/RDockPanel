@@ -3,6 +3,7 @@
 //! configured. A React page of the dashboard's bundle:
 //! `resources/admin/src/rdockpanel/domains/`.
 
+use crate::policies::permissions;
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
 use rustcms::{AppResult, async_trait};
 use serde_json::{Value, json};
@@ -18,7 +19,7 @@ impl PanelPage for DomainsPage {
             .icon("globe")
             .sort(1)
             // A role's, or a member's (`apps.access`): their projects' domains.
-            .permission_any(["service_domains.view_any", "apps.access"])
+            .permission_any(["service_domains.view_any", permissions::APPS_ACCESS])
     }
 
     fn view() -> PageView {

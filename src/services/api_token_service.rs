@@ -3,6 +3,7 @@
 //! permissions (never `*`). A token acts as its user — their roles, and
 //! their roles in projects — and never beyond its scopes: both must allow.
 
+use crate::policies::permissions;
 use rustcms::auth::{ADMIN_GUARD, AuthState};
 use rustcms::{AppError, AppResult, AppState, Principal};
 
@@ -21,7 +22,7 @@ pub const SCOPES: &[(&str, &[&str])] = &[
             "service_domains.view_any",
         ],
     ),
-    ("deploy", &["services.deploy"]),
+    ("deploy", &[permissions::SERVICES_DEPLOY]),
     (
         "write",
         &[
@@ -32,8 +33,8 @@ pub const SCOPES: &[(&str, &[&str])] = &[
             "service_domains.delete",
         ],
     ),
-    ("secrets", &["services.secrets"]),
-    ("logs", &["services.logs"]),
+    ("secrets", &[permissions::SERVICES_SECRETS]),
+    ("logs", &[permissions::SERVICES_LOGS]),
 ];
 
 /// The permissions `scopes` allow: every scope known, at least one (a token
@@ -161,7 +162,7 @@ mod tests {
         assert!(abilities(&["everything".to_owned()]).is_err());
         let read = abilities(&["read".to_owned()]).unwrap();
         assert!(read.contains(&"services.view".to_owned()));
-        assert!(!read.contains(&"services.deploy".to_owned()));
+        assert!(!read.contains(&permissions::SERVICES_DEPLOY.to_owned()));
         assert!(!read.iter().any(|a| a == "*" || a.starts_with("system.")));
         let both = abilities(&["read".to_owned(), "deploy".to_owned()]).unwrap();
         let set: std::collections::HashSet<String> = both.into_iter().collect();

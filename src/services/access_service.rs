@@ -9,12 +9,9 @@ use sea_orm::sea_query::{Query, SelectStatement};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 use crate::models::{project_member, service};
+use crate::policies::permissions;
 
-/// Opening the apps pages, nothing more: a member's (their projects say
-/// what they see there).
-pub const APPS_ACCESS: &str = "apps.access";
-
-/// Gives `user` [`APPS_ACCESS`] while they are a member of some project;
+/// Gives `user` [`permissions::APPS_ACCESS`] while they are a member of some project;
 /// takes it back once they are none's (a role's grant stays).
 pub async fn sync_apps_access(app: &rustcms::AppState, user: i64) -> AppResult<()> {
     use rustcms::auth::{ADMIN_GUARD, Actor, AuthState, RbacService};
@@ -23,10 +20,10 @@ pub async fn sync_apps_access(app: &rustcms::AppState, user: i64) -> AppResult<(
     };
     let rbac = RbacService::new(app.db(), &auth.resolver);
     if memberships(app.db(), user).await?.is_empty() {
-        rbac.revoke_permission(Actor::System, user, ADMIN_GUARD, APPS_ACCESS)
+        rbac.revoke_permission(Actor::System, user, ADMIN_GUARD, permissions::APPS_ACCESS)
             .await
     } else {
-        rbac.grant_permission(Actor::System, user, ADMIN_GUARD, APPS_ACCESS)
+        rbac.grant_permission(Actor::System, user, ADMIN_GUARD, permissions::APPS_ACCESS)
             .await
     }
 }
@@ -40,7 +37,7 @@ const VIEWER: &[&str] = &[
     "projects.view_any",
     "services.view",
     "services.view_any",
-    "services.logs",
+    permissions::SERVICES_LOGS,
     "deployments.view",
     "deployments.view_any",
     "service_domains.view",
@@ -62,9 +59,9 @@ const VIEWER: &[&str] = &[
 const DEVELOPER: &[&str] = &[
     "services.create",
     "services.update",
-    "services.deploy",
-    "services.secrets",
-    "services.exec",
+    permissions::SERVICES_DEPLOY,
+    permissions::SERVICES_SECRETS,
+    permissions::SERVICES_EXEC,
     "deployments.rollback",
     "service_domains.create",
     "service_domains.update",
@@ -84,17 +81,17 @@ const DEVELOPER: &[&str] = &[
     "database_backups.create",
     "database_backups.update",
     "database_backups.delete",
-    "backups.run",
+    permissions::BACKUPS_RUN,
 ];
 
 /// An admin's, besides a developer's: remove services, restore databases,
 /// rename the project, choose its members.
 const ADMIN: &[&str] = &[
     "services.delete",
-    "services.destroy",
-    "backups.restore",
+    permissions::SERVICES_DESTROY,
+    permissions::BACKUPS_RESTORE,
     "projects.update",
-    "projects.members",
+    permissions::PROJECTS_MEMBERS,
 ];
 
 /// The permissions `role` grants in its projects (a viewer's, a developer's
@@ -404,15 +401,15 @@ mod tests {
     fn roles() {
         assert!(role_grants("viewer", "services.view"));
         assert!(!role_grants("viewer", "services.update"));
-        assert!(role_grants("developer", "services.deploy"));
-        assert!(role_grants("developer", "services.secrets"));
-        assert!(!role_grants("developer", "services.destroy"));
-        assert!(role_grants("admin", "services.destroy"));
-        assert!(role_grants("admin", "projects.members"));
+        assert!(role_grants("developer", permissions::SERVICES_DEPLOY));
+        assert!(role_grants("developer", permissions::SERVICES_SECRETS));
+        assert!(!role_grants("developer", permissions::SERVICES_DESTROY));
+        assert!(role_grants("admin", permissions::SERVICES_DESTROY));
+        assert!(role_grants("admin", permissions::PROJECTS_MEMBERS));
         for role in ROLES {
-            assert!(!role_grants(role, "system.manage"));
+            assert!(!role_grants(role, permissions::SYSTEM_MANAGE));
             assert!(!role_grants(role, "projects.create"));
-            assert!(!role_grants(role, "docker.view"));
+            assert!(!role_grants(role, permissions::DOCKER_VIEW));
         }
         assert!(!role_grants("owner", "services.view"));
     }

@@ -10,8 +10,8 @@ use sea_orm::DatabaseTransaction;
 use serde_json::Value;
 
 use crate::admin::text;
-use crate::http::controllers::docker_controller::SYSTEM_PERMISSION;
 use crate::models::service_mount;
+use crate::policies::permissions;
 use crate::services::deploy_rules_service::{
     bind_source, config, valid_container_path, valid_volume_name,
 };
@@ -76,9 +76,7 @@ impl Resource for ServiceMountResource {
     }
 
     fn policy() -> std::sync::Arc<dyn Policy> {
-        std::sync::Arc::new(crate::admin::resources::guard::ChildPolicy(
-            "service_mounts",
-        ))
+        std::sync::Arc::new(crate::policies::child_policy::ChildPolicy("service_mounts"))
     }
 
     /// A member sees their projects' records only (a role seeing every
@@ -88,7 +86,7 @@ impl Resource for ServiceMountResource {
         ctx: &Ctx,
     ) -> sea_orm::Select<<Self as Resource>::Entity> {
         use sea_orm::{ColumnTrait, QueryFilter};
-        match crate::admin::resources::guard::members_only(ctx, "service_mounts") {
+        match crate::policies::members_only(ctx, "service_mounts") {
             Some(user) => query.filter(
                 crate::models::service_mount::Column::ServiceId
                     .in_subquery(crate::services::access_service::member_services(user)),
@@ -114,7 +112,7 @@ impl Resource for ServiceMountResource {
         txn: &DatabaseTransaction,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(ctx, txn, &data, None, "service_mounts").await?;
+        crate::policies::write(ctx, txn, &data, None, "service_mounts").await?;
         check(ctx, data, None)
     }
 
@@ -124,14 +122,7 @@ impl Resource for ServiceMountResource {
         record: &service_mount::Model,
         data: Data,
     ) -> AppResult<Data> {
-        crate::admin::resources::guard::write(
-            ctx,
-            txn,
-            &data,
-            Some(record.service_id),
-            "service_mounts",
-        )
-        .await?;
+        crate::policies::write(ctx, txn, &data, Some(record.service_id), "service_mounts").await?;
         check(ctx, data, Some(record))
     }
 }
@@ -181,7 +172,7 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
             }
         }
         "bind" => {
-            if !ctx.can(SYSTEM_PERMISSION) {
+            if !ctx.can(permissions::SYSTEM_MANAGE) {
                 errors.add(
                     "kind",
                     ctx.t("host directories need the system.manage permission"),

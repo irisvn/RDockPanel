@@ -3,7 +3,6 @@
 pub mod cert_resolver_resource;
 pub mod database_backup_resource;
 pub mod deployment_resource;
-pub mod guard;
 pub mod notification_channel_resource;
 pub mod project_resource;
 pub mod service_domain_resource;

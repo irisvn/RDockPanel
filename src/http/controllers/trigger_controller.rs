@@ -53,7 +53,7 @@ pub async fn deploy(
         return Err(AppError::NotFound);
     }
     // A privileged service is deployed by its administrators only.
-    if crate::admin::resources::service_resource::privileged(&row) {
+    if crate::models::service::privileged(&row) {
         return Err(AppError::Forbidden);
     }
     let deployment =
@@ -134,7 +134,7 @@ pub async fn github(
     if !signed(&secret, &body, signature) {
         return Err(AppError::NotFound);
     }
-    if crate::admin::resources::service_resource::privileged(&row) {
+    if crate::models::service::privileged(&row) {
         return Err(AppError::Forbidden);
     }
     let event = headers
@@ -182,7 +182,7 @@ pub async fn github(
         .await?
         .ok_or(AppError::NotFound)?;
     // Checked again on the locked row (it may have become privileged).
-    if crate::admin::resources::service_resource::privileged(&row) {
+    if crate::models::service::privileged(&row) {
         return Err(AppError::Forbidden);
     }
     let deployment =

@@ -12,8 +12,8 @@ use sea_orm::{EntityTrait, QueryOrder};
 use serde_json::Value;
 
 use crate::http::controllers::apps_controller::forbid_privileged;
-use crate::http::controllers::docker_controller::SYSTEM_PERMISSION;
 use crate::models::{project, service, service_domain};
+use crate::policies::permissions;
 use crate::services::deploy_service::{Snapshot, compose_alias};
 use crate::services::deployment_service::snapshot_without_env;
 use crate::services::traefik_service::deployed_snapshot;
@@ -37,7 +37,7 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
     {
         return Err(AppError::Forbidden);
     }
-    let admin = principal.can(SYSTEM_PERMISSION);
+    let admin = principal.can(permissions::SYSTEM_MANAGE);
     let projects: HashMap<i64, project::Model> = project::Entity::find()
         .all(db)
         .await?

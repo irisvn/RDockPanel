@@ -22,9 +22,14 @@ src/
                     build_service, compose_service, template_service, backup_service, …
   models/           action (the actions log); project, service, service_*, deployment, … (see Data)
   jobs/             pull_image, run_deployment, publish_routes, run_backup
+  policies/         who may do what: permissions.rs (the panel's own permission names), one
+                    policy per resource (project, service, domain, deployment, …), ChildPolicy
+                    for a service's records, and the helpers asking a user's roles and project
+                    role (may, admits, members_only, write)
   admin/pages/      Dashboard, Domains, Firewall, Actions, Settings, Containers, Images, Volumes, Networks (React)
   admin/resources/  Projects, Services, Domains, Ports, Mounts, Redirects, Scripts, Deployments,
                     backups, storage providers, notification channels, certificate resolvers
+                    (fields, forms, tables, scopes, hooks; their policies in policies/)
   admin/slots/      the service page's aside (state, actions, live deployment log)
 resources/admin/    src/: every page in React (built to js/rdockpanel/dashboard.js), css/rdockpanel/
                     (dashboard.css, xterm.css), js/rdockpanel/vendor/ (xterm.js)

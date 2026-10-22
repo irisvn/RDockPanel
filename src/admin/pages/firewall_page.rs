@@ -3,6 +3,7 @@
 //! their sources). Administrators' (`system.manage`). A React page of the
 //! dashboard's bundle: `resources/admin/src/rdockpanel/firewall/`.
 
+use crate::policies::permissions;
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
 use rustcms::{AppResult, async_trait};
 use serde_json::{Value, json};
@@ -17,7 +18,7 @@ impl PanelPage for FirewallPage {
         PanelPageMeta::new("Firewall")
             .icon("shield")
             .sort(2)
-            .permission_any(["system.manage"])
+            .permission_any([permissions::SYSTEM_MANAGE])
     }
 
     fn view() -> PageView {

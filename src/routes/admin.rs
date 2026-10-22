@@ -14,6 +14,7 @@ use crate::http::controllers::{
     server_controller as server, system_controller as system, templates_controller as templates,
     tokens_controller as tokens, traefik_controller as traefik, tunnel_controller as tunnel,
 };
+use crate::policies::permissions;
 
 /// Every admin route, with the access it requires.
 pub fn routes() -> AdminRoutes {
@@ -21,8 +22,8 @@ pub fn routes() -> AdminRoutes {
     // permission in the record's project (a role's, or a project role's:
     // `access_service`).
     let member = AdminAccess::authenticated;
-    let view = || AdminAccess::can("docker.view");
-    let manage = || AdminAccess::can("docker.manage");
+    let view = || AdminAccess::can(permissions::DOCKER_VIEW);
+    let manage = || AdminAccess::can(permissions::DOCKER_MANAGE);
     AdminRoutes::scope()
         .nest(
             "/docker",
@@ -38,23 +39,23 @@ pub fn routes() -> AdminRoutes {
                 )
                 .get(
                     "/containers/{id}/logs",
-                    AdminAccess::can("docker.logs"),
+                    AdminAccess::can(permissions::DOCKER_LOGS),
                     docker::logs,
                 )
                 .events(
                     "/containers/{id}/logs/follow",
-                    AdminAccess::can("docker.logs"),
+                    AdminAccess::can(permissions::DOCKER_LOGS),
                     docker::follow_logs,
                 )
                 .events(
                     "/containers/{id}/logs/follow/{tail}",
-                    AdminAccess::can("docker.logs"),
+                    AdminAccess::can(permissions::DOCKER_LOGS),
                     docker::follow_logs_tail,
                 )
                 .events("/containers/{id}/stats", view(), docker::live_stats)
                 .socket(
                     "/containers/{id}/exec",
-                    AdminAccess::can("docker.exec"),
+                    AdminAccess::can(permissions::DOCKER_EXEC),
                     docker::exec,
                 )
                 .get("/images", view(), docker::images)
@@ -73,9 +74,21 @@ pub fn routes() -> AdminRoutes {
         .nest(
             "/server",
             AdminRoutes::scope()
-                .get("/info", AdminAccess::can("server.view"), server::info)
-                .get("/samples", AdminAccess::can("server.view"), server::samples)
-                .events("/live", AdminAccess::can("server.view"), server::live),
+                .get(
+                    "/info",
+                    AdminAccess::can(permissions::SERVER_VIEW),
+                    server::info,
+                )
+                .get(
+                    "/samples",
+                    AdminAccess::can(permissions::SERVER_VIEW),
+                    server::samples,
+                )
+                .events(
+                    "/live",
+                    AdminAccess::can(permissions::SERVER_VIEW),
+                    server::live,
+                ),
         )
         .nest(
             "/apps",
@@ -85,116 +98,132 @@ pub fn routes() -> AdminRoutes {
                 .get("/domains/dns", member(), domains::dns)
                 .get(
                     "/traefik/resolvers",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::resolvers,
                 )
                 .post(
                     "/traefik/apply",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::apply,
                 )
-                .get("/panel", AdminAccess::can("system.manage"), traefik::panel)
+                .get(
+                    "/panel",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    traefik::panel,
+                )
                 // The Firewall page: the server's listeners and firewall.
                 .get(
                     "/firewall",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::show,
                 )
                 .get(
                     "/firewall/preview",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::preview,
                 )
                 .post(
                     "/firewall/openings",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::create_opening,
                 )
                 .patch(
                     "/firewall/openings/{id}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::update_opening,
                 )
                 .delete(
                     "/firewall/openings/{id}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::delete_opening,
                 )
                 .post(
                     "/firewall/blocked",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::create_blocked,
                 )
                 .delete(
                     "/firewall/blocked/{id}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::delete_blocked,
                 )
                 .post(
                     "/firewall/apply",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::apply,
                 )
                 .post(
                     "/firewall/keep",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::keep,
                 )
                 .post(
                     "/firewall/revert",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::revert,
                 )
                 .post(
                     "/firewall/disable",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     firewall::disable,
                 )
                 // The homepage at `/` (Settings → Panel): on or off.
-                .get("/home", AdminAccess::can("system.manage"), home::show)
-                .put("/home", AdminAccess::can("system.manage"), home::update)
+                .get(
+                    "/home",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    home::show,
+                )
+                .put(
+                    "/home",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    home::update,
+                )
                 // The shared maintenance page (Settings).
                 .get(
                     "/settings/maintenance",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     maintenance::show_settings,
                 )
                 .put(
                     "/settings/maintenance",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     maintenance::update_settings,
                 )
                 // Branding (Settings): the panel's name, color and images.
                 .get(
                     "/branding",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     branding::index,
                 )
                 .put(
                     "/branding",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     branding::update,
                 )
                 .put(
                     "/branding/images/{kind}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     branding::upload,
                 )
                 .delete(
                     "/branding/images/{kind}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     branding::remove,
                 )
                 // Cloudflare Tunnel (Settings).
-                .get("/tunnel", AdminAccess::can("system.manage"), tunnel::status)
+                .get(
+                    "/tunnel",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::status,
+                )
                 .post(
                     "/tunnel/enable",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     tunnel::enable,
                 )
                 .post(
                     "/tunnel/disable",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     tunnel::disable,
                 )
                 // Each user's own API tokens.
@@ -214,27 +243,27 @@ pub fn routes() -> AdminRoutes {
                 )
                 .get(
                     "/git/providers",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     git::index,
                 )
                 .post(
                     "/git/providers",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     git::create,
                 )
                 .patch(
                     "/git/providers/{id}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     git::update,
                 )
                 .delete(
                     "/git/providers/{id}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     git::delete,
                 )
                 .post(
                     "/git/providers/{id}/test",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     git::test,
                 )
                 .get("/services/{id}/github", member(), git::for_service)
@@ -250,112 +279,112 @@ pub fn routes() -> AdminRoutes {
                 )
                 .get(
                     "/system/status",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::status,
                 )
                 .events(
                     "/system/logs/{tail}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::logs,
                 )
                 .post(
                     "/system/restart",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::restart,
                 )
                 .post(
                     "/system/reboot",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::reboot,
                 )
                 .get(
                     "/system/version",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::version,
                 )
                 .post(
                     "/system/version/check",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::check_version,
                 )
                 .get(
                     "/system/version/notice",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::version_notice,
                 )
                 .post(
                     "/system/version/dismiss",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::dismiss_version,
                 )
                 .post(
                     "/system/version/update",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::update,
                 )
                 .get(
                     "/system/cleanup",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::cleanup_preview,
                 )
                 .post(
                     "/system/cleanup",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::cleanup,
                 )
                 .post(
                     "/system/ip",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::refresh_ip,
                 )
                 .post(
                     "/system/prune/{kind}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::prune,
                 )
                 .post(
                     "/panel/check",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::check_panel,
                 )
                 .get(
                     "/traefik/status",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::status,
                 )
                 .post(
                     "/traefik/restart",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::restart,
                 )
                 .put(
                     "/traefik/middlewares",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::save_middlewares,
                 )
                 .events(
                     "/traefik/logs/{tail}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::logs,
                 )
                 .get(
                     "/certificates",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::certificates,
                 )
                 .post(
                     "/certificates",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::upload_certificate,
                 )
                 .put(
                     "/certificates/{id}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::replace_certificate,
                 )
                 .delete(
                     "/certificates/{id}",
-                    AdminAccess::can("system.manage"),
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
                     traefik::delete_certificate,
                 )
                 .get("/services/{id}", member(), apps::service)
@@ -439,7 +468,7 @@ pub fn routes() -> AdminRoutes {
                 )
                 .get(
                     "/storage-providers/{id}/files",
-                    AdminAccess::can(backups::RESTORE_PERMISSION),
+                    AdminAccess::can(permissions::BACKUPS_RESTORE),
                     backups::files,
                 )
                 .post(

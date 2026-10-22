@@ -2,6 +2,7 @@
 //! did lately (deployments, backups, Docker actions) with their logs. A React
 //! page of the dashboard's bundle: `resources/admin/src/rdockpanel/actions/`.
 
+use crate::policies::permissions;
 use rustcms::admin::{Ctx, PageView, PanelPage, PanelPageMeta};
 use rustcms::{AppResult, async_trait};
 use serde_json::{Value, json};
@@ -17,7 +18,7 @@ impl PanelPage for ActionsPage {
             .icon("history")
             .sort(3)
             // A role's, or a member's (`apps.access`): their projects' actions.
-            .permission_any(["projects.view_any", "apps.access"])
+            .permission_any(["projects.view_any", permissions::APPS_ACCESS])
     }
 
     fn view() -> PageView {

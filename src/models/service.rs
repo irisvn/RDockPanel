@@ -139,6 +139,24 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
+/// Whether a service runs with added capabilities, sysctls or groups, or is
+/// a Compose service: its administrators' only (`system.manage`).
+pub fn privileged(service: &Model) -> bool {
+    service.kind == "compose"
+        || service
+            .cap_add
+            .as_deref()
+            .is_some_and(|c| !c.trim().is_empty())
+        || service
+            .sysctls
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+        || service
+            .groups
+            .as_deref()
+            .is_some_and(|g| !g.trim().is_empty())
+}
+
 /// Where `env` is sealed.
 pub fn env_context() -> Context {
     Context::column("services", "env")

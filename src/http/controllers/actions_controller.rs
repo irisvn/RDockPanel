@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use crate::http::controllers::docker_controller::scope;
 use crate::models::{action, backup_run, deployment, project, service};
+use crate::policies::permissions;
 use crate::services::docker_service::Scope;
 
 /// How many of each kind are read.
@@ -109,7 +110,7 @@ pub async fn index(State(app): State<AppState>, auth: Auth) -> AppResult<Json<Va
             }));
         }
     }
-    if principal.can("docker.view") {
+    if principal.can(permissions::DOCKER_VIEW) {
         let mut query = action::Entity::find().order_by_desc(action::Column::Id);
         if scope(&auth) != Scope::System {
             let own: Option<i64> = principal.id.parse().ok();

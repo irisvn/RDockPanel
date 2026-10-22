@@ -1,6 +1,7 @@
 //! Authentication and permissions: admin sessions under `/admin`, API tokens
 //! elsewhere. Declare permissions beyond each resource's own here.
 
+use crate::policies::permissions;
 use rustcms::auth::{ADMIN_GUARD, PermissionArea, PermissionMeta, PermissionPreset};
 use rustcms::prelude::*;
 
@@ -15,91 +16,91 @@ const AREAS: &[(&str, &str, i32)] = &[
 /// Each permission beyond the resources' own: its area, label, description.
 const META: &[(&str, &str, &str, &str)] = &[
     (
-        "apps.access",
+        permissions::APPS_ACCESS,
         "apps",
         "Open the apps pages",
         "Dashboard, Domains and Actions (a project's members need it)",
     ),
     (
-        "services.deploy",
+        permissions::SERVICES_DEPLOY,
         "apps",
         "Deploy services",
         "Deploy, start, stop, restart and roll back",
     ),
     (
-        "services.destroy",
+        permissions::SERVICES_DESTROY,
         "apps",
         "Destroy services",
         "Remove a service's Swarm service and its routes",
     ),
     (
-        "services.logs",
+        permissions::SERVICES_LOGS,
         "apps",
         "Read service logs",
         "A service's live logs, without Docker's pages",
     ),
     (
-        "services.exec",
+        permissions::SERVICES_EXEC,
         "apps",
         "Open service terminals",
         "A shell in a service's running container",
     ),
     (
-        "services.secrets",
+        permissions::SERVICES_SECRETS,
         "apps",
         "Read environment values",
         "Show environment variables in clear (each read is audited)",
     ),
     (
-        "projects.members",
+        permissions::PROJECTS_MEMBERS,
         "apps",
         "Choose project members",
         "Add, change and remove a project's members",
     ),
     (
-        "backups.run",
+        permissions::BACKUPS_RUN,
         "apps",
         "Run backups now",
         "Start a database backup by hand",
     ),
     (
-        "backups.restore",
+        permissions::BACKUPS_RESTORE,
         "apps",
         "Restore backups",
         "Replace a database's data with a backup",
     ),
     (
-        "docker.view",
+        permissions::DOCKER_VIEW,
         "docker",
         "See Docker",
         "Containers, images, volumes and networks",
     ),
     (
-        "docker.manage",
+        permissions::DOCKER_MANAGE,
         "docker",
         "Manage Docker",
         "Start, stop, remove and prune Docker objects",
     ),
     (
-        "docker.logs",
+        permissions::DOCKER_LOGS,
         "docker",
         "Read container logs",
         "Any container's logs",
     ),
     (
-        "docker.exec",
+        permissions::DOCKER_EXEC,
         "docker",
         "Open container terminals",
         "A shell in any container",
     ),
     (
-        "server.view",
+        permissions::SERVER_VIEW,
         "server",
         "See the server",
         "CPU, memory, disk and network, live",
     ),
     (
-        "system.manage",
+        permissions::SYSTEM_MANAGE,
         "system",
         "Manage the panel",
         "Settings, Traefik, certificates, the panel's own containers, reboot",
@@ -144,7 +145,7 @@ fn catalog(mut auth: AuthProvider) -> AuthProvider {
         ),
     ];
     for (role, label, description) in presets {
-        let mut names = vec![crate::services::access_service::APPS_ACCESS];
+        let mut names = vec![permissions::APPS_ACCESS];
         names.extend(crate::services::access_service::role_permissions(role));
         auth = auth.permission_preset(
             role,
@@ -157,7 +158,11 @@ fn catalog(mut auth: AuthProvider) -> AuthProvider {
         "monitor",
         PermissionPreset::new("Monitor")
             .description("Sees the server and Docker, changes nothing")
-            .permissions(["server.view", "docker.view", "docker.logs"]),
+            .permissions([
+                permissions::SERVER_VIEW,
+                permissions::DOCKER_VIEW,
+                permissions::DOCKER_LOGS,
+            ]),
     )
 }
 
@@ -169,39 +174,59 @@ fn declared(api: &ApiRoutes, admin: &AdminRoutes) -> AuthProvider {
         .admin_permissions(admin)
         .permission(
             rustcms::auth::ADMIN_GUARD,
-            crate::http::controllers::docker_controller::SYSTEM_PERMISSION,
+            permissions::SYSTEM_MANAGE,
             "system",
         )
         // Deploying, starting, stopping, restarting and rolling back services; destroying them.
-        .permission(rustcms::auth::ADMIN_GUARD, "services.deploy", "services")
-        .permission(rustcms::auth::ADMIN_GUARD, "services.destroy", "services")
+        .permission(
+            rustcms::auth::ADMIN_GUARD,
+            permissions::SERVICES_DEPLOY,
+            "services",
+        )
+        .permission(
+            rustcms::auth::ADMIN_GUARD,
+            permissions::SERVICES_DESTROY,
+            "services",
+        )
         // Running a database backup by hand; restoring one (replaces its data).
         .permission(
             rustcms::auth::ADMIN_GUARD,
-            crate::http::controllers::backups_controller::RUN_PERMISSION,
+            permissions::BACKUPS_RUN,
             "database_backups",
         )
         .permission(
             rustcms::auth::ADMIN_GUARD,
-            crate::http::controllers::backups_controller::RESTORE_PERMISSION,
+            permissions::BACKUPS_RESTORE,
             "database_backups",
         )
         // A service's logs and its terminal (without Docker's pages); a
         // project's members.
-        .permission(rustcms::auth::ADMIN_GUARD, "services.logs", "services")
-        .permission(rustcms::auth::ADMIN_GUARD, "services.exec", "services")
-        .permission(rustcms::auth::ADMIN_GUARD, "projects.members", "projects")
+        .permission(
+            rustcms::auth::ADMIN_GUARD,
+            permissions::SERVICES_LOGS,
+            "services",
+        )
+        .permission(
+            rustcms::auth::ADMIN_GUARD,
+            permissions::SERVICES_EXEC,
+            "services",
+        )
+        .permission(
+            rustcms::auth::ADMIN_GUARD,
+            permissions::PROJECTS_MEMBERS,
+            "projects",
+        )
         // Opening the apps pages (Dashboard, Domains, Actions) and nothing
         // else: given to a project's members (their projects are theirs).
         .permission(
             rustcms::auth::ADMIN_GUARD,
-            crate::services::access_service::APPS_ACCESS,
+            permissions::APPS_ACCESS,
             "projects",
         )
         // Reading environment values in clear (audited); writing needs `services.update`.
         .permission(
             rustcms::auth::ADMIN_GUARD,
-            crate::http::controllers::apps_controller::SECRETS_PERMISSION,
+            permissions::SERVICES_SECRETS,
             "services",
         )
 }

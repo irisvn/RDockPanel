@@ -12,14 +12,10 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::models::{backup_run, database_backup, storage_provider};
+use crate::policies::permissions;
 use crate::services::backup_service::{self, supported, valid_database};
 use crate::services::database_service::Engine;
 use crate::services::storage_service::{Store, valid_key};
-
-/// Running a backup by hand.
-pub const RUN_PERMISSION: &str = "backups.run";
-/// Restoring one (it replaces the database's data).
-pub const RESTORE_PERMISSION: &str = "backups.restore";
 
 fn audit_context(auth: &Auth, request: RequestMeta) -> AuditContext {
     AuditContext::new(AuditActor::user(auth.principal()), request)
@@ -94,7 +90,7 @@ pub async fn index(
         db,
         auth.principal(),
         row.project_id,
-        RESTORE_PERMISSION,
+        permissions::BACKUPS_RESTORE,
     )
     .await?;
     let restorable: Vec<Value> = runs
@@ -190,7 +186,7 @@ pub async fn run(
     Path(id): Path<i64>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     use crate::services::access_service;
-    if !access_service::admits(app.db(), auth.principal(), RUN_PERMISSION).await? {
+    if !access_service::admits(app.db(), auth.principal(), permissions::BACKUPS_RUN).await? {
         return Err(AppError::Forbidden);
     }
     let config = database_backup::Entity::find_by_id(id)
@@ -201,13 +197,13 @@ pub async fn run(
         app.db(),
         auth.principal(),
         config.service_id,
-        RUN_PERMISSION,
+        permissions::BACKUPS_RUN,
     )
     .await?;
     crate::http::controllers::apps_controller::forbid_privileged(&auth, &parent)?;
     let txn = rustcms::db::begin_write(app.db()).await?;
     let run = backup_service::request(&txn, &config, "manual", user_id(&auth)).await?;
-    let entry = AuditEntry::new("backups.run", "database_backups")
+    let entry = AuditEntry::new(permissions::BACKUPS_RUN, "database_backups")
         .key(id.to_string())
         .meta(json!({ "run": run.id }));
     audit::record(&txn, &audit_context(&auth, request), entry).await?;
@@ -239,7 +235,7 @@ pub async fn restore(
         app.db(),
         auth.principal(),
         id,
-        RESTORE_PERMISSION,
+        permissions::BACKUPS_RESTORE,
     )
     .await?;
     let body: RestoreBody = crate::http::controllers::apps_controller::read_body(body)?;
@@ -291,7 +287,7 @@ pub async fn restore(
     let provider = provider.ok_or(AppError::NotFound)?;
     // A project's admin restores this service's own backups only (a role's
     // restore permission: any file of the provider, which they may browse).
-    if !auth.principal().can(RESTORE_PERMISSION)
+    if !auth.principal().can(permissions::BACKUPS_RESTORE)
         && backup_run::Entity::find()
             .filter(backup_run::Column::ServiceId.eq(row.id))
             .filter(backup_run::Column::StorageProviderId.eq(provider.id))
@@ -312,13 +308,11 @@ pub async fn restore(
             database: body.database.trim(),
             volume,
             user_id: user_id(&auth),
-            elevated: auth
-                .principal()
-                .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION),
+            elevated: auth.principal().can(permissions::SYSTEM_MANAGE),
         },
     )
     .await?;
-    let entry = AuditEntry::new("backups.restore", "services")
+    let entry = AuditEntry::new(permissions::BACKUPS_RESTORE, "services")
         .key(id.to_string())
         .meta(json!({ "run": run.id, "file": file, "database": body.database.trim() }));
     audit::record(&txn, &audit_context(&auth, request), entry).await?;

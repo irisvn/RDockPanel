@@ -19,6 +19,7 @@ use serde_json::Value;
 
 use crate::http::controllers::apps_controller::{forbid_privileged, read_body, service_for};
 use crate::models::{panel_setting, service_logo};
+use crate::policies::permissions;
 use crate::services::maintenance_service as page;
 
 /// How long a preview is kept, how many in all and by author.
@@ -151,12 +152,7 @@ pub async fn create_preview(
                 .unwrap_or_default();
             (Some(row), project)
         }
-        None if auth
-            .principal()
-            .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION) =>
-        {
-            (None, "project".to_owned())
-        }
+        None if auth.principal().can(permissions::SYSTEM_MANAGE) => (None, "project".to_owned()),
         None => return Err(AppError::Forbidden),
     };
     let body: PreviewBody = read_body(body)?;
@@ -239,9 +235,7 @@ pub async fn show_preview(
         Some(service) => {
             service_for(&app, &auth, service, "services.view").await?;
         }
-        None if auth
-            .principal()
-            .can(crate::http::controllers::docker_controller::SYSTEM_PERMISSION) => {}
+        None if auth.principal().can(permissions::SYSTEM_MANAGE) => {}
         None => return Err(AppError::NotFound),
     }
     let mut response = html.into_response();
