@@ -6,14 +6,14 @@
 
 use rustcms::admin::*;
 use rustcms::{AppResult, ValidationErrors, async_trait};
-use sea_orm::DatabaseTransaction;
+use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
 use serde_json::Value;
 
-use crate::admin::text;
+use crate::admin::{int, text};
 use crate::models::service_mount;
 use crate::policies::permissions;
 use crate::services::deploy_rules_service::{
-    bind_source, config, valid_container_path, valid_volume_name,
+    bind_source, config, sealable, valid_container_path, valid_volume_name,
 };
 
 pub struct ServiceMountResource;
@@ -113,7 +113,9 @@ impl Resource for ServiceMountResource {
         data: Data,
     ) -> AppResult<Data> {
         crate::policies::write(ctx, txn, &data, None, "service_mounts").await?;
-        check(ctx, data, None)
+        let data = check(ctx, data, None)?;
+        files_fit(ctx, txn, &data, None).await?;
+        Ok(data)
     }
 
     async fn mutate_before_update(
@@ -123,13 +125,75 @@ impl Resource for ServiceMountResource {
         data: Data,
     ) -> AppResult<Data> {
         crate::policies::write(ctx, txn, &data, Some(record.service_id), "service_mounts").await?;
-        check(ctx, data, Some(record))
+        let data = check(ctx, data, Some(record))?;
+        files_fit(ctx, txn, &data, Some(record)).await?;
+        Ok(data)
     }
 }
 
-/// The largest file content, in bytes: what a MySQL `TEXT` holds (a Swarm
-/// config takes more; such files are small).
-const MAX_FILE: usize = 65_535;
+/// The file as it will be after this write, with the service's other
+/// files: within what a deployment seals together. Checked when its
+/// content, path or kind changes; files that cannot be read are left to
+/// the deployment to tell (a file can still be fixed).
+async fn files_fit(
+    ctx: &Ctx,
+    txn: &DatabaseTransaction,
+    data: &Data,
+    record: Option<&service_mount::Model>,
+) -> AppResult<()> {
+    let kind = text(data, "kind").or(record.map(|r| r.kind.as_str()));
+    if kind != Some("file") {
+        return Ok(());
+    }
+    let replaced = data
+        .get("sealed_content")
+        .and_then(|v| v.get("replace"))
+        .and_then(Value::as_str);
+    let target = text(data, "target").or(record.map(|r| r.target.as_str()));
+    let unchanged = replaced.is_none()
+        && record.is_some_and(|r| r.kind == "file" && Some(r.target.as_str()) == target);
+    if unchanged {
+        return Ok(());
+    }
+    let keyring = ctx.keyring()?;
+    let content = match (replaced, record.and_then(|r| r.sealed_content.as_ref())) {
+        (Some(content), _) => content.to_owned(),
+        (None, Some(sealed)) => match sealed.open(keyring, &service_mount::content_context()) {
+            Ok(content) => content,
+            Err(_) => return Ok(()),
+        },
+        (None, None) => return Ok(()),
+    };
+    let Some(service) = int(data, "service_id").or(record.map(|r| r.service_id)) else {
+        return Ok(());
+    };
+    let mut others = service_mount::Entity::find()
+        .filter(service_mount::Column::ServiceId.eq(service))
+        .filter(service_mount::Column::Kind.eq("file"));
+    if let Some(record) = record {
+        others = others.filter(service_mount::Column::Id.ne(record.id));
+    }
+    let mut files = std::collections::BTreeMap::new();
+    for other in others.all(txn).await? {
+        let Some(sealed) = &other.sealed_content else {
+            continue;
+        };
+        match sealed.open(keyring, &service_mount::content_context()) {
+            Ok(content) => files.insert(other.target, content),
+            Err(_) => return Ok(()),
+        };
+    }
+    files.insert(target.unwrap_or_default().to_owned(), content);
+    if sealable(&files) {
+        Ok(())
+    } else {
+        Err(ValidationErrors::field(
+            "sealed_content",
+            ctx.t("the service's files are at most 32 KiB together"),
+        )
+        .into())
+    }
+}
 
 /// Checks the mount as it will be after this write; a bind's source is
 /// stored resolved.
@@ -204,8 +268,8 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
             }
             if !has_content {
                 errors.add("sealed_content", ctx.t("is required"));
-            } else if replaced.as_deref().is_some_and(|c| c.len() > MAX_FILE) {
-                errors.add("sealed_content", ctx.t("is at most 64 KB"));
+            } else if replaced.as_deref().is_some_and(|c| !sealable(&c)) {
+                errors.add("sealed_content", ctx.t("is at most 32 KiB"));
             }
         }
         _ => errors.add("kind", ctx.t("must be volume, bind or file")),

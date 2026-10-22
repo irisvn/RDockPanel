@@ -508,6 +508,9 @@ pub async fn put_env(
         )
         .into());
     }
+    if !crate::services::deploy_rules_service::sealable(&env) {
+        return Err(ValidationErrors::field("text", "is at most 32 KiB in all").into());
+    }
     let sealed = (!env.is_empty())
         .then(|| Encrypted::seal(app.keyring(), &service::env_context(), &env))
         .transpose()?;

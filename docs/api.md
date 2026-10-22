@@ -35,7 +35,7 @@ The `write` and `logs` scopes are for routes to come.
 | POST | `/services/{id}/deploy` | deploy | queues a deployment: 202 `{"deployment": …}` |
 | POST | `/services/{id}/restart` | deploy | queues a restart: 202 |
 | GET | `/deployments/{id}` | read | its status, error and log |
-| GET | `/services/{id}/env` | secrets | `{"env": {NAME: value}}` (audited, as the panel's own read) |
+| GET | `/services/{id}/env` | secrets | `{"env": {NAME: value}}` (audited first, as the panel's own read: no audit, no values) |
 | GET | `/services/{id}/domains` | read | its domains |
 
 ### The `rdp` command line
@@ -119,7 +119,7 @@ their actions), so the resources' policies, validation and audit apply.
 | POST | `/scripts/{id}/run` | docker.exec | runs a script in a running container: `{"exit_code","output"}` (25 s at most); `{"command"}` must be the script as shown (409 otherwise); audited |
 | GET | `/services/{id}/credentials` | services.secrets | a database's passwords and internal URL; audited first |
 | GET | `/services/{id}/env` | services.secrets | `{"text","revision"}`: the environment as `.env` text, in clear; audited first (`services.env.read`, names only: no audit, no values) |
-| PUT | `/services/{id}/env` | services.update | `{"text","revision"?}` replaces the environment (sealed); with the revision read, 409 `env_stale` when it changed meanwhile; 422 names the bad line; audited (`services.env.update`, names only) |
+| PUT | `/services/{id}/env` | services.update | `{"text","revision"?}` replaces the environment (sealed); with the revision read, 409 `env_stale` when it changed meanwhile; 422 names the bad line, or an environment over 32 KiB; audited (`services.env.update`, names only) |
 
 A database's page includes `database`: engine, internal host, port, user, database; never its
 passwords. `GET /services/{id}/credentials` (services.secrets) answers `{"password",

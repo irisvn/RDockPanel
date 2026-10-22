@@ -10,8 +10,10 @@ pub struct AppServiceProvider;
 impl ServiceProvider for AppServiceProvider {
     fn register(&self, app: &mut AppBuilder) {
         // Tests bind fakes over these (`bind` replaces by type).
+        // A malformed `[panel]`: defaults until `boot` stops the panel.
         crate::services::deploy_rules_service::configure(
-            crate::services::deploy_rules_service::PanelConfig::from_config(app.config()),
+            crate::services::deploy_rules_service::PanelConfig::from_config(app.config())
+                .unwrap_or_default(),
         );
         app.bind(crate::services::docker_service::Docker::from_env());
         app.bind(crate::services::template_service::Templates::new(
@@ -259,6 +261,10 @@ impl ServiceProvider for AppServiceProvider {
     }
 
     async fn boot(&self, state: &AppState) -> anyhow::Result<()> {
+        // A `[panel]` value of the wrong kind stops every command (never
+        // run on defaults: no firewall checks, routes written elsewhere).
+        crate::services::deploy_rules_service::PanelConfig::from_config(state.config())
+            .map_err(|err| anyhow::anyhow!("the [panel] configuration is invalid: {err}"))?;
         // bollard logs each request's body at debug (through the `log`
         // crate): a service spec holds its environment's values. Whatever
         // RUST_LOG says, `log` records stop at info (the panel's own logs are

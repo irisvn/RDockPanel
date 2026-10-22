@@ -6,6 +6,7 @@ mod support;
 
 mod api;
 mod apps;
+mod audit_atomic;
 mod backups;
 mod branding;
 mod certificates;
@@ -19,6 +20,7 @@ mod firewall;
 mod git;
 mod health;
 mod home;
+mod large_values;
 mod live;
 mod members;
 mod notifications;

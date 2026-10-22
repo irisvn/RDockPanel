@@ -12,7 +12,7 @@ use crate::models::service_domain;
 use crate::policies::domain_policy::DomainPolicy;
 use crate::policies::permissions;
 use crate::services::deploy_rules_service::{
-    valid_domain_host, valid_middleware, valid_port, valid_route_path,
+    normalize_host, valid_domain_host, valid_middleware, valid_port, valid_route_path,
 };
 
 pub struct ServiceDomainResource;
@@ -267,7 +267,7 @@ async fn check_container(
 
 /// Hosts are stored lowercase; then each value is checked.
 fn check(ctx: &Ctx, mut data: Data) -> AppResult<Data> {
-    if let Some(host) = text(&data, "host").map(|h| h.trim().to_ascii_lowercase()) {
+    if let Some(host) = text(&data, "host").map(normalize_host) {
         data.insert("host".to_owned(), Value::String(host));
     }
     let mut errors = ValidationErrors::new();

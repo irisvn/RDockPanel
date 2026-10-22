@@ -18,7 +18,8 @@ use crate::models::{project, service, service_domain, service_mount, service_por
 use crate::services::build_service::{inside, valid_git_url, valid_ref};
 use crate::services::database_service::{Credentials, Engine, random_password};
 use crate::services::deploy_rules_service::{
-    config, valid_container_path, valid_image_reference, valid_name, valid_port, valid_route_path,
+    MAX_COMMAND, MAX_REPLACEMENT, MAX_REPO_PATH, config, normalize_host, sealable,
+    valid_container_path, valid_image_reference, valid_name, valid_port, valid_route_path,
     valid_volume_name,
 };
 use crate::services::deploy_service::{command_args, valid_env_name};
@@ -168,8 +169,12 @@ pub async fn create(
     txn: &DatabaseTransaction,
     keyring: &Keyring,
     project: &project::Model,
-    new: NewService,
+    mut new: NewService,
 ) -> AppResult<service::Model> {
+    // Hosts as the Domains tab stores them.
+    for domain in &mut new.domains {
+        domain.host = normalize_host(&domain.host);
+    }
     let mut errors = ValidationErrors::new();
     if !valid_name(&new.name) {
         errors.add(
@@ -274,8 +279,11 @@ pub async fn create(
                 errors.add("git_branch", "is not a branch, tag or commit");
             }
             for path in [&git.path, &git.file].into_iter().flatten() {
-                if inside(path).is_none() {
-                    errors.add("git_path", "must stay inside the repository");
+                if inside(path).is_none() || path.chars().count() > MAX_REPO_PATH {
+                    errors.add(
+                        "git_path",
+                        "must stay inside the repository (255 characters at most)",
+                    );
                 }
             }
         }
@@ -316,8 +324,11 @@ pub async fn create(
                     .into_iter()
                     .flatten()
                 {
-                    if inside(path).is_none() {
-                        errors.add("git_path", "must stay inside the repository");
+                    if inside(path).is_none() || path.chars().count() > MAX_REPO_PATH {
+                        errors.add(
+                            "git_path",
+                            "must stay inside the repository (255 characters at most)",
+                        );
                     }
                 }
                 if build.builder != "dockerfile" {
@@ -337,10 +348,15 @@ pub async fn create(
         },
         None => {}
     }
-    if let Some(command) = &command
-        && command_args(command).is_none()
-    {
-        errors.add("command", "has an unclosed quote");
+    if let Some(command) = &command {
+        if command.chars().count() > MAX_COMMAND {
+            errors.add("command", format!("is at most {MAX_COMMAND} characters"));
+        } else if command_args(command).is_none() {
+            errors.add("command", "has an unclosed quote");
+        }
+    }
+    if !sealable(&env) {
+        errors.add("env", "is at most 32 KiB in all");
     }
     if env.keys().any(|name| !valid_env_name(name)) {
         errors.add(
@@ -393,11 +409,22 @@ pub async fn create(
     for mount in &mounts {
         let (target, ok) = match mount {
             NewMount::Volume { name, target } => (target, valid_volume_name(name)),
-            NewMount::File { content, target } => (target, content.len() <= 65_535),
+            NewMount::File { content, target } => (target, sealable(content)),
         };
         if !ok || !valid_container_path(target) {
             errors.add("mounts", format!("{target} is not a valid mount"));
         }
+    }
+    // A deployment keeps the files sealed together.
+    let files: BTreeMap<&str, &str> = mounts
+        .iter()
+        .filter_map(|m| match m {
+            NewMount::File { content, target } => Some((target.as_str(), content.as_str())),
+            NewMount::Volume { .. } => None,
+        })
+        .collect();
+    if !sealable(&files) {
+        errors.add("mounts", "the files are at most 32 KiB together");
     }
     let reserved = &config().reserved_ports;
     for port in &new.ports {
@@ -447,6 +474,14 @@ pub async fn create(
             crate::services::deploy_service::check_redirect(&redirect.regex, &redirect.replacement)
         {
             errors.add("redirects", format!("{}: {e}", redirect.regex));
+        } else if redirect.replacement.chars().count() > MAX_REPLACEMENT {
+            errors.add(
+                "redirects",
+                format!(
+                    "{}: a replacement is at most {MAX_REPLACEMENT} characters",
+                    redirect.regex
+                ),
+            );
         }
     }
     if !errors.is_empty() {

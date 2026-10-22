@@ -96,7 +96,8 @@ impl Resource for ServiceResource {
             Field::column(service::Column::RateLimitPeriod),
             Field::column(service::Column::RateLimitBurst),
             Field::column(service::Column::RateLimitExempt).max_length(4000),
-            Field::column(service::Column::Command).max_length(1000),
+            Field::column(service::Column::Command)
+                .max_length(crate::services::deploy_rules_service::MAX_COMMAND),
             Field::column(service::Column::Replicas).required(),
             Field::column(service::Column::CpuLimitMillis),
             Field::column(service::Column::MemLimitMb),

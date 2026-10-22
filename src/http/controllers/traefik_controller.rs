@@ -165,6 +165,23 @@ async fn publish(app: &AppState, auth: &Auth, request: RequestMeta, target: &str
     .await
 }
 
+/// A certificate's change, recorded in its own transaction (never its key).
+async fn audited(
+    txn: &sea_orm::DatabaseTransaction,
+    auth: &Auth,
+    request: RequestMeta,
+    event: &str,
+    row: &crate::models::certificate::Model,
+) -> AppResult<()> {
+    use rustcms::audit::{AuditActor, AuditContext, AuditEntry};
+    let entry = AuditEntry::new(event, "certificates")
+        .key(row.id.to_string())
+        .meta(json!({ "name": row.name, "names": row.names, "not_after": row.not_after }));
+    let context = AuditContext::new(AuditActor::user(auth.principal()), request);
+    rustcms::audit::record(txn, &context, entry).await?;
+    Ok(())
+}
+
 fn taken(err: sea_orm::DbErr) -> AppError {
     let text = err.to_string().to_ascii_lowercase();
     if text.contains("unique") || text.contains("duplicate") {
@@ -190,6 +207,7 @@ pub async fn upload_certificate(
         &parsed.key,
     )
     .map_err(AppError::internal)?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     let row = crate::models::certificate::ActiveModel {
         name: Set(name),
         chain: Set(parsed.chain),
@@ -202,9 +220,11 @@ pub async fn upload_certificate(
         updated_at: Set(now),
         ..Default::default()
     }
-    .insert(app.db())
+    .insert(&txn)
     .await
     .map_err(taken)?;
+    audited(&txn, &auth, request.clone(), "certificates.create", &row).await?;
+    txn.commit().await?;
     publish(&app, &auth, request, &row.name).await?;
     Ok(Json(
         json!({ "id": row.id, "self_signed": parsed.self_signed }),
@@ -257,6 +277,7 @@ pub async fn replace_certificate(
     active.notified_days = Set(None);
     active.updated_at = Set(chrono::Utc::now());
     let row = active.update(&txn).await.map_err(taken)?;
+    audited(&txn, &auth, request.clone(), "certificates.replace", &row).await?;
     txn.commit().await?;
     publish(&app, &auth, request, &row.name).await?;
     Ok(Json(
@@ -285,6 +306,7 @@ pub async fn delete_certificate(
         .into());
     }
     let name = row.name.clone();
+    audited(&txn, &auth, request.clone(), "certificates.delete", &row).await?;
     row.delete(&txn).await?;
     txn.commit().await?;
     publish(&app, &auth, request, &name).await?;

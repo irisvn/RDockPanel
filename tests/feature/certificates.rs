@@ -487,7 +487,7 @@ db_test!(
 );
 
 /// A certificate for `names` signed by a new authority: (chain, key).
-fn issued(names: &[&str]) -> (String, String) {
+pub(crate) fn issued(names: &[&str]) -> (String, String) {
     use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
     let ca_key = KeyPair::generate().unwrap();
     let mut ca = CertificateParams::new(Vec::<String>::new()).unwrap();
@@ -655,6 +655,33 @@ db_test!(
             .assert_status(StatusCode::OK);
         let renewed_store = std::fs::read_to_string(dir.join("rdp-certificates.yml")).unwrap();
         assert_ne!(store, renewed_store);
+        // One unused: deleted. Each change recorded with it, never a key.
+        let (spare, spare_key) = issued(&["spare.example.net"]);
+        let spare = admin
+            .post_json(&url, &json!({"chain": spare, "key": spare_key}))
+            .await;
+        spare.assert_status(StatusCode::OK);
+        let spare = spare.json()["id"].as_i64().unwrap();
+        admin
+            .send(Method::DELETE, &format!("{url}/{spare}"), None)
+            .await
+            .assert_status(StatusCode::OK);
+        {
+            use sea_orm::EntityTrait;
+            let entries = rustcms::models::audit_log::Entity::find()
+                .all(app.state().db())
+                .await
+                .unwrap();
+            for event in [
+                "certificates.create",
+                "certificates.replace",
+                "certificates.delete",
+            ] {
+                assert!(entries.iter().any(|e| e.event == event), "{event}");
+            }
+            let all = format!("{entries:?}");
+            assert!(!all.contains("PRIVATE KEY"));
+        }
 
         // A Compose service's deployment asked with it (its domains are
         // routed as deployed), the certificate gone since: it fails. Any

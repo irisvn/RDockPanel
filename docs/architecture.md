@@ -447,6 +447,12 @@ check then digests the deployed environment with today's key before telling a ch
 keyed digest. A value sealed with a key that is gone (see `APP_PREVIOUS_KEYS` and
 `rustcms key:reencrypt`, which knows all three columns) refuses the deployment with a clear error.
 
+RustCMS seals 32 KiB at most (the value's JSON). A service's environment is one sealed value, and
+so are its files together (a deployment keeps them so): the Environment tab, the forms, templates and
+Deploy refuse more with a field error (or a 400 naming it), never a failure on the way. Values kept in
+clear that may be longer than MySQL's 64 KiB `TEXT` (a Compose file, notes, the shared maintenance
+page and the other settings, a certificate chain) are `MEDIUMTEXT` there.
+
 ### Deployments
 
 `services/deployment_service.rs` runs them:

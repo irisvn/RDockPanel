@@ -293,7 +293,10 @@ pub async fn env(
         rustcms::audit::AuditActor::user(&who.principal),
         request,
     );
-    rustcms::audit::record_detached(app.db(), &context, entry).await;
+    // No audit, no values (as the panel's own read).
+    let txn = rustcms::db::begin_write(app.db()).await?;
+    rustcms::audit::record(&txn, &context, entry).await?;
+    txn.commit().await?;
     Ok(Json(json!({ "env": env })))
 }
 

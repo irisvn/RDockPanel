@@ -87,17 +87,19 @@ pub async fn create(
     }
     let expires = rustcms::auth::tokens::expiry_in_days(body.days)
         .ok_or_else(|| ValidationErrors::field("days", "is out of range"))?;
-    let issued =
-        rustcms::auth::tokens::issue(app.db(), user, name, &granted, Some(expires)).await?;
+    // The token and its entry together: none made unrecorded.
+    let txn = rustcms::db::begin_write(app.db()).await?;
+    let issued = rustcms::auth::tokens::issue(&txn, user, name, &granted, Some(expires)).await?;
     let entry = AuditEntry::new("api_tokens.create", "api_tokens")
         .key(issued.token.id.to_string())
         .meta(json!({ "name": name, "scopes": body.scopes, "days": body.days }));
-    audit::record_detached(
-        app.db(),
+    audit::record(
+        &txn,
         &AuditContext::new(AuditActor::user(auth.principal()), request),
         entry,
     )
-    .await;
+    .await?;
+    txn.commit().await?;
     Ok((
         [(rustcms::axum::http::header::CACHE_CONTROL, "no-store")],
         Json(json!({ "token": issued.plain_text, "info": shown(&issued.token) })),
@@ -118,15 +120,17 @@ pub async fn revoke(
         .await?
         .filter(|t| t.user_id == user)
         .ok_or(AppError::NotFound)?;
-    rustcms::auth::tokens::revoke(app.db(), row.id).await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
+    rustcms::auth::tokens::revoke(&txn, row.id).await?;
     let entry = AuditEntry::new("api_tokens.revoke", "api_tokens")
         .key(row.id.to_string())
         .meta(json!({ "name": row.name }));
-    audit::record_detached(
-        app.db(),
+    audit::record(
+        &txn,
         &AuditContext::new(AuditActor::user(auth.principal()), request),
         entry,
     )
-    .await;
+    .await?;
+    txn.commit().await?;
     Ok(Json(json!({ "revoked": true })))
 }

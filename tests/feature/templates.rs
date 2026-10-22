@@ -351,3 +351,91 @@ async fn every_real_template_runs() {
     );
     assert!(ok * 100 >= list.len() * 95, "{ok} of {}", list.len());
 }
+
+db_test!(
+    a_schema_is_checked_as_the_forms_are,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let project = create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let url = app.admin_api(&format!("x/apps/projects/{project}/schema"));
+        let app_service = |name: &str, extra: serde_json::Value| {
+            let mut data =
+                json!({"serviceName": name, "source": {"type": "image", "image": "nginx:1.27"}});
+            for (k, v) in extra.as_object().unwrap() {
+                data[k] = v.clone();
+            }
+            json!({"schema": {"services": [{"type": "app", "data": data}]}})
+        };
+
+        // A host as the Domains tab takes it: trimmed, lowercase.
+        let made = admin
+            .post_json(
+                &url,
+                &app_service(
+                    "site",
+                    json!({"domains": [{"host": " Shop.Example.COM ", "port": 80}]}),
+                ),
+            )
+            .await;
+        made.assert_status(StatusCode::OK);
+        let site = made.json()["services"][0]["id"].as_i64().unwrap();
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{site}")))
+            .await
+            .json();
+        assert_eq!(page["domains"][0]["host"], "shop.example.com", "{page}");
+
+        // What the forms and the columns refuse: field errors, not failures.
+        admin
+            .post_json(
+                &url,
+                &app_service("long", json!({"deploy": {"command": "x".repeat(1001)}})),
+            )
+            .await
+            .assert_validation_error("command");
+        admin
+            .post_json(&url, &app_service("moved", json!({"redirects": [{"regex": "^/(.*)", "replacement": format!("/{}", "r".repeat(500)), "permanent": true}]})))
+            .await
+            .assert_validation_error("redirects");
+        admin
+            .post_json(
+                &url,
+                &json!({"schema": {"services": [{"type": "app", "data": {"serviceName": "built", "source": {"type": "git", "repo": "https://github.com/acme/app.git", "ref": "main", "path": "p".repeat(256)}}}]}}),
+            )
+            .await
+            .assert_validation_error("git_path");
+
+        // A wildcard written loosely is still a wildcard: administrators'.
+        let maker = support::user_with(
+            &app,
+            "maker",
+            &["projects.view", "services.create", "service_domains.create"],
+        )
+        .await;
+        let maker = app.acting_as(&maker).await;
+        maker
+            .post_json(
+                &url,
+                &app_service(
+                    "wild",
+                    json!({"domains": [{"host": " *.Example.com", "port": 80}]}),
+                ),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        maker
+            .post_json(
+                &url,
+                &app_service(
+                    "tame",
+                    json!({"domains": [{"host": "Tame.Example.com", "port": 80}]}),
+                ),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+    }
+);

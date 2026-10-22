@@ -5,6 +5,7 @@
 use rdockpanel::database::migrations::Migrator;
 use rustcms::axum::http::{Method, StatusCode};
 use rustcms_testing::{TestDb, db_test};
+use sea_orm::EntityTrait;
 use serde_json::json;
 
 use crate::deployments::create;
@@ -207,5 +208,35 @@ db_test!(
             .get(&api("/deployments/999999"))
             .await
             .assert_status(StatusCode::NOT_FOUND);
+
+        // The environment in clear (`secrets`): read once it is audited.
+        admin
+            .send(
+                Method::PUT,
+                &app.admin_api(&format!("x/apps/services/{web}/env")),
+                Some(&json!({"text": "TOKEN=s3cr3t-value\n"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let secrets = app
+            .with_token(&root, &["services.view", "services.secrets"])
+            .await;
+        let read = secrets.get(&api(&format!("/services/{web}/env"))).await;
+        read.assert_status(StatusCode::OK);
+        assert_eq!(read.json()["env"]["TOKEN"], "s3cr3t-value");
+        let audit: Vec<String> = rustcms::models::audit_log::Entity::find()
+            .all(app.state().db())
+            .await
+            .unwrap()
+            .iter()
+            .map(|a| format!("{a:?}"))
+            .collect();
+        assert!(
+            audit
+                .iter()
+                .any(|e| e.contains("services.env_read") && e.contains("\"api\"")),
+            "{audit:?}"
+        );
+        assert!(!audit.iter().any(|e| e.contains("s3cr3t-value")));
     }
 );

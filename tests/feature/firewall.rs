@@ -146,6 +146,55 @@ db_test!(
             )
             .await
             .assert_validation_error("cidr");
+        // Each change recorded with it: changed again, made and removed.
+        let id = opened.json()["id"].as_i64().unwrap();
+        admin
+            .send(Method::PATCH, &url(&format!("/openings/{id}")), Some(&json!({"ports": "5432", "protocol": "tcp", "target": "published", "sources_v4": "10.8.0.7/24, 203.0.113.25", "note": "VPN"})))
+            .await
+            .assert_status(StatusCode::OK);
+        let extra = open(
+            json!({"ports": "8080", "protocol": "tcp", "target": "published", "anywhere": true}),
+        )
+        .await;
+        extra.assert_status(StatusCode::OK);
+        let extra = extra.json()["id"].as_i64().unwrap();
+        admin
+            .send(Method::DELETE, &url(&format!("/openings/{extra}")), None)
+            .await
+            .assert_status(StatusCode::OK);
+        let blocked = admin
+            .send(
+                Method::POST,
+                &url("/blocked"),
+                Some(&json!({"cidr": "192.0.2.9"})),
+            )
+            .await;
+        blocked.assert_status(StatusCode::OK);
+        let blocked = blocked.json()["id"].as_i64().unwrap();
+        admin
+            .send(Method::DELETE, &url(&format!("/blocked/{blocked}")), None)
+            .await
+            .assert_status(StatusCode::OK);
+        admin
+            .send(Method::DELETE, &url(&format!("/blocked/{blocked}")), None)
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        let events: Vec<String> = rustcms::models::audit_log::Entity::find()
+            .all(state.db())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|a| a.event)
+            .collect();
+        for event in [
+            "firewall.opening.create",
+            "firewall.opening.update",
+            "firewall.opening.delete",
+            "firewall.blocked.create",
+            "firewall.blocked.delete",
+        ] {
+            assert!(events.iter().any(|e| e == event), "{event}: {events:?}");
+        }
 
         // The page: the host read, each port with what the firewall does.
         outputs

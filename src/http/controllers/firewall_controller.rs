@@ -6,7 +6,10 @@
 use rustcms::audit::{self, AuditActor, AuditContext, AuditEntry, RequestMeta};
 use rustcms::prelude::*;
 use rustcms::{AppError, AppResult, Json, ValidationErrors};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
+    Set,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -26,17 +29,19 @@ fn docker(app: &AppState) -> AppResult<std::sync::Arc<Docker>> {
         .ok_or_else(|| AppError::internal("Docker is not configured"))
 }
 
+/// Recorded in the change's own transaction: no change without its entry.
 async fn audited(
-    app: &AppState,
+    txn: &DatabaseTransaction,
     auth: &Auth,
     request: RequestMeta,
     event: &str,
     key: String,
     meta: Value,
-) {
+) -> AppResult<()> {
     let context = AuditContext::new(AuditActor::user(auth.principal()), request);
     let entry = AuditEntry::new(event, "firewall").key(key).meta(meta);
-    audit::record_detached(app.db(), &context, entry).await;
+    audit::record(txn, &context, entry).await?;
+    Ok(())
 }
 
 /// `GET /firewall`.
@@ -161,7 +166,8 @@ pub async fn create_opening(
     Json(input): Json<OpeningInput>,
 ) -> AppResult<Json<Value>> {
     let (ports, protocol, target, sources) = checked(&input)?;
-    if firewall_opening::Entity::find().count(app.db()).await? as usize >= rules::OPENINGS_MAX {
+    let txn = rustcms::db::begin_write(app.db()).await?;
+    if firewall_opening::Entity::find().count(&txn).await? as usize >= rules::OPENINGS_MAX {
         return Err(ValidationErrors::field(
             "ports",
             format!("at most {} openings", rules::OPENINGS_MAX),
@@ -182,18 +188,19 @@ pub async fn create_opening(
         updated_at: Set(now),
         ..Default::default()
     }
-    .insert(app.db())
+    .insert(&txn)
     .await?;
     let value = serde_json::to_value(&row).unwrap_or(Value::Null);
     audited(
-        &app,
+        &txn,
         &auth,
         request,
         "firewall.opening.create",
         row.id.to_string(),
         value.clone(),
     )
-    .await;
+    .await?;
+    txn.commit().await?;
     Ok(Json(value))
 }
 
@@ -205,11 +212,12 @@ pub async fn update_opening(
     Path(id): Path<i64>,
     Json(input): Json<OpeningInput>,
 ) -> AppResult<Json<Value>> {
+    let (ports, protocol, target, sources) = checked(&input)?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     let row = firewall_opening::Entity::find_by_id(id)
-        .one(app.db())
+        .one(&txn)
         .await?
         .ok_or(AppError::NotFound)?;
-    let (ports, protocol, target, sources) = checked(&input)?;
     let enabled = input.enabled.unwrap_or(row.enabled);
     let mut active: firewall_opening::ActiveModel = row.into();
     active.port_start = Set(i32::from(ports.0));
@@ -221,17 +229,18 @@ pub async fn update_opening(
     active.note = Set(input.note.clone().filter(|n| !n.trim().is_empty()));
     active.enabled = Set(enabled);
     active.updated_at = Set(chrono::Utc::now());
-    let row = active.update(app.db()).await?;
+    let row = active.update(&txn).await?;
     let value = serde_json::to_value(&row).unwrap_or(Value::Null);
     audited(
-        &app,
+        &txn,
         &auth,
         request,
         "firewall.opening.update",
         id.to_string(),
         value.clone(),
     )
-    .await;
+    .await?;
+    txn.commit().await?;
     Ok(Json(value))
 }
 
@@ -242,21 +251,23 @@ pub async fn delete_opening(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    let txn = rustcms::db::begin_write(app.db()).await?;
     let gone = firewall_opening::Entity::delete_by_id(id)
-        .exec(app.db())
+        .exec(&txn)
         .await?;
     if gone.rows_affected == 0 {
         return Err(AppError::NotFound);
     }
     audited(
-        &app,
+        &txn,
         &auth,
         request,
         "firewall.opening.delete",
         id.to_string(),
         json!({}),
     )
-    .await;
+    .await?;
+    txn.commit().await?;
     Ok(Json(json!({ "deleted": id })))
 }
 
@@ -279,24 +290,25 @@ pub async fn create_blocked(
     if cidr.prefix == 0 {
         return Err(ValidationErrors::field("cidr", "would block everyone").into());
     }
+    if input.note.as_ref().is_some_and(|n| n.chars().count() > 200) {
+        return Err(ValidationErrors::field("note", "is at most 200 characters").into());
+    }
     let text = cidr.to_string();
+    let txn = rustcms::db::begin_write(app.db()).await?;
     if firewall_blocked::Entity::find()
         .filter(firewall_blocked::Column::Cidr.eq(&text))
-        .one(app.db())
+        .one(&txn)
         .await?
         .is_some()
     {
         return Err(ValidationErrors::field("cidr", "is blocked already").into());
     }
-    if firewall_blocked::Entity::find().count(app.db()).await? as usize >= rules::BLOCKED_MAX {
+    if firewall_blocked::Entity::find().count(&txn).await? as usize >= rules::BLOCKED_MAX {
         return Err(ValidationErrors::field(
             "cidr",
             format!("at most {} addresses", rules::BLOCKED_MAX),
         )
         .into());
-    }
-    if input.note.as_ref().is_some_and(|n| n.chars().count() > 200) {
-        return Err(ValidationErrors::field("note", "is at most 200 characters").into());
     }
     let row = firewall_blocked::ActiveModel {
         cidr: Set(text),
@@ -304,18 +316,19 @@ pub async fn create_blocked(
         created_at: Set(chrono::Utc::now()),
         ..Default::default()
     }
-    .insert(app.db())
+    .insert(&txn)
     .await?;
     let value = serde_json::to_value(&row).unwrap_or(Value::Null);
     audited(
-        &app,
+        &txn,
         &auth,
         request,
         "firewall.blocked.create",
         row.id.to_string(),
         value.clone(),
     )
-    .await;
+    .await?;
+    txn.commit().await?;
     Ok(Json(value))
 }
 
@@ -326,21 +339,23 @@ pub async fn delete_blocked(
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    let txn = rustcms::db::begin_write(app.db()).await?;
     let gone = firewall_blocked::Entity::delete_by_id(id)
-        .exec(app.db())
+        .exec(&txn)
         .await?;
     if gone.rows_affected == 0 {
         return Err(AppError::NotFound);
     }
     audited(
-        &app,
+        &txn,
         &auth,
         request,
         "firewall.blocked.delete",
         id.to_string(),
         json!({}),
     )
-    .await;
+    .await?;
+    txn.commit().await?;
     Ok(Json(json!({ "deleted": id })))
 }
 

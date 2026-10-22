@@ -84,12 +84,14 @@ impl Default for PanelConfig {
 }
 
 impl PanelConfig {
-    /// From the app's configuration; defaults when the section is missing.
-    pub fn from_config(config: &rustcms::Config) -> Self {
-        let mut panel = config.section::<Self>("panel").unwrap_or_default();
+    /// From the app's configuration; defaults for what the section leaves
+    /// out (or for all of it, missing). A value of the wrong kind is an
+    /// error: never read as a default (`installed`, `reserved_ports`…).
+    pub fn from_config(config: &rustcms::Config) -> Result<Self, rustcms::config::ConfigError> {
+        let mut panel = config.section::<Self>("panel")?;
         panel.panel_host = panel_host(&config.app.url);
         panel.panel_url = shown_url(&config.app.url);
-        panel
+        Ok(panel)
     }
 }
 
@@ -118,6 +120,29 @@ fn shown_url(url: &str) -> String {
     parsed.set_query(None);
     parsed.set_fragment(None);
     parsed.as_str().trim_end_matches('/').to_owned()
+}
+
+/// The longest command a service runs (characters, as its column).
+pub const MAX_COMMAND: usize = 1000;
+/// The longest path inside a repository (characters, as its columns).
+pub const MAX_REPO_PATH: usize = 255;
+/// The longest redirect replacement (characters, as its column).
+pub const MAX_REPLACEMENT: usize = 500;
+
+/// A domain's host as stored and checked: trimmed, lowercase
+/// (` Shop.Example.COM` → `shop.example.com`).
+pub fn normalize_host(host: &str) -> String {
+    host.trim().to_ascii_lowercase()
+}
+
+/// The most a sealed value holds (its JSON): RustCMS's limit. A service's
+/// environment is one value, and so are its files together (a deployment
+/// keeps them so).
+pub const SEALED_MAX: usize = rustcms::crypto::MAX_PLAINTEXT;
+
+/// Whether `value` can be sealed (its JSON at most [`SEALED_MAX`] bytes).
+pub fn sealable<T: serde::Serialize>(value: &T) -> bool {
+    serde_json::to_vec(value).is_ok_and(|json| json.len() <= SEALED_MAX)
 }
 
 /// Whether `host` is the panel's own (no service may route it).
@@ -318,6 +343,30 @@ pub fn bind_source(source: &str, roots: &[PathBuf]) -> Result<PathBuf, BindRefus
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn panel_config(path: &str, value: serde_json::Value) -> Result<PanelConfig, String> {
+        let config = rustcms_testing::test_config("mysql://unused")
+            .with(path, value)
+            .unwrap();
+        PanelConfig::from_config(&config).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn a_malformed_panel_section_is_an_error() {
+        // Left out: the defaults.
+        let panel = panel_config("panel.public_ip", serde_json::json!("203.0.113.7")).unwrap();
+        assert_eq!(panel.public_ip, "203.0.113.7");
+        assert_eq!(panel.https_port, 443);
+        // Of the wrong kind: never the defaults.
+        for (path, value) in [
+            ("panel.installed", serde_json::json!("yes")),
+            ("panel.https_port", serde_json::json!("oops")),
+            ("panel.reserved_ports", serde_json::json!("22,80")),
+        ] {
+            let err = panel_config(path, value).unwrap_err();
+            assert!(err.contains(path.trim_start_matches("panel.")), "{err}");
+        }
+    }
 
     #[test]
     fn the_panels_url_as_shown() {

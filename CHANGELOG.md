@@ -3,6 +3,20 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.9.2 — 2026-10-23
+
+- A Compose file over 64 KB, and long notes in Vietnamese or emoji, are saved instead of failing
+  (MySQL columns widened).
+- An environment over 32 KB, or a service's files over 32 KB together, are refused with a clear
+  message (the Environment tab, the Storage tab, templates, Deploy) instead of a server error.
+- Templates and "Create from Schema" check what the forms check: domains are stored lowercase, and a
+  command, a redirect or a repository path too long is refused by its field.
+- Every firewall change, certificate upload, renewal and removal, and API token is recorded in the
+  audit log together with the change; reading a service's environment through the API is refused
+  when its audit entry cannot be written.
+- A `[panel]` setting of the wrong kind (`RUSTCMS_PANEL__…`) now stops the panel at start with the
+  setting's name, instead of running on defaults.
+
 ## 0.9.1 — 2026-10-22
 
 - The memory warning is drawn like the rest of the panel, in light and dark.

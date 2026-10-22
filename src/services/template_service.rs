@@ -483,7 +483,10 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
             .flatten()
         {
             let raw = text(domain, "host").unwrap_or_default();
-            let host = placeholders::expand(&raw, &vars);
+            // As stored (the wildcard check reads it so too).
+            let host = crate::services::deploy_rules_service::normalize_host(
+                &placeholders::expand(&raw, &vars),
+            );
             if host.contains("$(") {
                 warn(
                     &mut plan,

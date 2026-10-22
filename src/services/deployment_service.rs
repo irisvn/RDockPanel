@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap};
 use rustcms::crypto::{Encrypted, Keyring, Unreadable};
 
 use crate::models::{deployment, project, service, service_domain, service_mount, service_port};
-use crate::services::deploy_rules_service::{bind_source, config};
+use crate::services::deploy_rules_service::{bind_source, config, sealable};
 use crate::services::deploy_service::{
     ConfigRef, DeployOptions, PinnedImage, Runtime, Snapshot, TEMPLATE_LABEL, desired,
     network_name, pin_image, pulled_digest,
@@ -388,6 +388,17 @@ pub async fn request<C: ConnectionTrait>(
         _ => {
             let env = service_env(service, keyring).map_err(|_| unreadable_env())?;
             let files = service_files(txn, service, keyring).await?;
+            // Kept sealed whole by the deployment (32 KiB each).
+            if !sealable(&files) {
+                return Err(AppError::BadRequest(
+                    "the service's files are over 32 KiB together: shorten or remove some".into(),
+                ));
+            }
+            if !sealable(&env) {
+                return Err(AppError::BadRequest(
+                    "the service's environment is over 32 KiB: shorten it".into(),
+                ));
+            }
             let key = env_digest_key(keyring);
             let snapshot = snapshot_without_env(txn, service)
                 .await?
