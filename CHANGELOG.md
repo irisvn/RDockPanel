@@ -3,6 +3,10 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.9.1 — 2026-10-22
+
+- The memory estimate now recognizes an image written with or without `:latest` as the same one.
+
 ## 0.9.0 — 2026-10-22
 
 - **Room on the server**: creating a service, using a template, Deploy, Start, Restart and Force

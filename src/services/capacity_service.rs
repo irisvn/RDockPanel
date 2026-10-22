@@ -379,20 +379,33 @@ async fn observed_image(
     if image.is_empty() {
         return None;
     }
+    let wanted = same_image(image);
     let same = service::Entity::find()
         .filter(service::Column::ProjectId.eq(project_id))
-        .filter(service::Column::Image.eq(image))
         .filter(service::Column::DesiredState.ne("stopped"))
         .all(app.db())
         .await
         .ok()?;
-    for row in same {
+    for row in same.iter().filter(|r| same_image(&r.image) == wanted) {
         let name = deploy_service::service_name(project, &row.name);
         if let (_, Some(used)) = observed(docker, &name).await {
             return Some(used);
         }
     }
     None
+}
+
+/// An image as its tasks name it: without its digest, `:latest` when it
+/// has no tag (`whoami` and `whoami:latest` are one).
+pub fn same_image(image: &str) -> String {
+    let image = image.trim();
+    let image = image.split('@').next().unwrap_or(image);
+    let name = image.rsplit('/').next().unwrap_or(image);
+    if name.contains(':') || image.is_empty() {
+        image.to_owned()
+    } else {
+        format!("{image}:latest")
+    }
 }
 
 async fn present(docker: &Docker, image: &str) -> bool {
@@ -539,7 +552,7 @@ pub async fn for_action(
     let same_image = snapshot.build.is_some()
         || template
             .and_then(|t| t.container_spec.as_ref()?.image.as_deref())
-            .is_some_and(|i| i.split('@').next() == Some(image));
+            .is_some_and(|i| same_image(i) == same_image(image));
     // Built when deployed, rebuilt, or never built yet.
     let build = snapshot.build.is_some()
         && (matches!(action, Action::Deploy | Action::Rebuild) || deployed.is_none());
@@ -912,6 +925,23 @@ mod tests {
             Source::Default,
         );
         assert_eq!(bigger.memory, 142 * MIB);
+    }
+
+    #[test]
+    fn an_image_is_the_same_with_or_without_latest_and_its_digest() {
+        assert_eq!(
+            same_image("ghcr.io/traefik/whoami"),
+            "ghcr.io/traefik/whoami:latest"
+        );
+        assert_eq!(
+            same_image("ghcr.io/traefik/whoami:latest@sha256:abc"),
+            "ghcr.io/traefik/whoami:latest"
+        );
+        assert_eq!(
+            same_image("localhost:5000/app"),
+            "localhost:5000/app:latest"
+        );
+        assert_eq!(same_image("mysql:9"), "mysql:9");
     }
 
     #[test]

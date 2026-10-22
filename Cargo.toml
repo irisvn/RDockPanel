@@ -1,6 +1,6 @@
 [package]
 name = "rdockpanel"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2024"
 description = "Free, self-hosted server panel like EasyPanel: server monitoring and Docker management (Swarm deployment in progress)."
 license = "MIT OR Apache-2.0"
@@ -8,7 +8,7 @@ repository = "https://github.com/irisvn/rdockpanel"
 publish = false
 
 [package.metadata.rustcms]
-version = "0.9.0"
+version = "0.9.1"
 
 [dependencies]
 rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.8.2" }
