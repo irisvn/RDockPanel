@@ -925,6 +925,33 @@ impl DockerApi for BollardDocker {
         self.client.list_tasks(Some(options)).await.map_err(map_err)
     }
 
+    async fn reserved_memory(&self) -> DockerResult<u64> {
+        let filters = HashMap::from([("desired-state", vec!["running".to_owned()])]);
+        let options = ::bollard::query_parameters::ListTasksOptionsBuilder::new()
+            .filters(&filters)
+            .build();
+        let tasks = self
+            .client
+            .list_tasks(Some(options))
+            .await
+            .map_err(map_err)?;
+        // Placed on a node only: a pending task holds nothing yet.
+        Ok(tasks
+            .iter()
+            .filter(|t| t.node_id.as_deref().is_some_and(|n| !n.is_empty()))
+            .filter_map(|t| {
+                t.spec
+                    .as_ref()?
+                    .resources
+                    .as_ref()?
+                    .reservations
+                    .as_ref()?
+                    .memory_bytes
+            })
+            .map(|b| u64::try_from(b).unwrap_or(0))
+            .sum())
+    }
+
     fn service_logs(
         &self,
         service: &str,

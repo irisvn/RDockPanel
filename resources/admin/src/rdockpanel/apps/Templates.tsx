@@ -1,12 +1,13 @@
 // EasyPanel's templates in a project: the catalog (searchable), a
 // template's form (its JSON Schema), and "Create from schema" (a generator's
 // `{services}` output, pasted). Creating can deploy at once.
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { type PageProps } from "@rustcms/admin-sdk";
 import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, ErrorState, Input, Loading, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
 import { ErrorNote, Field } from "../lib/ui";
 import type { Project } from "./types";
+import { type Capacity, CapacityNotice, worthSaying } from "./Capacity";
 
 type Item = { slug: string; name: string; description: string | null; tags: string[]; logo_file: string | null };
 type Property = {
@@ -27,6 +28,35 @@ type Page = {
   logo: boolean;
 };
 type Made = { project: string; services: Array<{ id: number; name: string; kind: string }>; warnings: string[] };
+type Tried = { capacity: Capacity };
+
+/** Creating and deploying asks for room first: a dry run (nothing made)
+ * whose notice stays until what is sent changes. */
+function useRoom() {
+  const [room, setRoom] = useState<Capacity | null>(null);
+  const [ack, setAck] = useState(false);
+  // What is sent changed: an answer about what was sent before is dropped.
+  const asked = useRef(0);
+  const reset = () => {
+    asked.current += 1;
+    setRoom(null);
+    setAck(false);
+  };
+  /** Whether to create now (else the notice is shown first). */
+  const ready = async (deploy: boolean, dryRun: () => Promise<Tried>) => {
+    if (!deploy) return true;
+    if (room) return room.level !== "impossible" && (room.level !== "short" || ack);
+    const ask = asked.current;
+    const tried = await dryRun();
+    // Changed meanwhile: asked again on the next click.
+    if (ask !== asked.current) return false;
+    if (!worthSaying(tried.capacity)) return true;
+    setRoom(tried.capacity);
+    return false;
+  };
+  const blocked = (deploy: boolean) => deploy && !!room && (room.level === "impossible" || (room.level === "short" && !ack));
+  return { room, ack, setAck, reset, ready, blocked };
+}
 
 const logoUrl = (slug: string) => `${document.baseURI.replace(/\/$/, "")}/api/x/apps/templates/${slug}/logo`;
 
@@ -37,6 +67,7 @@ function TemplateForm(props: PageProps<unknown> & { slug: string; project: Proje
   const [deploy, setDeploy] = useState(props.project.can.deploy);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const room = useRoom();
   if (page.isLoading) return <Loading />;
   if (page.error || !page.data) return <ErrorState error={page.error} />;
   const p = page.data;
@@ -48,7 +79,10 @@ function TemplateForm(props: PageProps<unknown> & { slug: string; project: Proje
   // A select without a default starts on its first option (what it shows).
   const value = (name: string, prop: Property) =>
     name in values ? values[name] : prop.default ?? optionsOf(prop)?.[0]?.value ?? (prop.type === "boolean" ? false : "");
-  const set = (name: string, v: unknown) => setValues((old) => ({ ...old, [name]: v }));
+  const set = (name: string, v: unknown) => {
+    room.reset();
+    setValues((old) => ({ ...old, [name]: v }));
+  };
   return (
     <form
       className="rdp2-form"
@@ -62,7 +96,9 @@ function TemplateForm(props: PageProps<unknown> & { slug: string; project: Proje
           input[name] = prop.type === "number" || prop.type === "integer" ? Number(v) : v;
         }
         try {
-          const made = await props.api.post<Made>(`/apps/projects/${props.project.id}/templates/${props.slug}`, { input, deploy });
+          const url = `/apps/projects/${props.project.id}/templates/${props.slug}`;
+          if (!(await room.ready(deploy, () => props.api.post<Tried>(url, { input, deploy, dry_run: true })))) return;
+          const made = await props.api.post<Made>(url, { input, deploy });
           props.onDone(made);
         } catch (err) {
           setError(err);
@@ -114,12 +150,20 @@ function TemplateForm(props: PageProps<unknown> & { slug: string; project: Proje
       })}
       {props.project.can.deploy && (
         <label className="rdp2-row">
-          <Switch checked={deploy} onCheckedChange={setDeploy} /> {t("Deploy now")}
+          <Switch
+            checked={deploy}
+            onCheckedChange={(v) => {
+              room.reset();
+              setDeploy(v);
+            }}
+          />{" "}
+          {t("Deploy now")}
         </label>
       )}
+      {deploy && <CapacityNotice t={t} report={room.room} ack={room.ack} onAck={room.setAck} table />}
       <ErrorNote error={error} />
       <div className="rdp2-row rdp2-end">
-        <Button type="submit" disabled={busy}>
+        <Button type="submit" disabled={busy || room.blocked(deploy)}>
           {t("Create")}
         </Button>
       </div>
@@ -132,6 +176,7 @@ function FromSchema(props: PageProps<unknown> & { project: Project; onBack: () =
   const [text, setText] = useState("");
   const [deploy, setDeploy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const room = useRoom();
   return (
     <form
       className="rdp2-form"
@@ -140,7 +185,9 @@ function FromSchema(props: PageProps<unknown> & { project: Project; onBack: () =
         setError(null);
         try {
           const schema = JSON.parse(text);
-          props.onDone(await props.api.post<Made>(`/apps/projects/${props.project.id}/schema`, { schema, deploy }));
+          const url = `/apps/projects/${props.project.id}/schema`;
+          if (!(await room.ready(deploy, () => props.api.post<Tried>(url, { schema, deploy, dry_run: true })))) return;
+          props.onDone(await props.api.post<Made>(url, { schema, deploy }));
         } catch (err) {
           setError(err);
         }
@@ -152,16 +199,32 @@ function FromSchema(props: PageProps<unknown> & { project: Project; onBack: () =
         </Button>
       </div>
       <Field label={t("Schema")} help={t("A template's output: {\"services\": [{\"type\": \"app\", \"data\": {…}}]}")}>
-        <Textarea className="rdp2-env" rows={14} value={text} onChange={(e) => setText(e.target.value)} />
+        <Textarea
+          className="rdp2-env"
+          rows={14}
+          value={text}
+          onChange={(e) => {
+            room.reset();
+            setText(e.target.value);
+          }}
+        />
       </Field>
       {props.project.can.deploy && (
         <label className="rdp2-row">
-          <Switch checked={deploy} onCheckedChange={setDeploy} /> {t("Deploy now")}
+          <Switch
+            checked={deploy}
+            onCheckedChange={(v) => {
+              room.reset();
+              setDeploy(v);
+            }}
+          />{" "}
+          {t("Deploy now")}
         </label>
       )}
+      {deploy && <CapacityNotice t={t} report={room.room} ack={room.ack} onAck={room.setAck} table />}
       <ErrorNote error={error} />
       <div className="rdp2-row rdp2-end">
-        <Button type="submit" disabled={!text.trim()}>
+        <Button type="submit" disabled={!text.trim() || room.blocked(deploy)}>
           {t("Create")}
         </Button>
       </div>

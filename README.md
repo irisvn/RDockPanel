@@ -61,7 +61,9 @@ feature is free: no project limits, no paid tiers.
   pinned to their registry digest (a local-only image to its id, with a warning). Updates are rolling
   (start-first when zero downtime is on, the service has a health check and publishes no host-mode
   port; stop-first otherwise) and Swarm rolls back a failed one. Every deployment keeps its
-  configuration, for history and rollback, and the page shows changes not deployed yet.
+  configuration, for history and rollback, and the page shows changes not deployed yet. Before a
+  service is created or deployed, the panel estimates the memory it takes and warns when the server
+  runs low (a confirmation when it does not fit; never blocking deploys from the API or webhooks).
 - **Domains and HTTPS** through **Traefik**: domains and paths per service; a domain with HTTPS on
   redirects its HTTP to HTTPS; wildcard domains (`*.example.com`, for administrators) and custom
   Traefik middlewares; redirects (regular expressions), a rate limit by visitor (their real address

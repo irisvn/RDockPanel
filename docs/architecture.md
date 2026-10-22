@@ -247,6 +247,42 @@ whose ranges they may not overlap). Every service router's priority is its rule'
 then length) times 4, the variants +1 and +2: never above another route. Counters are Traefik's, in
 memory: per router (so per domain), reset when Traefik restarts or reloads.
 
+### Capacity check
+
+`services/capacity_service.rs` tells whether the server has room for what is about to run. It is
+advisory: the panel asks before (`POST /apps/capacity`, a template's dry run), and every deployment's
+run checks again and logs it; nothing stops a deployment but the user.
+
+What a service takes, by task, in this order: what its own running tasks use (the same image) (the largest of up to
+three, one Docker stats sample each), or the same image in its project when the caller sees its services (`observed`); its memory
+limit (`limit`); else a typical figure for its kind (mysql 450 MB, mongo 300, mariadb 200,
+postgres 128, redis 32, app 192: `default`). A Compose file counts its services (an app's each);
+one from a repository is `unknown`. Then what the action changes:
+
+| | Memory | Disk |
+|---|---|---|
+| more tasks than run now (a start: all), or another image | what they take more than the running ones use | |
+| a rolling update, start-first | a new task beside the one it replaces, while it rolls (parallelism 1; reservations too) | |
+| a build (Deploy, Force rebuild, or never built yet) | 1 GB while it builds | 3 GB |
+| an image pulled (not here yet, or a Force rebuild) | | 1 GB |
+
+Against the host (the panel's samples: `MemAvailable`, swap, the disk of `/`, the CPU's average):
+
+| Level | When |
+|---|---|
+| `impossible` | Swarm's memory reservations (its tasks placed on a node) plus the new ones exceed the node's memory: the task would stay pending. The UI refuses to deploy it |
+| `short` | the memory needed exceeds what is available, or less than 1 GB of disk would stay free. The UI asks for "deploy anyway" |
+| `tight` | less than 15% of the memory (at least 256 MB) stays free, swap over half used, less than 2 GB of disk, or the CPU over 90%. The UI says it |
+| `ok` | otherwise, or nothing more runs |
+| `unknown` | the host's figures are not read yet: nothing said |
+
+The server's figures go to who sees the server (`server.view`); everyone else sees the level, the
+need and why it does not fit, never the server's state, and `observed` reads only their project's
+services. A deployment's log says the level and the need (no host figures). A service whose
+deployment runs short (whoever asked: the UI, the API, a webhook) is notified once to the channels
+hearing `service` events, again only after it had room (kept in memory: a restart may say it
+again). A running Compose service counts nothing more (what it adds is not compared).
+
 ### Compose services
 
 A service of kind `compose` (made by the panel's administrators only:

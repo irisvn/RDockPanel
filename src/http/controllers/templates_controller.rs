@@ -106,6 +106,9 @@ pub struct UseTemplate {
     /// Deploy the services once created.
     #[serde(default)]
     pub deploy: bool,
+    /// Nothing created: what they would take (`capacity`).
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 /// Runs template `slug` with `input` and creates its services in project `id`.
@@ -128,7 +131,16 @@ pub async fn create(
     let output = template_engine::run_isolated(&source.runner, &code, &meta, &input)
         .await
         .map_err(unavailable)?;
-    apply(&app, &auth, request, id, &output, body.deploy, Some(&slug)).await
+    apply(
+        &app,
+        &auth,
+        request,
+        id,
+        &output,
+        (body.deploy, body.dry_run),
+        Some(&slug),
+    )
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +150,8 @@ pub struct FromSchema {
     pub schema: Value,
     #[serde(default)]
     pub deploy: bool,
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 /// "Create from Schema": a generator's output, pasted.
@@ -152,7 +166,16 @@ pub async fn from_schema(
         .await?;
     let body: FromSchema = serde_json::from_value(body)
         .map_err(|e| AppError::BadRequest(format!("the request: {e}")))?;
-    apply(&app, &auth, request, id, &body.schema, body.deploy, None).await
+    apply(
+        &app,
+        &auth,
+        request,
+        id,
+        &body.schema,
+        (body.deploy, body.dry_run),
+        None,
+    )
+    .await
 }
 
 /// The form's defaults (`schema.properties.*.default`) under what was sent.
@@ -175,14 +198,15 @@ fn with_defaults(meta: &Value, input: Value) -> Value {
 }
 
 /// Creates the planned services (one transaction: all or none), then asks
-/// for their deployments when `deploy`.
+/// for their deployments when `deploy`; with `dry_run`, what they would
+/// take only (checked as if created).
 async fn apply(
     app: &AppState,
     auth: &Auth,
     request: RequestMeta,
     project_id: i64,
     output: &Value,
-    deploy: bool,
+    (deploy, dry_run): (bool, bool),
     slug: Option<&str>,
 ) -> AppResult<Json<Value>> {
     let principal = auth.principal();
@@ -259,6 +283,28 @@ async fn apply(
         if wanted && !access_service::can(&txn, principal, project_id, permission).await? {
             return Err(AppError::Forbidden);
         }
+    }
+    if dry_run {
+        drop(txn);
+        let observe = access_service::can(app.db(), principal, project_id, "services.view").await?;
+        let planned: Vec<_> = services
+            .iter()
+            .map(crate::services::capacity_service::Planned::of)
+            .collect();
+        let report = crate::services::capacity_service::for_new(
+            app,
+            project.id,
+            &project.name,
+            &planned,
+            observe,
+        )
+        .await;
+        return Ok(Json(json!({
+            "project": project.name,
+            "services": services.iter().map(|s| json!({ "name": s.name, "kind": s.kind })).collect::<Vec<_>>(),
+            "warnings": warnings,
+            "capacity": crate::services::capacity_service::json(&report, principal.can("server.view")),
+        })));
     }
     let mut created = vec![];
     for new in services {

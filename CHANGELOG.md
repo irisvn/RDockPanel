@@ -3,6 +3,15 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.9.0 — 2026-10-22
+
+- **Room on the server**: creating a service, using a template, Deploy, Start, Restart and Force
+  rebuild say when the server's memory (or disk) runs low or is not enough, with what each service
+  would take. When it does not fit, deploying asks to be confirmed; a memory reservation the server
+  cannot give is refused (Swarm would leave it pending). Deployments from the API, webhooks and
+  trigger URLs are never stopped: their log says it, and the notification channels hear it.
+- Templates keep their memory limit and reservation (EasyPanel's `resources`).
+
 ## 0.8.0 — 2026-10-22
 
 - **Maintenance page** redesigned: simpler, light and dark, in the visitor's language, with when the

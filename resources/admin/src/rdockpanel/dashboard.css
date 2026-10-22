@@ -302,3 +302,26 @@
 .rdp2-insert:hover:not(:disabled) { background: var(--muted); }
 .rdp2-logo { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .rdp2-logo img { height: 2.5rem; max-width: 10rem; object-fit: contain; border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.25rem; background: var(--background); }
+
+/* Room on the server (apps/Capacity.tsx): amber when little stays free, red when it does not fit. */
+.rdp2-cap { --cap: var(--rdp-busy); display: flex; flex-direction: column; gap: 0.625rem; padding: 0.75rem 0.875rem; border: 1px solid color-mix(in srgb, var(--cap) 40%, var(--border)); border-radius: 0.625rem; background: color-mix(in srgb, var(--cap) 8%, var(--background)); font-size: var(--rdp-text-sm); }
+.rdp2-cap-bad { --cap: var(--rdp-bad); }
+.rdp2-cap-head { display: flex; gap: 0.5rem; align-items: flex-start; }
+.rdp2-cap-head p { margin: 0.125rem 0 0; color: var(--muted-foreground); }
+.rdp2-cap-icon { flex: none; width: 1.125rem; height: 1.125rem; margin-top: 0.0625rem; border-radius: 50%; display: grid; place-items: center; background: var(--cap); color: #fff; font-size: 0.6875rem; font-weight: 700; }
+.rdp2-cap-bar { display: flex; height: 0.625rem; overflow: hidden; border: 1px solid var(--border); border-radius: 999px; background: var(--muted); }
+.rdp2-cap-bar i { display: block; height: 100%; }
+.rdp2-cap-used { background: var(--muted-foreground); opacity: 0.55; }
+.rdp2-cap-more { background: var(--cap); }
+.rdp2-cap-legend { display: flex; flex-wrap: wrap; gap: 0.875rem; font-size: var(--rdp-text-xs); color: var(--muted-foreground); }
+.rdp2-cap-legend b { color: var(--foreground); font-weight: 600; }
+.rdp2-cap-dot { display: inline-block; width: 0.5rem; height: 0.5rem; margin-right: 0.3rem; border-radius: 2px; vertical-align: middle; }
+.rdp2-cap-table { width: 100%; border-collapse: collapse; font-size: var(--rdp-text-xs); }
+.rdp2-cap-table th, .rdp2-cap-table td { padding: 0.3rem 0; text-align: left; border-bottom: 1px solid var(--border); }
+.rdp2-cap-table th { color: var(--muted-foreground); font-weight: 500; }
+.rdp2-cap-table .rdp2-num { text-align: right; font-variant-numeric: tabular-nums; }
+.rdp2-cap-table tfoot td { font-weight: 600; border-bottom: 0; }
+.rdp2-cap-source { padding: 0.0625rem 0.45rem; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-foreground); white-space: nowrap; }
+.rdp2-cap-reasons { margin: 0; padding-left: 1.125rem; }
+.rdp2-cap-note { margin: 0; font-size: var(--rdp-text-xs); color: var(--muted-foreground); }
+.rdp2-cap-ack { display: flex; gap: 0.5rem; align-items: center; padding-top: 0.5rem; border-top: 1px solid color-mix(in srgb, var(--cap) 30%, var(--border)); font-weight: 500; }

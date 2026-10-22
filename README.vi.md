@@ -55,6 +55,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **Deploy:**
   - Deploy, Start, Stop, Restart và Destroy ngay trên trang service, có log trực tiếp; mỗi service chỉ chạy một lần deploy tại một thời điểm;
   - Rollback từ một lần deploy trước ("Roll back to this" trong danh sách Deployments);
+  - trước khi tạo hoặc deploy service, panel ước tính RAM cần thêm và cảnh báo khi máy sắp hết (không đủ thì phải xác nhận mới deploy; deploy qua API hoặc webhook không bị chặn, chỉ ghi log và gửi thông báo);
   - Build lại từ đầu (Force rebuild: không dùng build cache, pull lại image, thay mọi task); Overview hiện lỗi gần đây;
   - image được ghim theo digest của registry (image chỉ có trên máy thì ghim theo id, kèm cảnh báo);
   - rolling update: task mới chạy trước khi bật zero downtime, có healthcheck và không publish port kiểu host (nếu không thì task cũ dừng trước); Swarm tự rollback khi update lỗi;

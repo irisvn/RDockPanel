@@ -5,6 +5,7 @@ pub mod api_v1_controller;
 pub mod apps_controller;
 pub mod backups_controller;
 pub mod branding_controller;
+pub mod capacity_controller;
 pub mod deploy_controller;
 pub mod docker_controller;
 pub mod domains_controller;

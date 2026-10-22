@@ -35,11 +35,20 @@ import { MaintenanceTab, RedirectsTab, ScriptsTab, SecurityTab } from "./Access"
 import type { Deployment, Domain, ServiceDetail } from "./types";
 import { DomainForm, plainDomain } from "./DomainForm";
 import { ServiceLogs, ServiceTerminal } from "./Terminal";
+import { useCapacityCheck } from "./Capacity";
 
 type Props = PageProps<unknown> & { project: string; serviceId: number; tab: string };
 type T = (s: string) => string;
 
 const TABS = ["overview", "credentials", "backups", "deployments", "environment", "domains", "redirects", "security", "maintenance", "scripts", "source", "storage", "advanced"] as const;
+
+/** The actions that run more (their question's title, its button). */
+const ROOM_FOR: Record<string, [string, string]> = {
+  deploy: ["Deploy {name}?", "Deploy"],
+  rebuild: ["Rebuild {name}?", "Force rebuild"],
+  start: ["Start {name}?", "Start"],
+  restart: ["Restart {name}?", "Restart"],
+};
 
 export function ServicePage(props: Props) {
   const t = props.t;
@@ -47,6 +56,7 @@ export function ServicePage(props: Props) {
   const [error, setError] = useState<unknown>(null);
   const ask = useAsk();
   const narrow = useNarrow();
+  const [roomFor, roomDialog] = useCapacityCheck(t, props.api);
   if (detail.isLoading) return <Loading />;
   if (detail.error || !detail.data) return <ErrorState error={detail.error} />;
   const d = detail.data;
@@ -57,6 +67,9 @@ export function ServicePage(props: Props) {
 
   const run = async (name: string, question?: { title: string; body: string; action: string }) => {
     if (question && !(await ask({ title: t(question.title).replace("{name}", s.name), body: t(question.body), action: t(question.action), destructive: true }))) return;
+    // What runs more: room for it first (asked when there is little).
+    const more = ROOM_FOR[name];
+    if (more && !(await roomFor({ service_id: s.id, action: name }, t(more[0]).replace("{name}", s.name), t(more[1])))) return;
     setError(null);
     try {
       await resources.action("services", name, [s.id]);
@@ -150,6 +163,7 @@ export function ServicePage(props: Props) {
         </>
       }
     >
+      {roomDialog}
       {d.pending && s.status !== "new" && <Alert variant="warning">{t("The configuration changed since the last deployment: deploy to apply it.")}</Alert>}
       <ErrorNote error={error} />
       <Tabs

@@ -180,6 +180,60 @@ db_test!(
         let services = service::Entity::find().all(app.state().db()).await.unwrap();
         assert_eq!(services.len(), 2);
 
+        // A dry run: what they would take once deployed, nothing made.
+        let big = json!({"services": [{"type": "mysql", "data": {"serviceName": "big"}}, {"type": "app", "data": {"serviceName": "web", "source": {"type": "image", "image": "nginx"}, "resources": {"memoryReservation": 0, "memoryLimit": 300, "cpuReservation": 0, "cpuLimit": 0}}}]});
+        let tried = admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/projects/{project}/schema")),
+                &json!({"schema": big, "deploy": true, "dry_run": true}),
+            )
+            .await;
+        tried.assert_status(StatusCode::OK);
+        let tried = tried.json();
+        let mib = 1024 * 1024;
+        assert_eq!(tried["capacity"]["needs"][0]["source"], "default");
+        assert_eq!(tried["capacity"]["needs"][0]["memory"], 450 * mib);
+        assert_eq!(tried["capacity"]["needs"][1]["source"], "limit");
+        assert_eq!(tried["capacity"]["memory"], 750 * mib);
+        let services = service::Entity::find().all(app.state().db()).await.unwrap();
+        assert_eq!(services.len(), 2);
+        // Asked of the form: its need; the server's figures to who sees the
+        // server only.
+        let asker = support::user_with(&app, "asker", &["projects.view", "services.create"]).await;
+        let asker = app.acting_as(&asker).await;
+        let room = asker
+            .post_json(
+                &app.admin_api("x/apps/capacity"),
+                &json!({"project_id": project.parse::<i64>().unwrap(), "services": [{"kind": "redis"}]}),
+            )
+            .await;
+        room.assert_status(StatusCode::OK);
+        let room = room.json();
+        assert_eq!(room["needs"][0]["memory"], 32 * mib);
+        assert!(room["host"].is_null());
+        asker
+            .post_json(
+                &app.admin_api("x/apps/capacity"),
+                &json!({"service_id": site, "action": "deploy"}),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let room = admin
+            .post_json(
+                &app.admin_api("x/apps/capacity"),
+                &json!({"service_id": site, "action": "deploy"}),
+            )
+            .await;
+        room.assert_status(StatusCode::OK);
+        assert_eq!(room.json()["needs"][0]["name"], "site");
+        admin
+            .post_json(
+                &app.admin_api("x/apps/capacity"),
+                &json!({"service_id": site, "action": "fly"}),
+            )
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+
         // Create from Schema: the same output, pasted.
         let schema = json!({"services": [{"type": "redis", "data": {"serviceName": "cache"}}]});
         admin

@@ -700,7 +700,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "You may no longer use this terminal.": "Bạn không còn quyền dùng terminal này.",
   "Disconnected.": "Mất kết nối.",
   // Notification events
-  "A running service fails, and when it is back": "Service đang chạy bị lỗi, và khi chạy lại",
+  "A running service fails, and when it is back; deployed without enough memory": "Service đang chạy bị lỗi, và khi chạy lại; được deploy khi không đủ RAM",
   "Traefik stops, and when it is back": "Traefik ngừng chạy, và khi chạy lại",
   "An uploaded certificate expires soon": "Certificate tải lên sắp hết hạn",
   "A newer RDockPanel is out": "Có bản RDockPanel mới",
@@ -1148,6 +1148,47 @@ window.rustcms?.registerTranslations?.("vi", {
   "nftables.service is enabled: its configuration flushes every table at boot": "nftables.service đang bật: cấu hình của nó xoá mọi bảng khi khởi động",
   "a Docker bridge carries the default route": "một bridge của Docker đang giữ route mặc định",
   "the panel has no domain (it answers on port 3000): give it a domain or the Cloudflare tunnel first": "panel chưa có domain (đang chạy ở port 3000): hãy gán domain hoặc bật Cloudflare Tunnel trước",
+  // Room on the server (apps/Capacity.tsx)
+  "In use now": "Đang chạy cùng image",
+  "Memory limit": "Giới hạn RAM",
+  Typical: "Mức thường gặp",
+  "Estimate: what it uses now.": "Ước tính: RAM thật đang dùng.",
+  "Estimate: its memory limit.": "Ước tính: giới hạn RAM đã đặt.",
+  "Not known before it runs: its Compose file is in a repository.": "Chưa biết trước khi chạy: file Compose nằm trong repository.",
+  "Estimate: a typical {kind} service. Set a memory limit on its Advanced tab for a closer one.":
+    "Ước tính: mức thường gặp của {kind}. Đặt giới hạn RAM ở tab Advanced để có số chính xác hơn.",
+  "This service cannot run": "Service này không thể chạy",
+  "It reserves {more} of memory, but only {free} of the server's {total} is left to reserve. Docker Swarm would leave it pending.":
+    "Service giữ chỗ {more} RAM, nhưng máy ({total}) chỉ còn {free} để giữ chỗ. Docker Swarm sẽ để nó chờ mãi ở trạng thái \"pending\".",
+  "Its memory reservation is larger than the server can give. Docker Swarm would leave it pending.":
+    "RAM giữ chỗ lớn hơn phần máy còn cho được. Docker Swarm sẽ để nó chờ mãi ở trạng thái \"pending\".",
+  "Not enough memory for this": "Không đủ RAM cho service này",
+  "Not enough disk space for this": "Không đủ dung lượng disk",
+  "It needs about {need}, the server has {free} free. Services may be stopped for lack of memory, or slow the others down.":
+    "Cần khoảng {need}, máy chỉ còn {free}. Service có thể bị tắt do hết bộ nhớ, hoặc làm chậm các service khác.",
+  "It needs about {need}, more than the server has free.": "Cần khoảng {need}, nhiều hơn phần máy còn trống.",
+  "Memory will be low": "RAM sẽ còn rất ít",
+  "Without downtime, the new version starts before the old one stops: about {need} more while it deploys.":
+    "Zero downtime chạy bản mới trước khi tắt bản cũ, nên trong lúc deploy cần thêm khoảng {need}.",
+  "About {left} stays free after it. It can still be deployed; keep an eye on it.":
+    "Sau khi deploy máy còn khoảng {left} trống. Vẫn deploy được nhưng nên theo dõi.",
+  "It needs about {need}; little memory stays free after it.": "Cần khoảng {need}; sau khi deploy máy còn rất ít RAM.",
+  "About {x} of memory missing": "Thiếu khoảng {x} RAM",
+  "Less than 15% of the memory stays free": "RAM trống sau deploy dưới 15%",
+  "Swap is {p}% used": "Swap đã dùng {p}%",
+  "{free} of disk space free": "Disk còn trống {free}",
+  "Little disk space free": "Disk còn rất ít",
+  "The CPU is busy ({p}%)": "CPU đang bận ({p}%)",
+  "For a while": "Tạm thêm",
+  Total: "Tổng",
+  Close: "Đóng",
+  More: "Sẽ thêm",
+  "Estimated from": "Ước tính từ",
+  "I understand, deploy anyway": "Tôi hiểu, vẫn deploy",
+  "Deploy {name}?": "Deploy {name}?",
+  "Rebuild {name}?": "Build lại {name}?",
+  "Start {name}?": "Start {name}?",
+  "Restart {name}?": "Restart {name}?",
 });
 
 export {};

@@ -107,6 +107,7 @@ their actions), so the resources' policies, validation and audit apply.
 | GET | `/services/{id}` | services.view | a service's page: configuration (names of its environment variables, never values), domains, ports, mounts, pending changes, recent deployments (with deployments.view) |
 | GET | `/deployments/{id}` | deployments.view | one deployment with its log |
 | GET | `/services/{id}/stats` | services.view | the Overview's monitor: CPU and memory of each running task on this node, and their sum (two Docker stats samples, at most 3 s) |
+| POST | `/capacity` | services.create in the project, or services.deploy on the service | room for what is about to run: `{"project_id","services":[{kind,image?,replicas?,compose?}]}` (to create), or `{"service_id","action"}` (`deploy`, `start`, `restart`, `rebuild`); `{level, needs, memory, disk, reasons, host, reservation?}`, `host` (the server's figures) with server.view only (see Capacity check) |
 | GET | `/services/{id}/errors` | services.view | the Overview's recent errors: failed tasks (exit code, refused, lost; not those a deployment stopped) and the last failed deployment with the end of its log (deployments.view) |
 | GET (SSE) | `/services/{id}/logs/{tail}` | services.logs (in its project) or docker.logs | `lines` events: the service's logs (every task's), the last `tail` lines first; not a Compose service's |
 | GET (WS) | `/services/{id}/exec/{container}` | services.exec (in its project) or docker.exec | a terminal in a running task container of the service (its full id), as `/docker/containers/{id}/exec` |
@@ -196,6 +197,8 @@ Each user's own (Settings → API tokens); audited, never the token.
 | GET | `/templates/{slug}/logo` | services.create (a role's, or in a project) | the logo (image, `sandbox` CSP) |
 | POST | `/projects/{id}/templates/{slug}` | services.create (+ projects.view; services.deploy to deploy) | `{"input":{…},"deploy":bool}`: runs the generator, creates its services (databases first), queues their deployments when asked; `{"project","services","warnings"}` |
 | POST | `/projects/{id}/schema` | same | `{"schema":{"services":[…]},"deploy":bool}`: "Create from Schema" |
+
+Both take `"dry_run": true`: nothing is created (checked as if it were); `{"project","services","warnings","capacity"}`, what they would take (as `/capacity` answers).
 
 ## Backups (`/apps`)
 

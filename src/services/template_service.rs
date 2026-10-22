@@ -248,6 +248,22 @@ fn env_lines(name: &str, text: &str) -> Result<BTreeMap<String, String>, String>
         .map_err(|e| format!("{name}: its environment, line {}: {}", e.line, e.message))
 }
 
+/// Its memory limit and reservation (`resources`, MB; 0: none). Its CPU
+/// is left as the panel's default.
+fn memory(data: &Value, new: &mut NewService) {
+    let Some(resources) = data.get("resources") else {
+        return;
+    };
+    let mb = |key| {
+        number(resources, key)
+            .filter(|m| (4..=1_048_576).contains(m))
+            .and_then(|m| u32::try_from(m).ok())
+    };
+    new.mem_limit_mb = mb("memoryLimit");
+    new.mem_reservation_mb =
+        mb("memoryReservation").filter(|r| new.mem_limit_mb.is_none_or(|limit| *r <= limit));
+}
+
 fn text(v: &Value, key: &str) -> Option<String> {
     v.get(key)?.as_str().map(str::to_owned)
 }
@@ -411,6 +427,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 new.env = env_lines(&name, &env)?;
             }
             new.command = text(&data, "command");
+            memory(&data, &mut new);
             plan.services.push(new);
             continue;
         }
@@ -444,6 +461,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
         if let Some(env) = text(&data, "env") {
             new.env = env_lines(&name, &env)?;
         }
+        memory(&data, &mut new);
         let deploy = data.get("deploy").cloned().unwrap_or(json!({}));
         new.replicas = number(&deploy, "replicas").unwrap_or(1).clamp(1, 50) as i32;
         new.command = text(&deploy, "command");
@@ -547,7 +565,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                     .unwrap_or(false),
             });
         }
-        for unsupported in ["resources", "maintenance", "scripts"] {
+        for unsupported in ["maintenance", "scripts"] {
             if data.get(unsupported).is_some_and(|v| !v.is_null()) {
                 warn(&mut plan, &format!("{unsupported} left out"));
             }
@@ -645,6 +663,31 @@ mod tests {
             super::plan(&grouped, "p", None).unwrap().services[0].groups,
             ["video"]
         );
+    }
+
+    #[test]
+    fn a_templates_memory_is_kept() {
+        let output = json!({"services": [
+            {"type": "app", "data": {"serviceName": "search", "source": {"type": "image", "image": "elasticsearch:8"}, "resources": {"memoryReservation": 0, "memoryLimit": 1024, "cpuReservation": 0, "cpuLimit": 0}}},
+            {"type": "postgres", "data": {"serviceName": "db", "resources": {"memoryReservation": 256, "memoryLimit": 512, "cpuReservation": 0, "cpuLimit": 0}}},
+            {"type": "redis", "data": {"serviceName": "cache", "resources": {"memoryReservation": 512, "memoryLimit": 128, "cpuReservation": 0, "cpuLimit": 0}}}
+        ]});
+        let plan = plan(&output, "p", None).unwrap();
+        let memory: Vec<_> = plan
+            .services
+            .iter()
+            .map(|s| (s.mem_limit_mb, s.mem_reservation_mb))
+            .collect();
+        // Databases first; 0: none; a reservation over the limit: left out.
+        assert_eq!(
+            memory,
+            [
+                (Some(512), Some(256)),
+                (Some(128), None),
+                (Some(1024), None)
+            ]
+        );
+        assert!(plan.warnings.iter().all(|w| !w.contains("resources")));
     }
 
     #[test]

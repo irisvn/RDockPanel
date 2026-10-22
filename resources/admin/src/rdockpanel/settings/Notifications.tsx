@@ -33,7 +33,7 @@ const EVENTS: Array<{ name: string; label: string; short: string; on: boolean }>
   { name: "deploy", label: "App deployment (and every failure)", short: "deployments", on: true },
   { name: "backup", label: "Database backup and restore", short: "backups", on: true },
   { name: "disk", label: "Disk usage at or over", short: "disk", on: true },
-  { name: "service", label: "A running service fails, and when it is back", short: "services", on: true },
+  { name: "service", label: "A running service fails, and when it is back; deployed without enough memory", short: "services", on: true },
   { name: "traefik", label: "Traefik stops, and when it is back", short: "Traefik", on: true },
   { name: "certificate", label: "An uploaded certificate expires soon", short: "certificates", on: true },
   { name: "update", label: "A newer RDockPanel is out", short: "updates", on: true },

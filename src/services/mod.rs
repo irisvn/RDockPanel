@@ -7,6 +7,7 @@ pub mod api_token_service;
 pub mod backup_service;
 pub mod branding_service;
 pub mod build_service;
+pub mod capacity_service;
 pub mod cert_service;
 pub mod certificate_service;
 pub mod compose_service;

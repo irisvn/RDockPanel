@@ -9,6 +9,7 @@ import { EmptyState, ErrorNote, Field, Metric, NavLink, Page, RowActions, Sectio
 import { percent, size } from "../lib/format";
 import { ResourceError, resources } from "../lib/resources";
 import { Templates } from "./Templates";
+import { CapacityNotice, useCapacity } from "./Capacity";
 import type { Overview, Project } from "./types";
 
 type Sample = {
@@ -178,6 +179,13 @@ export function NewService(props: {
   const fields = (error as { fieldErrors?: Record<string, string[]> } | null)?.fieldErrors ?? {};
   const app = kind === "app";
   const isCompose = kind === "compose";
+  // What it would take once deployed (an app's once its image is known).
+  const room = useCapacity(
+    props.api,
+    app && !image.trim()
+      ? null
+      : { project_id: props.project.id, services: [{ kind, image: isCompose ? undefined : image.trim() || undefined, compose: isCompose ? compose : undefined }] },
+  );
   return (
     <Dialog open onClose={props.onClose} title={`${t("Create service in")} ${props.project.name}`}>
       <form
@@ -235,6 +243,7 @@ export function NewService(props: {
             <Input value={image} onChange={(e) => setImage(e.target.value)} placeholder={app ? "nginx:1.27-alpine" : ""} />
           </Field>
         )}
+        <CapacityNotice t={t} report={room} />
         {!fields.name && !fields.image && !fields.compose && <ErrorNote error={error} />}
         <div className="rdp2-row rdp2-end">
           <Button type="button" variant="ghost" onClick={props.onClose}>

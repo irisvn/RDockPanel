@@ -337,6 +337,12 @@ db_test!(
                 Case::new(Method::POST, "/apps/projects/1/schema")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                // Whose access is checked by what it names (a body).
+                Case::new(Method::POST, "/apps/capacity").expect(
+                    "anonymous",
+                    &anonymous,
+                    StatusCode::FORBIDDEN,
+                ),
                 Case::new(Method::POST, "/apps/projects/1/services")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

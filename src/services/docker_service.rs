@@ -394,6 +394,11 @@ pub trait DockerApi: Send + Sync {
     async fn delete_secret(&self, id: &str) -> DockerResult<()>;
     /// The service's tasks (every slot, current and past).
     async fn list_tasks(&self, service: &str) -> DockerResult<Vec<SwarmTask>>;
+    /// The memory (bytes) the tasks meant to run and placed on a node
+    /// reserve, on every node.
+    async fn reserved_memory(&self) -> DockerResult<u64> {
+        Ok(0)
+    }
     fn service_logs(
         &self,
         service: &str,

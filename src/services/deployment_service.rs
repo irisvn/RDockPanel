@@ -640,6 +640,16 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
     active.updated_at = Set(Utc::now());
     let row = active.update(db).await?;
     let mut log = RunLog::new(db, &row);
+    // Room for it: said, never in its way (whoever asked for it).
+    if let Ok(snapshot) = serde_json::from_value::<Snapshot>(row.spec.clone()) {
+        let check =
+            crate::services::capacity_service::check_run(state, &service, &snapshot, &row.trigger);
+        match tokio::time::timeout(Duration::from_secs(10), check).await {
+            Ok(Ok(Some(line))) => log.line(line).await,
+            Ok(Ok(None)) | Err(_) => {}
+            Ok(Err(err)) => tracing::warn!(%err, "the capacity check failed"),
+        }
+    }
     let traefik = state.service::<Traefik>();
     let outcome = match state.service::<Docker>() {
         Some(docker) => {

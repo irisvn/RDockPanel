@@ -97,6 +97,14 @@ pub enum Event {
         down: bool,
         error: Option<String>,
     },
+    /// A service deployed with less room than it needs (a service event).
+    Capacity {
+        project: String,
+        service: String,
+        need_mb: u64,
+        available_mb: u64,
+        total_mb: u64,
+    },
     /// Traefik stopped answering (no task runs), or runs again.
     Traefik {
         down: bool,
@@ -127,7 +135,7 @@ impl Event {
             Self::Backup { .. } => "backup",
             Self::Disk { .. } => "disk",
             Self::Certificate { .. } => "certificate",
-            Self::Service { .. } => "service",
+            Self::Service { .. } | Self::Capacity { .. } => "service",
             Self::Traefik { .. } => "traefik",
             Self::Update { .. } => "update",
             Self::Prune { .. } => "prune",
@@ -202,6 +210,9 @@ impl Event {
             Self::Service {
                 project, service, ..
             } => format!("{project}/{service} runs again"),
+            Self::Capacity {
+                project, service, ..
+            } => format!("{project}/{service} was deployed without enough memory"),
             Self::Traefik { down: true } => "Traefik is not running: no domain answers".to_owned(),
             Self::Traefik { down: false } => "Traefik runs again".to_owned(),
             Self::Update { version } => format!("RDockPanel {version} is out"),
@@ -228,6 +239,14 @@ impl Event {
                 format!("{names}: upload a renewed one (Settings → Certificates)")
             }
             Self::Service { error, .. } => error.clone().unwrap_or_default(),
+            Self::Capacity {
+                need_mb,
+                available_mb,
+                total_mb,
+                ..
+            } => format!(
+                "It needs about {need_mb} MB more; {available_mb} MB of {total_mb} MB was available."
+            ),
             Self::Traefik { .. } => String::new(),
             Self::Update { .. } => {
                 "Settings → Version: what changed, and the command that updates the panel"
@@ -249,6 +268,7 @@ impl Event {
             Self::Service { down, .. } | Self::Traefik { down } => !down,
             Self::Prune { .. } | Self::Test => true,
             Self::Disk { .. }
+            | Self::Capacity { .. }
             | Self::Certificate { .. }
             | Self::Update { .. }
             | Self::Login { .. } => false,
@@ -293,6 +313,15 @@ impl Event {
                 down,
                 error,
             } => json!({"project": project, "service": service, "down": down, "error": error}),
+            Self::Capacity {
+                project,
+                service,
+                need_mb,
+                available_mb,
+                total_mb,
+            } => {
+                json!({"project": project, "service": service, "need_mb": need_mb, "available_mb": available_mb, "total_mb": total_mb})
+            }
             Self::Traefik { down } => json!({"down": down}),
             Self::Update { version } => json!({"version": version}),
             Self::Prune {
