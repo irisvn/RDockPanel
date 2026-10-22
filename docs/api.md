@@ -291,8 +291,24 @@ deployment of the service is under way. Audited as `services.deploy.trigger` (sy
 
 ## Maintenance page (public)
 
-`GET /api/v1/maintenance/{project}_{service}`: the page of a service in maintenance (503, HTML);
-404 otherwise. Traefik routes the service's domains there while it is in maintenance.
+`GET /api/v1/maintenance/{project}_{service}`: the page of a service in maintenance (503, HTML, in a
+sandbox), for a `Host` of its own domains only; 404 otherwise. Traefik routes the service's domains
+there while it is in maintenance.
+
+Its settings are fields of the `services` resource (`services.update`, applied when saved):
+`maintenance`, `maintenance_title`, `maintenance_subtitle`, `maintenance_eta` (an instant) and
+`maintenance_eta_offset` (minutes east of UTC it is shown in), `maintenance_contact` (an email or an
+https link), `maintenance_page` (`default` or `custom`), `maintenance_html` (up to 256 KB) and
+`maintenance_bypass` (IPs or networks, one a line). In the panel:
+
+| Method | Path | Permission | |
+|---|---|---|---|
+| PUT | `/services/{id}/maintenance-logo` | services.update | `{"data"}` (base64: PNG, JPEG or WebP, up to 256 KB): its own logo; audited |
+| DELETE | `/services/{id}/maintenance-logo` | services.update | back to the panel's logo; audited |
+| POST | `/maintenance/preview` | services.view (system.manage without `service_id`) | `{service_id?, title?, subtitle?, eta?, eta_offset?, contact?, page?, html?}`: renders it (nothing saved); `{"id"}` |
+| GET | `/maintenance/preview/{id}` | its author | the page, in the sandbox (framed by the panel) |
+| GET | `/settings/maintenance` | system.manage | `{template, contact, starter, placeholders}` |
+| PUT | `/settings/maintenance` | system.manage | `{template, contact}`: the shared page (empty: the built-in one) and default contact; audited |
 
 ## GitHub webhook (public)
 

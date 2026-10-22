@@ -11,6 +11,7 @@ pub mod domains_controller;
 pub mod firewall_controller;
 pub mod git_controller;
 pub mod home_controller;
+pub mod maintenance_controller;
 pub mod members_controller;
 pub mod notifications_controller;
 pub mod server_controller;

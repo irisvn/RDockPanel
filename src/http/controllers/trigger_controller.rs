@@ -238,25 +238,19 @@ pub async fn github(
     ))
 }
 
-fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 /// The maintenance page of a service (`/api/v1/maintenance/<project>_<service>`,
-/// where Traefik routes its domains while it is in maintenance): its title
-/// and subtitle, 503. Unknown or not in maintenance: 404.
+/// where Traefik routes its domains while it is in maintenance), 503: the
+/// built-in page, the panel's shared one or its own HTML, in a sandbox
+/// (no script, an opaque origin). Only on its own domains (never the
+/// panel's, nor an address): else, unknown or not in maintenance, 404.
 pub async fn maintenance(
     State(app): State<AppState>,
     Path(name): Path<String>,
-) -> AppResult<(
-    StatusCode,
-    [(rustcms::axum::http::HeaderName, &'static str); 3],
-    String,
-)> {
+    headers: rustcms::axum::http::HeaderMap,
+) -> AppResult<rustcms::axum::response::Response> {
+    use crate::services::maintenance_service as page;
+    use rustcms::axum::http::header;
+    use rustcms::axum::response::IntoResponse;
     use sea_orm::{ColumnTrait, QueryFilter};
     let (project, service_name) = name.split_once('_').ok_or(AppError::NotFound)?;
     let project = crate::models::project::Entity::find()
@@ -274,28 +268,49 @@ pub async fn maintenance(
     if !row.maintenance {
         return Err(AppError::NotFound);
     }
-    let title = escape(
-        row.maintenance_title
-            .as_deref()
-            .filter(|t| !t.trim().is_empty())
-            .unwrap_or("Under maintenance"),
+    // Asked for one of its domains (Traefik keeps the visitor's host).
+    let domains: Vec<String> = crate::models::service_domain::Entity::find()
+        .filter(crate::models::service_domain::Column::ServiceId.eq(row.id))
+        .all(app.db())
+        .await?
+        .into_iter()
+        .map(|d| d.host)
+        .collect();
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default();
+    // Never the panel's own host (a wildcard domain may cover it).
+    if crate::services::deploy_rules_service::is_panel_host(&page::bare_host(host))
+        || !page::serves(host, &domains)
+    {
+        return Err(AppError::NotFound);
+    }
+    let contact = crate::models::panel_setting::get(app.db(), page::CONTACT_KEY).await?;
+    let logo = page::logo_of(app.db(), Some(row.id)).await?;
+    let mut facts = page::Facts::of(&row, &project.name, contact, logo);
+    facts.lang = page::Lang::pick(
+        None,
+        headers
+            .get(header::ACCEPT_LANGUAGE)
+            .and_then(|h| h.to_str().ok()),
     );
-    let subtitle = escape(
-        row.maintenance_subtitle
-            .as_deref()
-            .unwrap_or("We will be back soon."),
-    );
-    let page = format!(
-        r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><style>body{{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:#f8fafc;color:#0f172a}}@media(prefers-color-scheme:dark){{body{{background:#0f172a;color:#e2e8f0}}}}main{{text-align:center;padding:2rem}}h1{{font-size:1.75rem;margin:0 0 .5rem}}p{{opacity:.75;margin:0}}</style></head><body><main><h1>{title}</h1><p>{subtitle}</p></main></body></html>"#
-    );
-    use rustcms::axum::http::header;
-    Ok((
-        StatusCode::SERVICE_UNAVAILABLE,
-        [
-            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-            (header::CACHE_CONTROL, "no-store"),
-            (header::RETRY_AFTER, "300"),
-        ],
-        page,
-    ))
+    let template = page::template_of(app.db(), &row).await?;
+    let html = page::page(template.as_deref(), &facts);
+    let retry = page::retry_after(row.maintenance_eta, chrono::Utc::now()).to_string();
+    let mut response = (StatusCode::SERVICE_UNAVAILABLE, html).into_response();
+    let set = response.headers_mut();
+    for (name, value) in [
+        (header::CONTENT_TYPE, "text/html; charset=utf-8".to_owned()),
+        (header::CACHE_CONTROL, "no-store".to_owned()),
+        (header::RETRY_AFTER, retry),
+        (header::CONTENT_SECURITY_POLICY, page::CSP.to_owned()),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+        (header::REFERRER_POLICY, "no-referrer".to_owned()),
+    ] {
+        if let Ok(value) = rustcms::axum::http::HeaderValue::from_str(&value) {
+            set.insert(name, value);
+        }
+    }
+    Ok(response)
 }

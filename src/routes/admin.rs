@@ -9,7 +9,7 @@ use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
     branding_controller as branding, deploy_controller as deploy, docker_controller as docker,
     domains_controller as domains, firewall_controller as firewall, git_controller as git,
-    home_controller as home, members_controller as members,
+    home_controller as home, maintenance_controller as maintenance, members_controller as members,
     notifications_controller as notifications, server_controller as server,
     system_controller as system, templates_controller as templates, tokens_controller as tokens,
     traefik_controller as traefik, tunnel_controller as tunnel,
@@ -153,6 +153,17 @@ pub fn routes() -> AdminRoutes {
                 // The homepage at `/` (Settings → Panel): on or off.
                 .get("/home", AdminAccess::can("system.manage"), home::show)
                 .put("/home", AdminAccess::can("system.manage"), home::update)
+                // The shared maintenance page (Settings).
+                .get(
+                    "/settings/maintenance",
+                    AdminAccess::can("system.manage"),
+                    maintenance::show_settings,
+                )
+                .put(
+                    "/settings/maintenance",
+                    AdminAccess::can("system.manage"),
+                    maintenance::update_settings,
+                )
                 // Branding (Settings): the panel's name, color and images.
                 .get(
                     "/branding",
@@ -377,6 +388,27 @@ pub fn routes() -> AdminRoutes {
                 .get("/services/{id}/stats", member(), apps::stats)
                 .get("/services/{id}/errors", member(), apps::errors)
                 .post("/services/{id}/basic-auth", member(), apps::add_basic_auth)
+                // Its maintenance page: its logo, previews being written.
+                .put(
+                    "/services/{id}/maintenance-logo",
+                    member(),
+                    maintenance::upload_logo,
+                )
+                .delete(
+                    "/services/{id}/maintenance-logo",
+                    member(),
+                    maintenance::remove_logo,
+                )
+                .post(
+                    "/maintenance/preview",
+                    member(),
+                    maintenance::create_preview,
+                )
+                .get(
+                    "/maintenance/preview/{id}",
+                    member(),
+                    maintenance::show_preview,
+                )
                 .delete(
                     "/services/{id}/basic-auth/{user}",
                     member(),

@@ -6,7 +6,8 @@
 import { type ReactNode, useState } from "react";
 import { type PageProps } from "@rustcms/admin-sdk";
 import { Button, Dialog, Input, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
-import { EmptyState, ErrorNote, Field, RowActions, Section, Stack, TableScroll, useAsk } from "../lib/ui";
+import { EmptyState, ErrorNote, Field, FilePicker, RowActions, Section, Stack, TableScroll, useAsk } from "../lib/ui";
+import { HtmlEditor, Preview, fromLocalInput, localInput } from "./MaintenancePage";
 import { ResourceError, resources } from "../lib/resources";
 import type { ServiceDetail } from "./types";
 
@@ -418,15 +419,58 @@ function BasicAuthSection(props: Props) {
   );
 }
 
-/** Maintenance mode: the domains show the panel's page (title, subtitle). */
+/** File bytes as base64 (without the data URL's prefix). */
+function base64Of(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Maintenance mode: the domains show a page (503) instead of the service:
+ * the default one (the panel's shared page, else the built-in one) or the
+ * service's own HTML; the addresses let through still reach the service. */
 export function MaintenanceTab(props: Props) {
   const { t, d } = props;
   const s = d.service;
   const [on, setOn] = useState(s.maintenance);
+  const [kind, setKind] = useState<"default" | "custom">(s.maintenance_page ?? "default");
   const [title, setTitle] = useState(s.maintenance_title ?? "");
   const [subtitle, setSubtitle] = useState(s.maintenance_subtitle ?? "");
+  const [eta, setEta] = useState(localInput(s.maintenance_eta));
+  const [contact, setContact] = useState(s.maintenance_contact ?? "");
+  const [html, setHtml] = useState(s.maintenance_html ?? "");
+  const [bypass, setBypass] = useState(s.maintenance_bypass ?? "");
+  const [logo, setLogo] = useState<string | null>(d.maintenance.logo);
+  // Bumped when the logo changes: the preview is made again.
+  const [logoRevision, setLogoRevision] = useState(0);
   const [error, setError] = useState<unknown>(null);
   const fields = error instanceof ResourceError ? error.fieldErrors : {};
+  const when = fromLocalInput(eta);
+  const can = d.can.update;
+  const hosts = d.domains.map((x) => x.host).filter((h) => !h.startsWith("*."));
+  const uploadLogo = async (file: File) => {
+    setError(null);
+    try {
+      const made = await props.api.put<{ logo: string }>(`/apps/services/${s.id}/maintenance-logo`, { data: await base64Of(file) });
+      setLogo(made.logo);
+      setLogoRevision((n) => n + 1);
+    } catch (err) {
+      setError(err);
+    }
+  };
+  const removeLogo = async () => {
+    setError(null);
+    try {
+      await props.api.delete(`/apps/services/${s.id}/maintenance-logo`);
+      setLogo(null);
+      setLogoRevision((n) => n + 1);
+    } catch (err) {
+      setError(err);
+    }
+  };
   return (
     <Section
       title={t("Maintenance")}
@@ -440,8 +484,14 @@ export function MaintenanceTab(props: Props) {
           try {
             await resources.update("services", s.id, {
               maintenance: on,
+              maintenance_page: kind,
               maintenance_title: title.trim() || null,
               maintenance_subtitle: subtitle.trim() || null,
+              maintenance_eta: when.eta,
+              maintenance_eta_offset: when.eta ? when.offset : null,
+              maintenance_contact: contact.trim() || null,
+              maintenance_html: html.trim() ? html : null,
+              maintenance_bypass: bypass.trim() || null,
             });
             props.onSaved();
           } catch (err) {
@@ -450,20 +500,89 @@ export function MaintenanceTab(props: Props) {
         }}
       >
         <label className="rdp2-row">
-          <Switch checked={on} onCheckedChange={setOn} disabled={!d.can.update} /> {t("Maintenance mode")}
+          <Switch checked={on} onCheckedChange={setOn} disabled={!can} /> {t("Maintenance mode")}
         </label>
-        <Field label={t("Title")} error={fields.maintenance_title}>
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Under maintenance")} disabled={!d.can.update} />
-        </Field>
-        <Field label={t("Subtitle")} error={fields.maintenance_subtitle}>
-          <Input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder={t("We will be back soon.")} disabled={!d.can.update} />
-        </Field>
-        {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
-        {d.can.update && (
-          <div className="rdp2-row rdp2-end">
-            <Button type="submit">{t("Save")}</Button>
-          </div>
+        {s.maintenance && hosts.length > 0 && (
+          <p className="rdp2-muted">
+            {t("Visitors of these domains see the page:")}{" "}
+            {hosts.map((h, i) => (
+              <span key={h}>
+                {i > 0 && ", "}
+                <a href={`https://${h}`} target="_blank" rel="noreferrer">{h}</a>
+              </span>
+            ))}
+          </p>
         )}
+        <div className="rdp2-maint">
+          <div className="rdp2-form">
+            <Field
+              label={t("Page")}
+              help={kind === "default" ? (d.maintenance.shared ? t("The panel's shared page (Settings → Maintenance page).") : t("The built-in page.")) : undefined}
+              error={fields.maintenance_page}
+            >
+              <NativeSelect value={kind} onChange={(e) => setKind(e.target.value as "default" | "custom")} disabled={!can}>
+                <option value="default">{t("Default")}</option>
+                <option value="custom">{t("Its own HTML")}</option>
+              </NativeSelect>
+            </Field>
+            <Field label={t("Title")} error={fields.maintenance_title}>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Under maintenance")} disabled={!can} />
+            </Field>
+            <Field label={t("Subtitle")} error={fields.maintenance_subtitle}>
+              <Input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder={t("We will be back soon.")} disabled={!can} />
+            </Field>
+            <div className="rdp2-grid2">
+              <Field label={t("Back at")} help={t("In your time; empty: not shown")} error={fields.maintenance_eta}>
+                <Input type="datetime-local" value={eta} onChange={(e) => setEta(e.target.value)} disabled={!can} />
+              </Field>
+              <Field label={t("Contact")} help={t("An email or an https link")} error={fields.maintenance_contact}>
+                <Input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="support@example.com" disabled={!can} />
+              </Field>
+            </div>
+            <Field label={t("Logo")} help={t("PNG, JPEG or WebP up to 256 KB. None: the panel's logo (Branding).")} error={fields.data}>
+              <div className="rdp2-logo">
+                {logo && <img src={logo} alt="" />}
+                {can && <FilePicker label={logo ? t("Replace") : t("Upload")} accept="image/png,image/jpeg,image/webp" onFile={(file) => void uploadLogo(file)} />}
+                {can && logo && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => void removeLogo()}>
+                    {t("Use the panel's logo")}
+                  </Button>
+                )}
+              </div>
+            </Field>
+            {kind === "custom" && (
+              <HtmlEditor t={t} value={html} onChange={setHtml} starter={d.maintenance.starter} placeholders={d.maintenance.placeholders} disabled={!can} error={fields.maintenance_html} />
+            )}
+            <Field
+              label={t("Addresses that still reach the service")}
+              help={t("IPs or networks, one a line (you, your team, a VPN): they see the service as usual. Through Cloudflare, single addresses only.")}
+              error={fields.maintenance_bypass}
+            >
+              <Textarea className="rdp2-mono" rows={3} value={bypass} placeholder={"203.0.113.7\n10.8.0.0/24"} onChange={(e) => setBypass(e.target.value)} disabled={!can} />
+            </Field>
+            {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+            {can && (
+              <div className="rdp2-row rdp2-end">
+                <Button type="submit">{t("Save")}</Button>
+              </div>
+            )}
+          </div>
+          <Preview
+            {...props}
+            label={t("Preview")}
+            revision={String(logoRevision)}
+            body={{
+              service_id: s.id,
+              title,
+              subtitle,
+              eta: when.eta,
+              eta_offset: when.offset,
+              contact,
+              page: kind,
+              html: kind === "custom" ? html : undefined,
+            }}
+          />
+        </div>
       </form>
     </Section>
   );

@@ -304,6 +304,12 @@ pub async fn service(
             "maintenance": row.maintenance,
             "maintenance_title": row.maintenance_title,
             "maintenance_subtitle": row.maintenance_subtitle,
+            "maintenance_eta": row.maintenance_eta,
+            "maintenance_eta_offset": row.maintenance_eta_offset,
+            "maintenance_contact": row.maintenance_contact,
+            "maintenance_page": row.maintenance_page,
+            "maintenance_html": row.maintenance_html,
+            "maintenance_bypass": row.maintenance_bypass,
             "rate_limit_average": row.rate_limit_average,
             "rate_limit_period": row.rate_limit_period,
             "rate_limit_burst": row.rate_limit_burst,
@@ -333,6 +339,23 @@ pub async fn service(
         "redirects": redirects,
         "scripts": scripts,
         "basic_auth": auth_users,
+        // Its maintenance page: its own logo, whether the panel has a shared
+        // page, the HTML to start from and the placeholders.
+        "maintenance": {
+            "logo": crate::models::service_logo::Entity::find_by_id(row.id)
+                .one(db)
+                .await?
+                .map(|l| format!(
+                    "data:{};base64,{}",
+                    l.mime,
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &l.data)
+                )),
+            "shared": crate::models::panel_setting::get(db, crate::services::maintenance_service::TEMPLATE_KEY)
+                .await?
+                .is_some_and(|t| !t.trim().is_empty()),
+            "starter": crate::services::maintenance_service::starter(),
+            "placeholders": crate::services::maintenance_service::PLACEHOLDERS,
+        },
         "ports": ports,
         "mounts": mounts,
         "latest": latest,

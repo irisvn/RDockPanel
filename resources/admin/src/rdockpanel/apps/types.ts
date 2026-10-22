@@ -77,6 +77,16 @@ export type ServiceDetail = {
     maintenance: boolean;
     maintenance_title: string | null;
     maintenance_subtitle: string | null;
+    /** When it is back (UTC), and the offset it was written in (minutes east of UTC). */
+    maintenance_eta: string | null;
+    maintenance_eta_offset: number | null;
+    /** An email or an https link. */
+    maintenance_contact: string | null;
+    /** `default`: the panel's shared page, else the built-in one; `custom`: its own HTML. */
+    maintenance_page: "default" | "custom";
+    maintenance_html: string | null;
+    /** Addresses that still reach the service in maintenance (one a line). */
+    maintenance_bypass: string | null;
     /** Its rate limit: average requests per period by visitor, burst at once (average null: off). */
     rate_limit_average: number | null;
     rate_limit_period: "1s" | "1m" | "1h" | null;
@@ -118,6 +128,8 @@ export type ServiceDetail = {
   domains: Domain[];
   redirects: Array<{ id: number; regex: string; replacement: string; permanent: boolean; enabled: boolean }>;
   basic_auth: Array<{ id: number; username: string }>;
+  /** Its maintenance page: its own logo (a data URL), whether the panel has a shared page, the HTML to start from. */
+  maintenance: { logo: string | null; shared: boolean; starter: string; placeholders: string[] };
   scripts: Array<{ id: number; name: string; command: string }>;
   ports: Port[];
   mounts: Mount[];

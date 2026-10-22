@@ -370,6 +370,27 @@ db_test!(
                 Case::new(Method::DELETE, "/apps/services/1/basic-auth/1")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::PUT, "/apps/services/1/maintenance-logo")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::DELETE, "/apps/services/1/maintenance-logo")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/maintenance/preview").expect(
+                    "nobody",
+                    &nobody,
+                    StatusCode::FORBIDDEN,
+                ),
+                // Another's preview, or none: not found.
+                Case::new(Method::GET, "/apps/maintenance/preview/x")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("nobody", &nobody, StatusCode::NOT_FOUND),
+                Case::new(Method::GET, "/apps/settings/maintenance")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
+                Case::new(Method::PUT, "/apps/settings/maintenance")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN),
                 Case::new(Method::POST, "/apps/services/1/github-webhook")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

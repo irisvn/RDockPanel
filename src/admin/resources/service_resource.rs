@@ -83,6 +83,13 @@ impl Resource for ServiceResource {
             Field::column(service::Column::Maintenance),
             Field::column(service::Column::MaintenanceTitle).max_length(200),
             Field::column(service::Column::MaintenanceSubtitle).max_length(1000),
+            Field::column(service::Column::MaintenanceEta),
+            Field::column(service::Column::MaintenanceEtaOffset),
+            Field::column(service::Column::MaintenanceContact).max_length(255),
+            Field::column(service::Column::MaintenancePage),
+            Field::column(service::Column::MaintenanceHtml)
+                .max_length(crate::services::maintenance_service::MAX_HTML),
+            Field::column(service::Column::MaintenanceBypass).max_length(4000),
             Field::column(service::Column::RateLimitAverage),
             Field::column(service::Column::RateLimitPeriod),
             Field::column(service::Column::RateLimitBurst),
@@ -314,8 +321,8 @@ impl Resource for ServiceResource {
         Ok(data)
     }
 
-    /// Its maintenance and rate limit applied without a deployment: its
-    /// routes written again (once this commits).
+    /// Its maintenance (and who it lets through) and rate limit applied
+    /// without a deployment: its routes written again (once this commits).
     async fn after_save(
         ctx: &Ctx,
         txn: &DatabaseTransaction,
@@ -415,15 +422,23 @@ fn normalize(mut data: Data) -> Data {
     if let Some(image) = text(&data, "image").map(|i| i.trim().to_owned()) {
         data.insert("image".to_owned(), serde_json::Value::String(image));
     }
-    if let Some(Ok(exempt)) =
-        text(&data, "rate_limit_exempt").map(|e| rate_limit_service::exempt(Some(e)))
-    {
-        let value = if exempt.is_empty() {
+    for field in ["rate_limit_exempt", "maintenance_bypass"] {
+        if let Some(Ok(list)) = text(&data, field).map(|e| rate_limit_service::exempt(Some(e))) {
+            let value = if list.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::Value::String(list.join("\n"))
+            };
+            data.insert(field.to_owned(), value);
+        }
+    }
+    if let Some(contact) = text(&data, "maintenance_contact").map(|c| c.trim().to_owned()) {
+        let value = if contact.is_empty() {
             serde_json::Value::Null
         } else {
-            serde_json::Value::String(exempt.join("\n"))
+            serde_json::Value::String(contact)
         };
-        data.insert("rate_limit_exempt".to_owned(), value);
+        data.insert("maintenance_contact".to_owned(), value);
     }
     data
 }
@@ -596,11 +611,31 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
     {
         errors.add("rate_limit_period", ctx.t("must be 1s, 1m or 1h"));
     }
-    if let Some(Err(why)) =
-        text(data, "rate_limit_exempt").map(|e| rate_limit_service::exempt(Some(e)))
-    {
-        errors.add("rate_limit_exempt", why);
+    for field in ["rate_limit_exempt", "maintenance_bypass"] {
+        if let Some(Err(why)) = text(data, field).map(|e| rate_limit_service::exempt(Some(e))) {
+            errors.add(field, why);
+        }
     }
+    if let Some(contact) = text(data, "maintenance_contact")
+        && !contact.trim().is_empty()
+        && !crate::services::maintenance_service::valid_contact(contact)
+    {
+        errors.add(
+            "maintenance_contact",
+            ctx.t("must be an email or an https link"),
+        );
+    }
+    if text(data, "maintenance_html")
+        .is_some_and(|h| h.len() > crate::services::maintenance_service::MAX_HTML)
+    {
+        errors.add("maintenance_html", ctx.t("is larger than 256 KB"));
+    }
+    if let Some(page) = text(data, "maintenance_page")
+        && !matches!(page, "default" | "custom")
+    {
+        errors.add("maintenance_page", ctx.t("must be default or custom"));
+    }
+    range("maintenance_eta_offset", -840..=840, &mut errors);
     // A reservation within its limit (the values after this write).
     let value = |field: &str, old: Option<i32>| {
         if data.contains_key(field) {

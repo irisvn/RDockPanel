@@ -3,6 +3,14 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.8.0 — 2026-10-22
+
+- **Maintenance page** redesigned: simpler, light and dark, in the visitor's language, with when the
+  service is back, a contact and a logo.
+- Write your own maintenance page in HTML and CSS (scripts are blocked), with a live preview, or set
+  one shared page for every service in Settings → Maintenance page.
+- Addresses that still reach the service while it is in maintenance (you, your team, a VPN).
+
 ## 0.7.0 — 2026-10-22
 
 - **Rate limit** in a service's Security tab: requests per visitor (their IP) on its domains, with

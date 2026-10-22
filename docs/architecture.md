@@ -347,10 +347,37 @@ each run is audited (its name, never its output). Not for Compose services.
 
 The Maintenance tab. A service in maintenance (applied when saved) has its
 domains routed to the panel (`[panel] internal_url`, `http://rdockpanel:3000` installed; empty: no
-maintenance mode) at `/api/v1/maintenance/<project>_<service>`, a public page of its title and
-subtitle (escaped), answered 503 with `Retry-After`, while it is in maintenance (turned off: its
-domains lead to the service again at once). Its notes (Overview) are for the team only and
-never deployed.
+maintenance mode) at `/api/v1/maintenance/<project>_<service>`, answered 503 with `Retry-After`
+(until the time it is back: a minute to a day; five minutes when none), while it is in maintenance
+(turned off: its domains lead to the service again at once). The page
+(`services/maintenance_service.rs`) is:
+
+- **Default:** the panel's shared page (Settings → Maintenance page) when there is one, else the
+  built-in page: the logo, the title, the subtitle, when it is back (in the offset it was written in)
+  and the contact (an email as text, an https link as a link), in the visitor's language (English or
+  Vietnamese, `Accept-Language`), light or dark.
+- **Its own HTML** (`maintenance_html`, up to 256 KB).
+
+HTML pages fill in `{{title}}`, `{{subtitle}}`, `{{eta}}`, `{{eta_iso}}`, `{{contact}}`,
+`{{contact_href}}`, `{{logo}}` (a data URL), `{{service}}` and `{{project}}` (escaped; others stay as
+written). A page larger than 1 MB once filled in, or using the logo more than 4 times, is replaced by
+the built-in page (which leaves a logo over 128 KB out). The logo is the service's own
+(`service_logos`: PNG, JPEG or WebP up to 256 KB) or the panel's (Branding: light and dark).
+
+Every page runs in a sandbox (`Content-Security-Policy: sandbox; default-src 'none'; style-src
+'unsafe-inline' https:; img-src data: https:; …`): no script, no form, an opaque origin. It is
+served only for the service's own domains (the request's `Host`, which Traefik keeps; a wildcard's
+single label): through the panel's domain or an address it is 404. The tab's preview is rendered
+by the panel from what is being written (kept five minutes, its author's only, at most 3 each and 20
+in all) and shown in a sandboxed frame with the same policy (`frame-ancestors 'self'`).
+
+**Addresses let through** (`maintenance_bypass`, checked like rate limit exemptions) still reach the
+service: each router showing the page has a twin routing as it does out of maintenance (its
+redirects and authentication, without the rate limit), just above it: `-bypass` (+1) for exempt
+peers (`ClientIP`), `-bypass-cf` (+2) for a Cloudflare edge naming an exact address last in
+`X-Forwarded-For` (`HeaderRegexp`), and on the tunnel's entrypoint `-bypass` (+2, above its scheme's
+routers). Networks match direct visitors only. Its notes (Overview) are for the team only and never
+deployed.
 
 ### Auto deploy from GitHub
 

@@ -58,6 +58,20 @@ pub struct Model {
     pub maintenance: bool,
     pub maintenance_title: Option<String>,
     pub maintenance_subtitle: Option<String>,
+    /// When it is expected back (UTC), and the offset (minutes east of
+    /// UTC) it was written in: shown in that time.
+    pub maintenance_eta: Option<DateTimeUtc>,
+    pub maintenance_eta_offset: Option<i32>,
+    /// An email or an https link visitors may reach.
+    pub maintenance_contact: Option<String>,
+    /// `default` (the panel's shared page, else the built-in one) or
+    /// `custom` (`maintenance_html`: HTML and CSS, run in a sandbox).
+    pub maintenance_page: String,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub maintenance_html: Option<String>,
+    /// Addresses that still reach the service (one a line).
+    #[sea_orm(column_type = "Text", nullable)]
+    pub maintenance_bypass: Option<String>,
     /// Its rate limit on its domains: `average` requests per `period`
     /// (`1s`, `1m`, `1h`) by visitor, `burst` at once (`None`: off), but
     /// for the exempt addresses (IPs or networks, one a line). Applied when

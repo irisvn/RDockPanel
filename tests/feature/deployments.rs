@@ -1821,34 +1821,254 @@ db_test!(
     }
 );
 
+/// The maintenance page as a visitor of `host` gets it.
+async fn maintenance_page(app: &TestApp, host: &str, name: &str) -> rustcms_testing::TestResponse {
+    use rustcms::axum::body::Body;
+    use rustcms::axum::http::Request;
+    app.request(
+        Request::get(format!("/api/v1/maintenance/{name}"))
+            .header("host", host)
+            .header("accept-language", "vi-VN,vi;q=0.9,en;q=0.5")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+}
+
 db_test!(
     a_service_in_maintenance_shows_its_page,
     migrate = Migrator,
     |db: TestDb| async move {
         let app = support::app_with_docker(db, FakeDocker::default()).await;
         let (admin, id) = shop(&app).await;
-        app.get("/api/v1/maintenance/shop_web")
+        let url = format!("{}/{id}", records(&app, "services"));
+        maintenance_page(&app, "shop.localhost", "shop_web")
             .await
             .assert_status(StatusCode::NOT_FOUND);
+        // Refused: not a contact, another page, every address.
+        for (body, field) in [
+            (
+                json!({"maintenance_contact": "javascript:alert(1)"}),
+                "maintenance_contact",
+            ),
+            (json!({"maintenance_page": "evil"}), "maintenance_page"),
+            (
+                json!({"maintenance_bypass": "0.0.0.0/0"}),
+                "maintenance_bypass",
+            ),
+            (
+                json!({"maintenance_eta_offset": 9999}),
+                "maintenance_eta_offset",
+            ),
+            // 256 KB of bytes, not of characters.
+            (
+                json!({"maintenance_html": "é".repeat(140_000)}),
+                "maintenance_html",
+            ),
+        ] {
+            admin
+                .send(rustcms::axum::http::Method::PATCH, &url, Some(&body))
+                .await
+                .assert_validation_error(field);
+        }
+        let eta = chrono::Utc::now() + chrono::Duration::minutes(30);
         admin
             .send(
                 rustcms::axum::http::Method::PATCH,
-                &format!("{}/{id}", records(&app, "services")),
-                Some(&json!({"maintenance": true, "maintenance_title": "<b>Back</b> soon", "maintenance_subtitle": "At 10:00"})),
+                &url,
+                Some(&json!({
+                    "maintenance": true,
+                    "maintenance_title": "<b>Back</b> soon",
+                    "maintenance_subtitle": "At 10:00",
+                    "maintenance_eta": eta.to_rfc3339(),
+                    "maintenance_eta_offset": 420,
+                    "maintenance_contact": " ops@shop.localhost ",
+                    "maintenance_bypass": "10.8.0.7/24\n1.2.3.4",
+                })),
             )
             .await
             .assert_status(StatusCode::OK);
-        // Applied when saved: the page, no deployment.
-        let page = app.get("/api/v1/maintenance/shop_web").await;
+        // Applied when saved: the built-in page, escaped, in a sandbox.
+        let page = maintenance_page(&app, "shop.localhost:8080", "shop_web").await;
         page.assert_status(StatusCode::SERVICE_UNAVAILABLE);
         let html = page.text();
         assert!(
             html.contains("&lt;b&gt;Back&lt;/b&gt; soon") && html.contains("At 10:00"),
             "{html}"
         );
+        assert!(
+            html.contains("Dự kiến trở lại lúc") && html.contains("(GMT+7) · ops@shop.localhost"),
+            "{html}"
+        );
+        let csp = page.header("content-security-policy").unwrap();
+        assert!(
+            csp.starts_with("sandbox;")
+                && csp.contains("default-src 'none'")
+                && !csp.contains("script-src"),
+            "{csp}"
+        );
+        assert_eq!(page.header("cache-control").as_deref(), Some("no-store"));
+        let retry: i64 = page.header("retry-after").unwrap().parse().unwrap();
+        assert!((1700..=1800).contains(&retry), "{retry}");
+        // Only on its own domains: never the panel's, nor an address.
+        for host in ["localhost:8000", "103.90.224.55:3000", "evil.localhost", ""] {
+            maintenance_page(&app, host, "shop_web")
+                .await
+                .assert_status(StatusCode::NOT_FOUND);
+        }
+        // Its own HTML, its placeholders filled in (escaped).
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"maintenance_page": "custom", "maintenance_html": "<p>{{title}} / {{project}}_{{service}} / {{contact_href}} / {{nope}}</p>"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let html = maintenance_page(&app, "shop.localhost", "shop_web")
+            .await
+            .text();
+        assert_eq!(
+            html,
+            "<p>&lt;b&gt;Back&lt;/b&gt; soon / shop_web /  / {{nope}}</p>"
+        );
+        // The panel's shared page for the default one.
+        admin
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &app.admin_api("x/apps/settings/maintenance"),
+                Some(&json!({"template": "<i>{{title}} {{contact}}</i>", "contact": "https://status.example.com"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"maintenance_page": "default", "maintenance_contact": null})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let html = maintenance_page(&app, "shop.localhost", "shop_web")
+            .await
+            .text();
+        assert_eq!(
+            html,
+            "<i>&lt;b&gt;Back&lt;/b&gt; soon https://status.example.com</i>"
+        );
+        // Who it lets through: kept canonical (routed as unit tests show).
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        assert_eq!(
+            page["service"]["maintenance_bypass"],
+            "10.8.0.0/24\n1.2.3.4/32"
+        );
+        assert_eq!(page["service"]["maintenance_contact"], json!(null));
         app.get("/api/v1/maintenance/shop_nothing")
             .await
             .assert_status(StatusCode::NOT_FOUND);
+    }
+);
+
+db_test!(
+    a_maintenance_page_has_its_logo_and_previews,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use base64::Engine;
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let (admin, id) = shop(&app).await;
+        let logo = app.admin_api(&format!("x/apps/services/{id}/maintenance-logo"));
+        let svg = base64::engine::general_purpose::STANDARD
+            .encode(b"<svg xmlns='http://www.w3.org/2000/svg'><script>x</script></svg>");
+        admin
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &logo,
+                Some(&json!({"data": svg})),
+            )
+            .await
+            .assert_validation_error("data");
+        let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nfake");
+        let set = admin
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &logo,
+                Some(&json!({"data": png})),
+            )
+            .await;
+        set.assert_status(StatusCode::OK);
+        assert!(
+            set.json()["logo"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        assert!(page["maintenance"]["logo"].is_string());
+        assert!(
+            page["maintenance"]["starter"]
+                .as_str()
+                .unwrap()
+                .contains("{{title}}")
+        );
+        // A preview: rendered as the page would be, its author's only.
+        let made = admin
+            .post_json(
+                &app.admin_api("x/apps/maintenance/preview"),
+                &json!({"service_id": id, "title": "Soon <b>", "page": "custom", "html": "<h1>{{title}}</h1><img src=\"{{logo}}\">"}),
+            )
+            .await;
+        made.assert_status(StatusCode::OK);
+        let preview = app.admin_api(&format!(
+            "x/apps/maintenance/preview/{}",
+            made.json()["id"].as_str().unwrap()
+        ));
+        let shown = admin.get(&preview).await;
+        shown.assert_status(StatusCode::OK);
+        assert!(
+            shown
+                .text()
+                .starts_with("<h1>Soon &lt;b&gt;</h1><img src=\"data:image/png;base64,")
+        );
+        let csp = shown.header("content-security-policy").unwrap();
+        assert!(
+            csp.starts_with("sandbox;") && csp.contains("frame-ancestors 'self'"),
+            "{csp}"
+        );
+        let other =
+            support::user_with(&app, "viewer", &["services.view", "services.view_any"]).await;
+        let other = app.acting_as(&other).await;
+        other
+            .get(&preview)
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        // Settings' preview and page: the panel's administrators only.
+        other
+            .post_json(
+                &app.admin_api("x/apps/maintenance/preview"),
+                &json!({"html": "<p>x</p>"}),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        other
+            .get(&app.admin_api("x/apps/settings/maintenance"))
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        // Removed: the panel's again.
+        admin
+            .send(rustcms::axum::http::Method::DELETE, &logo, None)
+            .await
+            .assert_status(StatusCode::OK);
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        assert!(page["maintenance"]["logo"].is_null());
     }
 );
 

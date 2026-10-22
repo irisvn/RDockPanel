@@ -538,6 +538,28 @@ window.rustcms?.registerTranslations?.("vi", {
   // Maintenance.
   Maintenance: "Bảo trì",
   "Maintenance mode": "Chế độ bảo trì",
+  Preview: "Xem trước",
+  Contact: "Liên hệ",
+  "Back at": "Dự kiến trở lại",
+  "In your time; empty: not shown": "Theo giờ của bạn; để trống thì không hiện",
+  "An email or an https link": "Email hoặc link https",
+  "Its own HTML": "HTML riêng",
+  "The panel's shared page (Settings → Maintenance page).": "Trang bảo trì chung của panel (Cài đặt → Trang bảo trì).",
+  "The built-in page.": "Trang có sẵn của panel.",
+  "PNG, JPEG or WebP up to 256 KB. None: the panel's logo (Branding).": "PNG, JPEG hoặc WebP, tối đa 256 KB. Không có: dùng logo của panel (Branding).",
+  "Use the panel's logo": "Dùng logo của panel",
+  "Addresses that still reach the service": "IP vẫn vào được site thật",
+  "IPs or networks, one a line (you, your team, a VPN): they see the service as usual. Through Cloudflare, single addresses only.":
+    "IP hoặc dải mạng, mỗi dòng một mục (bạn, team, VPN): những địa chỉ này vẫn thấy site như bình thường. Qua Cloudflare chỉ khớp được IP lẻ.",
+  "Visitors of these domains see the page:": "Khách vào các domain này đang thấy trang bảo trì:",
+  "Start from the default page": "Bắt đầu từ trang mặc định",
+  "HTML and CSS only: scripts are blocked. Images and fonts: data URIs or https. Up to 256 KB. Insert a value:":
+    "Chỉ HTML và CSS: script bị chặn. Ảnh và font: data URI hoặc https. Tối đa 256 KB. Bấm để chèn giá trị:",
+  "The preview could not be made.": "Không tạo được bản xem trước.",
+  "The page of every service in maintenance with the default page. Empty: the built-in page. A service may have its own HTML instead.":
+    "Trang chung cho mọi service đang bảo trì ở chế độ \"Mặc định\". Để trống thì dùng trang có sẵn. Service nào cần riêng thì chọn \"HTML riêng\".",
+  "Default contact": "Liên hệ mặc định",
+  "An email or an https link, for services that name none": "Email hoặc link https, dùng cho service không ghi liên hệ",
   "While on, the service's domains show this page (503) instead of the service. Applied when saved.":
     "Khi bật, domain của service hiện trang này (503) thay cho service. Áp dụng ngay khi lưu.",
   Title: "Tiêu đề",

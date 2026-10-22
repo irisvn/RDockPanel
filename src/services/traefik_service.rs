@@ -362,6 +362,7 @@ pub async fn deployed_routes<C: sea_orm::ConnectionTrait>(
     snapshot.redirects = now.redirects;
     snapshot.maintenance = now.maintenance;
     snapshot.rate_limit = now.rate_limit;
+    snapshot.maintenance_bypass = now.maintenance_bypass;
     // Its users with their hashes (never kept in a snapshot).
     let mut users: Vec<String> = crate::models::service_basic_auth::Entity::find()
         .filter(crate::models::service_basic_auth::Column::ServiceId.eq(row.id))

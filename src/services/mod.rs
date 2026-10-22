@@ -24,6 +24,7 @@ pub mod firewall_service;
 pub mod github_service;
 pub mod home_service;
 pub mod live_service;
+pub mod maintenance_service;
 pub mod notify_service;
 pub mod panel_domain_service;
 pub mod panel_log;

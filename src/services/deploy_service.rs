@@ -117,6 +117,10 @@ pub struct Snapshot {
     /// Its rate limit on its domains (`None`: off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<crate::services::rate_limit_service::RateLimit>,
+    /// In maintenance: the addresses (canonical networks) that still reach
+    /// the service.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub maintenance_bypass: Vec<String>,
 }
 
 /// A redirect: Traefik's `redirectRegex`.
@@ -431,6 +435,10 @@ impl Snapshot {
             redirects: vec![],
             basic_auth: vec![],
             rate_limit: crate::services::rate_limit_service::RateLimit::of(service),
+            maintenance_bypass: crate::services::rate_limit_service::exempt(
+                service.maintenance_bypass.as_deref(),
+            )
+            .unwrap_or_default(),
             compose: (service.kind == "compose").then(|| Compose {
                 inline: (service.source != "git")
                     .then(|| service.compose.clone())
@@ -553,6 +561,7 @@ impl Snapshot {
         container.redirects.clear();
         container.basic_auth.clear();
         container.rate_limit = None;
+        container.maintenance_bypass.clear();
         container.maintenance = false;
         container.hash()
     }
@@ -1150,6 +1159,19 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
         return None;
     }
     let base = snapshot.service_name();
+    // In maintenance, the addresses let through reach the service as it is
+    // routed otherwise (without its rate limit).
+    let normal = (snapshot.maintenance
+        && !options.internal_url.is_empty()
+        && !snapshot.maintenance_bypass.is_empty())
+    .then(|| {
+        let mut normal = snapshot.clone();
+        normal.maintenance = false;
+        normal.rate_limit = None;
+        normal.maintenance_bypass.clear();
+        routes(&normal, options)
+    })
+    .flatten();
     let mut http = TraefikHttp {
         routers: BTreeMap::new(),
         services: BTreeMap::new(),
@@ -1361,6 +1383,9 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
     {
         rate_limited(&mut http, &base, snapshot.domains.len(), limit);
     }
+    if let Some(normal) = normal {
+        bypassed(&mut http, &base, normal.http, &snapshot.maintenance_bypass);
+    }
     Some(TraefikFile { http })
 }
 
@@ -1422,6 +1447,98 @@ fn rate_limited(
                 router.middlewares.insert(0, proxied.clone());
             }
         }
+    }
+}
+
+/// In maintenance, each router showing the page gets a twin leading where
+/// it leads otherwise (`normal`'s of its entry points and rule), for the addresses
+/// let through, just above it:
+/// - straight to Traefik: the peer (`-bypass`, +1);
+/// - from a Cloudflare edge (`-bypass-cf`, +2) or the tunnel (`-bypass`, +2:
+///   above its scheme's routers, +1): the visitor it names, last in
+///   `X-Forwarded-For`, which Traefik keeps from them only. Exact addresses
+///   only (a regular expression of the header).
+fn bypassed(http: &mut TraefikHttp, base: &str, normal: TraefikHttp, bypass: &[String]) {
+    use crate::services::maintenance_service::{exact_addresses, forwarded_for};
+    let private = format!("{base}-bypass-private");
+    http.middlewares.insert(
+        private.clone(),
+        json!({"headers": {"customResponseHeaders": {"Cache-Control": "private, no-store"}}}),
+    );
+    let exact = exact_addresses(bypass);
+    let forwarded = (!exact.is_empty()).then(|| {
+        format!(
+            "HeaderRegexp(`X-Forwarded-For`, `{}`)",
+            forwarded_for(&exact)
+        )
+    });
+    let any = |cidrs: &mut dyn Iterator<Item = String>| {
+        cidrs
+            .map(|c| format!("ClientIP(`{c}`)"))
+            .collect::<Vec<_>>()
+            .join(" || ")
+    };
+    let direct = any(&mut bypass.iter().cloned());
+    let edges = any(&mut crate::services::rate_limit_service::CLOUDFLARE
+        .iter()
+        .map(|c| c.to_string()));
+    // Each page's router, and the one routing the same requests otherwise
+    // (its entry points and rule: an HTTP domain's names differ).
+    let pages: Vec<(String, Router)> = http
+        .routers
+        .iter()
+        .map(|(name, router)| (name.clone(), router.clone()))
+        .collect();
+    for (name, page) in pages {
+        let priority = page.priority.unwrap_or_default();
+        let Some(router) = normal
+            .routers
+            .values()
+            .find(|r| r.entry_points == page.entry_points && r.rule == page.rule)
+        else {
+            continue;
+        };
+        let tunnel = router
+            .entry_points
+            .iter()
+            .any(|e| e == crate::services::tunnel_service::ENTRYPOINT);
+        // Never cached (a cache would show it to everyone).
+        let mut middlewares = vec![private.clone()];
+        middlewares.extend(router.middlewares.iter().cloned());
+        let twin = |rule: String, priority: i64| Router {
+            rule,
+            priority: Some(priority),
+            middlewares: middlewares.clone(),
+            ..router.clone()
+        };
+        if tunnel {
+            if let Some(forwarded) = &forwarded {
+                http.routers.insert(
+                    format!("{name}-bypass"),
+                    twin(format!("({}) && {forwarded}", router.rule), priority + 2),
+                );
+            }
+            continue;
+        }
+        http.routers.insert(
+            format!("{name}-bypass"),
+            twin(format!("({}) && ({direct})", router.rule), priority + 1),
+        );
+        if let Some(forwarded) = &forwarded {
+            http.routers.insert(
+                format!("{name}-bypass-cf"),
+                twin(
+                    format!("({}) && ({edges}) && {forwarded}", router.rule),
+                    priority + 2,
+                ),
+            );
+        }
+    }
+    for (name, service) in normal.services {
+        http.services.entry(name).or_insert(service);
+    }
+    for (name, middleware) in normal.middlewares {
+        http.middlewares.entry(name).or_insert(middleware);
     }
 }
 
@@ -1613,6 +1730,7 @@ mod tests {
             redirects: vec![],
             basic_auth: vec![],
             rate_limit: None,
+            maintenance_bypass: vec![],
         }
     }
 
@@ -1907,6 +2025,186 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    #[test]
+    fn in_maintenance_the_addresses_let_through_reach_the_service() {
+        use crate::services::rate_limit_service::RateLimit;
+        let mut down = snapshot();
+        down.maintenance = true;
+        down.basic_auth = vec!["u:h".into()];
+        down.rate_limit = Some(RateLimit {
+            average: 1,
+            period: "1s".into(),
+            burst: 1,
+            exempt: vec![],
+        });
+        down.maintenance_bypass = vec!["10.8.0.0/24".into(), "1.2.3.4/32".into()];
+        let options = DeployOptions {
+            tunnel: true,
+            internal_url: "http://panel:3000".into(),
+            ..production()
+        };
+        let file = routes(&down, &options).unwrap();
+        let mut up = down.clone();
+        up.maintenance = false;
+        up.rate_limit = None;
+        let normal = routes(&up, &options).unwrap();
+        let base = down.service_name();
+        let r = |name: &str| file.http.routers[name].clone();
+        let p = |name: &str| r(name).priority.unwrap();
+        // The page, for everyone else.
+        assert_eq!(
+            r(&format!("{base}-0")).service,
+            format!("{base}-maintenance")
+        );
+        // Straight: the peer, just above the page; the service as otherwise.
+        let direct = r(&format!("{base}-0-bypass"));
+        assert_eq!(
+            direct.service,
+            normal.http.routers[&format!("{base}-0")].service
+        );
+        // Never cached, then as otherwise.
+        assert_eq!(direct.middlewares[0], format!("{base}-bypass-private"));
+        assert_eq!(
+            direct.middlewares[1..],
+            normal.http.routers[&format!("{base}-0")].middlewares[..]
+        );
+        let private =
+            serde_json::to_value(&file.http.middlewares[&format!("{base}-bypass-private")])
+                .unwrap();
+        assert_eq!(
+            private["headers"]["customResponseHeaders"]["Cache-Control"],
+            "private, no-store"
+        );
+        assert!(!direct.middlewares.iter().any(|m| m.contains("ratelimit")));
+        assert_eq!(
+            direct.rule,
+            "(Host(`shop.example.com`)) && (ClientIP(`10.8.0.0/24`) || ClientIP(`1.2.3.4/32`))"
+        );
+        assert_eq!(p(&format!("{base}-0-bypass")), p(&format!("{base}-0")) + 1);
+        // Cloudflare's edges: the exact address they name.
+        let edge = r(&format!("{base}-0-bypass-cf"));
+        assert!(edge.rule.contains("ClientIP(`173.245.48.0/20`)"));
+        assert!(
+            edge.rule
+                .ends_with(r"HeaderRegexp(`X-Forwarded-For`, `(^|,\s*)(1\.2\.3\.4)$`)"),
+            "{}",
+            edge.rule
+        );
+        assert_eq!(
+            p(&format!("{base}-0-bypass-cf")),
+            p(&format!("{base}-0")) + 2
+        );
+        // HTTP: redirected to HTTPS as otherwise.
+        let plain = r(&format!("{base}-0-http-bypass"));
+        assert_eq!(
+            plain.middlewares,
+            [format!("{base}-bypass-private"), format!("{base}-https")]
+        );
+        // The tunnel: above its scheme's routers, which stay as they are.
+        let tunnel = format!("{base}-0-tunnel");
+        assert_eq!(r(&format!("{tunnel}-bypass")).service, direct.service);
+        assert!(r(&format!("{tunnel}-bypass")).rule.contains("HeaderRegexp"));
+        assert_eq!(p(&format!("{tunnel}-bypass")), p(&tunnel) + 2);
+        assert_eq!(
+            p(&format!("{tunnel}-http-bypass")),
+            p(&format!("{tunnel}-http")) + 2
+        );
+        assert_eq!(
+            r(&format!("{tunnel}-http-bypass")).middlewares,
+            [
+                format!("{base}-bypass-private"),
+                format!("{base}-tunnel-https")
+            ]
+        );
+        // Never above a longer route: `/api`'s page.
+        for name in file
+            .http
+            .routers
+            .keys()
+            .filter(|k| k.starts_with(&format!("{base}-0")))
+        {
+            assert!(p(name) < p(&format!("{base}-1")), "{name}");
+        }
+        assert!(file.http.services.contains_key(&direct.service));
+        assert!(
+            !file
+                .http
+                .middlewares
+                .keys()
+                .any(|k| k.contains("ratelimit"))
+        );
+        // An HTTP domain (its page's router named otherwise): let through too.
+        let http_only = r(&format!("{base}-2-http-bypass"));
+        assert_eq!(
+            http_only.service,
+            normal.http.routers[&format!("{base}-2")].service
+        );
+        assert_eq!(http_only.entry_points, ["web"]);
+        // Networks only: no header match (exact addresses only).
+        down.maintenance_bypass = vec!["10.8.0.0/24".into()];
+        let file = routes(&down, &options).unwrap();
+        assert!(file.http.routers.contains_key(&format!("{base}-0-bypass")));
+        assert!(
+            !file
+                .http
+                .routers
+                .keys()
+                .any(|k| k.ends_with("-bypass-cf") || k.ends_with("tunnel-bypass"))
+        );
+        // Nobody let through: the page only.
+        down.maintenance_bypass.clear();
+        let file = routes(&down, &options).unwrap();
+        assert!(!file.http.routers.keys().any(|k| k.contains("bypass")));
+        // Not in maintenance: no bypass either.
+        let mut running = snapshot();
+        running.maintenance_bypass = vec!["10.8.0.0/24".into()];
+        assert!(
+            !routes(&running, &options)
+                .unwrap()
+                .http
+                .routers
+                .keys()
+                .any(|k| k.contains("bypass"))
+        );
+        assert_eq!(
+            running.container_hash(false),
+            snapshot().container_hash(false)
+        );
+    }
+
+    /// Writes a service in maintenance letting `10.99.0.0/24` and `6.6.6.6`
+    /// through (`RDP_MT_DUMP=<dir>`), for a real Traefik to load.
+    #[test]
+    #[ignore]
+    fn maintenance_dump() {
+        let Ok(dir) = std::env::var("RDP_MT_DUMP") else {
+            return;
+        };
+        let mut s = snapshot();
+        s.domains = vec![Domain {
+            host: "shop.test".into(),
+            path: "/".into(),
+            port: 80,
+            https: false,
+            compose_service: None,
+            middlewares: vec![],
+            cert_resolver: None,
+            certificate: None,
+        }];
+        s.maintenance = true;
+        s.maintenance_bypass = vec!["10.99.0.0/24".into(), "6.6.6.6/32".into()];
+        let options = DeployOptions {
+            tunnel: true,
+            internal_url: "http://maint:80".into(),
+            ..DeployOptions::default()
+        };
+        std::fs::write(
+            format!("{dir}/{}.yml", s.service_name()),
+            routes(&s, &options).unwrap().to_yaml(),
+        )
+        .unwrap();
     }
 
     fn routes_of(snapshot: &Snapshot) -> TraefikFile {

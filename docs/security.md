@@ -107,6 +107,15 @@ then sees its Cloudflare visitors' address first in `X-Forwarded-For` (`X-Real-I
 Exempt addresses match the peer only. A Cloudflare Worker fetching a site names its own visitor;
 Cloudflare's cache answers without reaching the server; a published port bypasses Traefik.
 
+## Maintenance pages
+
+A maintenance page may be HTML written by a member of the service's project. It is served in a
+sandbox (its CSP: no script, no form, an opaque origin) and only for the service's own domains,
+never the panel's domain or an address: it cannot act on the panel's origin. The panel's preview of
+it is the same response, framed by the panel, for its author only. Through a cache (Cloudflare's), a
+page cached before maintenance may still be shown, and a page of a visitor let through may be cached
+for others: purge the cache when maintenance starts or ends.
+
 ## Compose services
 
 A Compose file can run privileged containers and mount any host directory: creating or editing a
