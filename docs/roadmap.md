@@ -68,5 +68,6 @@ Next:
 | 0.6.1: a light/dark switch per user | the panel's sidebar | released, in use |
 | 0.7.0: runtime branding | Settings → Branding | released, in use |
 | 0.8.x: `migrate --allow-newer` | an older panel starting on a newer database (Settings → Version's rollback) | released, in use |
-| 0.8.2: pages remounted after an action | Stop/Start from a service's tab without the error page | released, in use (the pin) |
+| 0.8.2: pages remounted after an action | Stop/Start from a service's tab without the error page | released, in use |
+| 0.10.3: media, rich text v2, editor layouts, action options (0.9–0.10) | security fixes; the panel keeps its look (success and warning stay neutral) | released, in use (the pin) |
 | TOTP | two-factor authentication | planned |

@@ -1,6 +1,6 @@
 [package]
 name = "rdockpanel"
-version = "0.9.2"
+version = "0.9.3"
 edition = "2024"
 description = "Free, self-hosted server panel like EasyPanel: server monitoring and Docker management (Swarm deployment in progress)."
 license = "MIT OR Apache-2.0"
@@ -8,10 +8,10 @@ repository = "https://github.com/irisvn/rdockpanel"
 publish = false
 
 [package.metadata.rustcms]
-version = "0.9.2"
+version = "0.10.3"
 
 [dependencies]
-rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.8.2" }
+rustcms = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.10.3" }
 sea-orm = { version = "=2.0.4", default-features = false, features = ["macros", "with-chrono", "with-uuid", "with-rust_decimal", "with-json"] }
 sea-orm-migration = { version = "=2.0.4", default-features = false }
 anyhow = "1"
@@ -54,6 +54,6 @@ rustls-pki-types = { version = "1.15.1", features = ["std"] }
 [dev-dependencies]
 insta = "1"
 rcgen = "0.14.10"
-rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.8.2" }
+rustcms-testing = { git = "https://github.com/irisvn/RustCMS-Core", tag = "v0.10.3" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 [workspace]

@@ -10,7 +10,16 @@ pub fn provider() -> AdminProvider {
         // serve the React pages) but have no sidebar entry (`navigation(false)`).
         .home("dashboard")
         // Light by default, as EasyPanel; not the operating system's scheme.
-        .theme(rustcms::admin::Theme::new().color_scheme(rustcms::admin::ColorScheme::Light))
+        // Success and warning stay neutral (RustCMS 0.10.2 made them green and
+        // amber): the kit's warning alerts tint their text with it, and the
+        // panel keeps status colors to dots and icons (docs/ui-guidelines.md).
+        .theme(
+            rustcms::admin::Theme::new()
+                .color_scheme(rustcms::admin::ColorScheme::Light)
+                .color("success", "#3f3f46")
+                .color("warning", "#52525b")
+                .dark(|p| p.color("success", "#d4d4d8").color("warning", "#d4d4d8")),
+        )
         // Settings → Branding, while the panel runs.
         .branding(crate::services::branding_service::PanelBranding)
         // Labels in Vietnamese (`rustcms lang:missing vi` lists what is missing).

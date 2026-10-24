@@ -3,6 +3,11 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.9.3 — 2026-10-24
+
+- Built on RustCMS 0.10.3 (from 0.8.2): framework fixes and security updates (`ctutils` 0.4.5,
+  `tokio` 1.53.3). The panel looks and works as before.
+
 ## 0.9.2 — 2026-10-23
 
 - A Compose file over 64 KB, and long notes in Vietnamese or emoji, are saved instead of failing

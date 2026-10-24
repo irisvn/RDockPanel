@@ -155,7 +155,8 @@ what ships. Its **§10 checklist** is binding: run it before showing anything.
    `docs/*.md`, `CHANGELOG.md`).
 4. **Commits**: short messages in Vietnamese, easy to understand.
 5. **Releases**: a big update bumps the version.
-   - Bump both `version` fields in `Cargo.toml`: a minor bump for features, a patch bump for fixes.
+   - Bump `[package] version` in `Cargo.toml`: a minor bump for features, a patch bump for fixes.
+     `[package.metadata.rustcms] version` is RustCMS's version: only `rustcms upgrade` changes it.
    - Add a CHANGELOG section: a few plain bullets on what changed for users, no internals.
    - Push to `main`, and wait for CI and that commit's image (`release.yml`) to succeed.
    - Then push the tag `vX.Y.Z`: it names that image and publishes the GitHub Release. It does not
