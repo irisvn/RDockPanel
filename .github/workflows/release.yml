@@ -24,7 +24,8 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  # Lowercase, as image names must be (the repository is irisvn/RDockPanel).
+  IMAGE: ghcr.io/irisvn/rdockpanel
 
 jobs:
   build:
