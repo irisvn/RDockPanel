@@ -113,8 +113,7 @@ pub async fn update(
     request: RequestMeta,
     Json(body): Json<Switch>,
 ) -> AppResult<Json<Value>> {
-    use sea_orm::TransactionTrait;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     home_service::set_enabled(&txn, body.enabled).await?;
     let entry = AuditEntry::new("home.update", "panel_settings")
         .key("home")

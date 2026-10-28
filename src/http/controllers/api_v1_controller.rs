@@ -6,7 +6,7 @@
 
 use rustcms::prelude::*;
 use rustcms::{AppError, AppResult, Json};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, TransactionTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::Value;
 
 use crate::models::{deployment, project, service, service_domain};
@@ -192,7 +192,7 @@ async fn queue(
     trigger: Trigger,
 ) -> AppResult<Value> {
     use sea_orm::QuerySelect;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     // Read again, locked: what is deployed is what is authorized (a move to
     // another project or new privileges meanwhile waits, or went first).
     let row = &service::Entity::find_by_id(row.id)

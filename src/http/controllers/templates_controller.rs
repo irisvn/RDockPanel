@@ -9,7 +9,7 @@ use rustcms::audit::{self, AuditActor, AuditContext, AuditEntry, RequestMeta};
 use rustcms::prelude::*;
 use rustcms::queue;
 use rustcms::{AppError, AppResult, Json};
-use sea_orm::EntityTrait;
+use sea_orm::{EntityTrait, QuerySelect};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -227,17 +227,45 @@ async fn apply(
         return Err(AppError::Forbidden);
     }
     let compose_allowed = principal.can(permissions::SYSTEM_MANAGE);
-    let txn = rustcms::db::begin_write(app.db()).await?;
+    // Planned (and its passwords hashed) before the write: a project keeps
+    // its name, and the write holds SQLite's whole database.
     let project = project::Entity::find_by_id(project_id)
-        .one(&txn)
+        .one(app.db())
         .await?
         .ok_or(AppError::NotFound)?;
     let host = (!config().service_domain.trim().is_empty()).then(|| config().service_domain.trim());
     let Plan {
-        services,
+        mut services,
         warnings,
         blocking,
     } = template_service::plan(output, &project.name, host).map_err(unavailable)?;
+    if !dry_run {
+        // Off the async workers: bcrypt takes a while per password.
+        services = tokio::task::spawn_blocking(move || {
+            services
+                .iter_mut()
+                .try_for_each(creation_service::hash_passwords)
+                .map(|()| services)
+        })
+        .await
+        .map_err(AppError::internal)??;
+    }
+    let txn = rustcms::db::begin_write(app.db()).await?;
+    // Still there, under the name planned with (a project without
+    // deployments can be renamed meanwhile): held until the commit.
+    let planned_for = project.name;
+    let project = project::Entity::find_by_id(project_id)
+        .lock_exclusive()
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if project.name != planned_for {
+        return Err(AppError::Conflict {
+            code: "project_renamed",
+            reason: "stale",
+            message: "The project was renamed meanwhile: try again",
+        });
+    }
     if deploy && !blocking.is_empty() {
         return Err(unavailable(format!(
             "{} Create it without deploying, and protect it before deploying.",

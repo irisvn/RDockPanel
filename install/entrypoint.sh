@@ -1,5 +1,6 @@
 #!/bin/sh
-# The panel's container: migrations (waiting for MySQL while it starts),
+# The panel's container: migrations (waiting for MySQL while it starts;
+# SQLite is a file, there at once),
 # permissions, then the command (`serve` by default). `--allow-newer`: a
 # database a newer version migrated is used as it is (Settings → Version's
 # Update rolled back to this one); the panel's migrations only add.

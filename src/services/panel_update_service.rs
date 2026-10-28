@@ -6,7 +6,8 @@
 //!    one at a time; asked twice, refused.
 //! 2. A maintenance gate stops new deployments, backups and restores
 //!    ([`refuse_while_updating`]); the update waits until those running end.
-//! 3. The panel's database is dumped (`mysqldump`) to the backups directory.
+//! 3. The panel's database is copied to the backups directory: `mysqldump`
+//!    (MySQL) or `VACUUM INTO` (SQLite).
 //! 4. Swarm moves the service to the release's image, pinned by the digest
 //!    the registry gave, with a rollback when the new task does not become
 //!    healthy (`update_config.failure_action = rollback`).
@@ -327,11 +328,77 @@ async fn run(app: &AppState, id: i64) -> Result<(), String> {
     // 3. The database, dumped.
     plan.stage = "backing up".to_owned();
     row = save_plan(db, row, &plan).await.map_err(|e| e.to_string())?;
-    plan.dump = Some(dump(&docker, &plan.from, id).await?);
+    plan.dump = Some(
+        if db.get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
+            snapshot(db, DUMPS, &plan.from, id).await?
+        } else {
+            dump(&docker, &plan.from, id).await?
+        },
+    );
     // 4. The service moved to the release, rolled back if it fails.
     plan.stage = "updating".to_owned();
     save_plan(db, row, &plan).await.map_err(|e| e.to_string())?;
     move_to(&docker, &plan.image).await
+}
+
+/// A copy of the panel's SQLite database in `dir` (`VACUUM INTO`: what is
+/// committed, the write-ahead log's too, in one consistent file), checked
+/// whole before the update goes on: the file's path.
+pub async fn snapshot(
+    db: &sea_orm::DatabaseConnection,
+    dir: &str,
+    from: &str,
+    id: i64,
+) -> Result<String, String> {
+    use sea_orm::ConnectionTrait;
+    if !from
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
+    {
+        return Err(format!("{from:?} is not a version"));
+    }
+    tokio::fs::create_dir_all(dir)
+        .await
+        .map_err(|e| format!("{dir}: {e}"))?;
+    let path = format!(
+        "{dir}/rdockpanel-{from}-{}-{id}.sqlite",
+        Utc::now().format("%Y%m%d-%H%M%S")
+    );
+    // Outside a transaction (VACUUM cannot run in one); a file already
+    // there is refused, never overwritten.
+    db.execute_unprepared(&format!("VACUUM INTO '{}'", path.replace('\'', "''")))
+        .await
+        .map_err(|e| format!("the database's copy failed: {e}"))?;
+    if let Err(e) = intact(&path).await {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(format!("the database's copy is not whole: {e}"));
+    }
+    Ok(path)
+}
+
+/// `PRAGMA integrity_check` of the SQLite file at `path`, opened read-only.
+async fn intact(path: &str) -> Result<(), String> {
+    use sea_orm::ConnectionTrait;
+    let copy = sea_orm::Database::connect(format!("sqlite://{path}?mode=ro"))
+        .await
+        .map_err(|e| e.to_string())?;
+    let row = copy
+        .query_one_raw(sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "PRAGMA integrity_check",
+        ))
+        .await
+        .map_err(|e| e.to_string());
+    let _ = copy.close().await;
+    let verdict: String = row?
+        .ok_or("no answer")?
+        .try_get_by_index(0)
+        .map_err(|e| e.to_string())?;
+    if verdict == "ok" {
+        Ok(())
+    } else {
+        Err(verdict)
+    }
 }
 
 /// `mysqldump` of the panel's database (in `rdp-mysql`), to [`DUMPS`]: the

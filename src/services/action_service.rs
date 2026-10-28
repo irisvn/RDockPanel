@@ -68,8 +68,7 @@ pub async fn announce(
     kind: &str,
     target: &str,
 ) -> AppResult<action::Model> {
-    use sea_orm::TransactionTrait;
-    let txn = db.begin().await?;
+    let txn = rustcms::db::begin_write(db).await?;
     let row = start(&txn, by, kind, target, action::RUNNING).await?;
     let entry = AuditEntry::new(format!("system.{kind}"), "system")
         .key(target)

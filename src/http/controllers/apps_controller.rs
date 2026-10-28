@@ -9,7 +9,7 @@ use rustcms::audit::{self, AuditActor, AuditContext, AuditEntry, RequestMeta};
 use rustcms::crypto::Encrypted;
 use rustcms::prelude::*;
 use rustcms::{AppError, AppResult, Json, ValidationErrors};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -446,7 +446,7 @@ pub async fn env(
         .key(id.to_string())
         .meta(json!({ "names": env.keys().collect::<Vec<_>>() }));
     // No audit, no values.
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     audit::record(&txn, &audit_context(&auth, request), entry).await?;
     txn.commit().await?;
     Ok(Json(json!({
@@ -514,7 +514,7 @@ pub async fn put_env(
     let sealed = (!env.is_empty())
         .then(|| Encrypted::seal(app.keyring(), &service::env_context(), &env))
         .transpose()?;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     // Locked: two editors never overwrite each other's change unseen.
     let current = service::Entity::find_by_id(row.id)
         .lock_exclusive()
@@ -604,7 +604,7 @@ pub async fn credentials(
     let host = snapshot_without_env(db, &row).await?.service_name();
     let entry = AuditEntry::new("services.credentials.read", "services").key(id.to_string());
     // No audit, no values.
-    let txn = db.begin().await?;
+    let txn = rustcms::db::begin_write(db).await?;
     audit::record(&txn, &audit_context(&auth, request), entry).await?;
     txn.commit().await?;
     Ok(Json(json!({
@@ -657,7 +657,7 @@ pub async fn create_service(
     if body.kind == "compose" && !auth.principal().can(permissions::SYSTEM_MANAGE) {
         return Err(AppError::Forbidden);
     }
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     let project = project::Entity::find_by_id(id)
         .one(&txn)
         .await?
@@ -1231,7 +1231,7 @@ pub async fn run_script(
     let entry = AuditEntry::new("services.script.run", "services")
         .key(row.id.to_string())
         .meta(json!({ "script": script.name }));
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     audit::record(&txn, &audit_context(&auth, request.clone()), entry).await?;
     txn.commit().await?;
     let mark = format!(

@@ -8,7 +8,7 @@ use rustcms::prelude::*;
 use rustcms::{AppError, AppResult, Json, ValidationErrors};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, TransactionTrait,
+    QuerySelect, Set,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -115,7 +115,7 @@ pub async fn add(
     let role = body.role.trim();
     check_role(role)?;
     let email = body.email.trim().to_ascii_lowercase();
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     // The project held while its members change.
     crate::models::project::Entity::find_by_id(id)
         .lock_exclusive()
@@ -189,7 +189,7 @@ pub async fn update(
     let body: Role = parse(body)?;
     let role = body.role.trim();
     check_role(role)?;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     crate::models::project::Entity::find_by_id(id)
         .lock_exclusive()
         .one(&txn)
@@ -233,7 +233,7 @@ pub async fn remove(
     Path((id, user)): Path<(i64, i64)>,
 ) -> AppResult<Json<Value>> {
     access_service::project(app.db(), auth.principal(), id, PROJECTS_MEMBERS).await?;
-    let txn = app.db().begin().await?;
+    let txn = rustcms::db::begin_write(app.db()).await?;
     crate::models::project::Entity::find_by_id(id)
         .lock_exclusive()
         .one(&txn)

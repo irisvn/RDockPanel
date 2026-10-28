@@ -19,6 +19,25 @@ curl -fsSL …/install.sh | sudo sh -s -- \
 
 Point `panel.example.com` and `*.apps.example.com` (a wildcard record) to the server first.
 
+### The panel's database
+
+The panel keeps its own data (projects, services, users, the audit log, …) in one of two
+databases, chosen at the first install and kept afterwards:
+
+- **MySQL 8.4** (the default): a service `rdp-mysql` next to the panel. For most servers.
+- **SQLite**: one file, `/var/lib/rdockpanel/data/panel.sqlite`, no database server (less memory).
+  For a small server: one writer at a time, so many people saving at once wait their turn.
+
+Run in a terminal, the installer asks (Enter is MySQL); `--database mysql` or `--database sqlite`
+answers it beforehand, and without a terminal (a script, cron) it is MySQL. Your apps' own
+databases (PostgreSQL, MySQL, … services) are not affected by this choice.
+
+The choice is kept in `install.conf` (`DATABASE=`). A later run with another `--database` stops
+without changing anything: moving the panel's data from one database to the other is not done by
+the installer. An `install.conf` from before 0.10.0 has no `DATABASE`: the installer then reads it
+from what the install left (`rdp-mysql`, the database URL secret), and stops when it cannot tell
+(put `DATABASE=mysql` or `DATABASE=sqlite` in the file).
+
 | Option | |
 |---|---|
 | `--domain HOST` | the panel at `https://HOST` only (needs `--email`; point its DNS here first) |
@@ -26,12 +45,13 @@ Point `panel.example.com` and `*.apps.example.com` (a wildcard record) to the se
 | `--apps-domain HOST` | generated app domains `<project>-<service>.HOST` |
 | `--no-domain` | back to `http://<server-ip>:3000` |
 | `--admin-email EMAIL` | creates the first administrator and prints its password |
+| `--database mysql\|sqlite` | the panel's database, at the first install only (see above; asked in a terminal, else MySQL) |
 | `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:main`, a development build: use `--version` for a release) |
 | `--version X.Y.Z` | that release of the panel: `ghcr.io/irisvn/rdockpanel:X.Y.Z` |
 | `--upgrade-system` | MySQL and Traefik pulled again at their tags (a newer patch of `mysql:8.4`, `traefik:v3.7`) |
 
 The options are kept in `/etc/rdockpanel/install.conf`: a later run changes only what it is given.
-That file is read as data (`KEY=value` lines of `IMAGE`, `DOMAIN`, `EMAIL`, `APPS_DOMAIN`, each
+That file is read as data (`KEY=value` lines of `IMAGE`, `DOMAIN`, `EMAIL`, `APPS_DOMAIN`, `DATABASE`, each
 value checked), never run. In the panel, **Settings → Panel** checks a new domain, email or apps'
 domain (DNS records, a name a service already uses) and gives the exact command to run here.
 Without a domain the panel answers on plain HTTP (port 3000): give it a domain before using it
@@ -41,11 +61,14 @@ panel is reached over HTTPS only.
 ## What it sets up
 
 - Docker (when missing) and a single-node **Swarm**.
-- `/etc/rdockpanel`: `secrets/` (`APP_KEY`, the database's passwords; made once, kept across
-  installs), `traefik/dynamic/` (the routes the panel writes), `traefik/acme/` (certificates).
-- Docker secrets `rdp_app_key`, `rdp_database_url`, `rdp_mysql_root`, `rdp_mysql_password`, and the
-  overlay network `rdp-internal`.
-- Three Swarm services, labelled `rdockpanel.system=true` (hidden from users without
+- `/etc/rdockpanel`: `secrets/` (`APP_KEY`, the database's URL and MySQL's passwords; made once,
+  kept across installs), `traefik/dynamic/` (the routes the panel writes), `traefik/acme/`
+  (certificates).
+- Docker secrets `rdp_app_key`, `rdp_database_url` (and with MySQL `rdp_mysql_root`,
+  `rdp_mysql_password`), and the overlay network `rdp-internal`.
+- With SQLite, `/var/lib/rdockpanel/data` (the database file and its `-wal`/`-shm` companions),
+  mounted into the panel at the same path.
+- Three Swarm services (two with SQLite: no `rdp-mysql`), labelled `rdockpanel.system=true` (hidden from users without
   `system.manage`), pinned to this node (`node.labels.rdockpanel.main`: their data lives here):
   - `rdp-mysql`: MySQL 8.4, data on the volume `rdp-mysql-data`, reachable on `rdp-internal` only;
     under 2 GB of memory it runs small (no `performance_schema`, no binary log, smaller buffers
@@ -55,7 +78,8 @@ panel is reached over HTTPS only.
   - `rdockpanel`: the panel (port 3000 without a domain), with the Docker socket, the host's `/proc` (server
     metrics), the routes directory, `/var/lib/rdockpanel/backups` (the same path inside: what a
     "Local directory" storage provider under it writes lands on the host) and
-    `/var/lib/rdockpanel/compose` (Compose services' files, the same path inside). Its entrypoint migrates
+    `/var/lib/rdockpanel/compose` (Compose services' files, the same path inside), and with SQLite
+    `/var/lib/rdockpanel/data`. It is replaced stop-first (never two panels writing). Its entrypoint migrates
     the database at each start. It reaches itself at `http://rdockpanel:3000` from Traefik
     (maintenance pages).
 
@@ -84,7 +108,8 @@ it runs (its version, commit and RustCMS Core's) at the foot of the Dashboard an
 registry's `X.Y.Z` tags; the notes are GitHub's release), says so there and on the Dashboard (to
 its administrators). Its **Update** button (an administrator's; the panel never updates by itself)
 moves the panel to that release: new deployments, backups and restores wait while those running
-end, the panel's database is dumped to `/var/lib/rdockpanel/backups/panel/`, then Swarm replaces
+end, the panel's database is copied to `/var/lib/rdockpanel/backups/panel/` (a `mysqldump`, or with
+SQLite a checked `VACUUM INTO` copy; no copy, no update), then Swarm replaces
 the panel (the release's image pinned by its digest) and rolls back if the new one does not
 become healthy; the next panel records how it ended (Settings → Version → History). The
 installer command for it (`--version X.Y.Z`) is shown too. A run of the installer without
@@ -112,12 +137,28 @@ curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/inst
   | sudo sh -s -- --version 0.5.0
 ```
 
+With SQLite the copy is `rdockpanel-<version>-<time>-<id>.sqlite`, a whole database. Install the
+version the copy was made by, stop the panel and wait until its task is gone (`docker ps` shows no
+`rdockpanel` container), replace the file and remove the old `-wal` and `-shm` files (they belong
+to the old file), then start it:
+
+```sh
+curl -fsSL …/install.sh | sudo sh -s -- --version 0.10.0
+docker service scale rdockpanel=0
+cd /var/lib/rdockpanel/data
+rm -f panel.sqlite-wal panel.sqlite-shm
+cp /var/lib/rdockpanel/backups/panel/rdockpanel-0.10.0-….sqlite panel.sqlite
+docker service scale rdockpanel=1
+```
+
 ## Backups
 
 Your apps' databases: a database service's Backups tab (scheduled dumps to a storage provider of
 Settings: a directory under `/var/lib/rdockpanel/backups`, or an S3-compatible bucket, better off
-the server). The panel itself: back up `/etc/rdockpanel` (secrets and certificates) and the database: `docker exec` into the
-`rdp-mysql` container and `mysqldump panel`. Losing `APP_KEY` loses the encrypted environment
+the server). The panel itself: back up `/etc/rdockpanel` (secrets and certificates) and the database: with
+MySQL, `docker exec` into the `rdp-mysql` container and `mysqldump panel`; with SQLite, copy
+`/var/lib/rdockpanel/data` while the panel is stopped (`docker service scale rdockpanel=0`, then
+`=1`), or keep the copy Settings → Version's Update makes. Losing `APP_KEY` loses the encrypted environment
 variables, registry passwords and file mounts (see [security](security.md)).
 
 ## Uninstalling
@@ -125,16 +166,20 @@ variables, registry passwords and file mounts (see [security](security.md)).
 If the Firewall is on, turn it off first (Firewall → Turn off): Docker waits for it at boot. Without
 the panel, `sh /var/lib/rdockpanel/firewall/fw.sh disable` does the same.
 
-Then `docker service rm rdockpanel rdp-traefik rdp-mysql rdp-cloudflared` (the last one if the tunnel
-was on), then (this deletes the panel's data, its backups included):
+Then `docker service rm rdockpanel rdp-traefik rdp-mysql rdp-cloudflared` (`rdp-mysql` with MySQL,
+the last one if the tunnel was on), then (this deletes the panel's data, its backups included):
 
 ```sh
-docker volume rm rdp-mysql-data
-docker secret rm rdp_app_key rdp_database_url rdp_mysql_root rdp_mysql_password
+docker volume rm rdp-mysql-data                                         # MySQL
+docker secret rm rdp_app_key rdp_database_url
+docker secret rm rdp_mysql_root rdp_mysql_password                      # MySQL
 docker secret ls -q -f name=rdp_tunnel_ -f name=rdp-dns- | xargs -r docker secret rm
 docker network rm rdp-internal rdp-tunnel     # rdp-tunnel only if the tunnel was used
 rm -r /etc/rdockpanel /var/lib/rdockpanel/backups
+rm -r /var/lib/rdockpanel/data                                          # SQLite
 ```
+
+Remove the database too: a new install makes a new `APP_KEY`, which cannot read an old database.
 
 Your apps' services keep running until removed. `/var/lib/rdockpanel/compose` holds the Compose
 services' files, and their relative bind mounts (`./data`) live there too: remove it only once

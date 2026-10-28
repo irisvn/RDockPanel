@@ -205,8 +205,9 @@ db_test!(
             .await;
         assert_eq!(read.json()["template"], json!(page));
 
-        // Back to TEXT: refused while a value is longer, nothing changed.
-        {
+        // Back to TEXT: refused while a value is longer, nothing changed
+        // (MySQL's; other databases have no 64 KiB TEXT to go back to).
+        if app.state().db().get_database_backend() == sea_orm::DatabaseBackend::MySql {
             use sea_orm_migration::MigratorTrait;
             let undone = Migrator::down(app.state().db(), Some(1)).await;
             assert!(

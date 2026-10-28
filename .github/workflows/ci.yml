@@ -1,5 +1,5 @@
 # On pushes to main and pull requests: formatting, lints, the tests on MySQL 8.4
-# (the panel's only database: `RUSTCMS_TEST_BACKENDS=mysql` runs no other).
+# and SQLite (the panel's two databases: `RUSTCMS_TEST_BACKENDS=mysql,sqlite`).
 # `Cargo.lock` is committed: CI builds exactly the versions you tested.
 name: CI
 
@@ -33,7 +33,7 @@ jobs:
           - 3306:3306
     env:
       RUSTCMS_TEST_MYSQL: mysql://root:root@127.0.0.1:3306/mysql
-      RUSTCMS_TEST_BACKENDS: mysql
+      RUSTCMS_TEST_BACKENDS: mysql,sqlite
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -62,7 +62,7 @@ jobs:
       PANEL_TEST_DOCKER: "1"
       PANEL_TEST_SWARM: "1"
       RUSTCMS_TEST_MYSQL: mysql://root:root@127.0.0.1:3306/mysql
-      RUSTCMS_TEST_BACKENDS: mysql
+      RUSTCMS_TEST_BACKENDS: mysql,sqlite
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

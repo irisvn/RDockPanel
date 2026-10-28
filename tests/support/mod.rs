@@ -74,6 +74,15 @@ pub async fn app_with(
     .await
 }
 
+/// This run's part of a Swarm object's name: the process id, and `s` for
+/// a test's SQLite variant (its MySQL variant runs in the same process).
+pub fn run_id(db: &rustcms_testing::TestDb) -> String {
+    match db.backend() {
+        rustcms_testing::Backend::Sqlite => format!("{}s", std::process::id()),
+        _ => std::process::id().to_string(),
+    }
+}
+
 /// Held by the tests that change a real Swarm's networks: Swarm's address
 /// allocator rejects tasks ("Pool overlaps") while networks come and go in
 /// parallel.
@@ -93,7 +102,8 @@ pub async fn swarm_lock() -> tokio::sync::MutexGuard<'static, ()> {
 /// crashed). Each run that takes `swarm_lock` leaves a marker named after its
 /// process; the objects of a marked process no longer running are removed
 /// (their names carry its pid: `e<pid>`, `d<pid>`, `db<pid>`, `t<pid>`,
-/// `r<pid>a`, `r<pid>b`), then its marker. Nothing unmarked is touched.
+/// `r<pid>a`, `r<pid>b`, with `s` after the pid for a SQLite variant:
+/// [`run_id`]), then its marker. Nothing unmarked is touched.
 fn sweep_dead_runs() {
     use std::process::Command;
     let runs = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("swarm-runs");
@@ -127,11 +137,15 @@ fn sweep_dead_runs() {
         gone.iter().any(|(_, pid)| {
             [
                 format!("e{pid}"),
+                format!("e{pid}s"),
                 format!("d{pid}"),
                 format!("db{pid}"),
+                format!("db{pid}s"),
                 format!("t{pid}"),
                 format!("r{pid}a"),
                 format!("r{pid}b"),
+                format!("r{pid}sa"),
+                format!("r{pid}sb"),
             ]
             .iter()
             .any(|p| {

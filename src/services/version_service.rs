@@ -466,6 +466,24 @@ pub async fn status(app: &AppState, installed: bool) -> AppResult<Value> {
         )
     });
     let mut components = json!({ "rustcms": env!("RDP_CORE_VERSION") });
+    // The panel's database: SQLite in its process, or MySQL's service.
+    let sqlite = app.db().get_database_backend() == sea_orm::DatabaseBackend::Sqlite;
+    if sqlite {
+        use sea_orm::ConnectionTrait;
+        let version = app
+            .db()
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT sqlite_version()",
+            ))
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.try_get_by_index::<String>(0).ok());
+        if let Some(version) = version {
+            components["sqlite"] = json!(version);
+        }
+    }
     if let Some(docker) = docker.as_deref() {
         if let Ok(info) = docker.info().await {
             components["docker"] = json!(info.server_version);
@@ -479,7 +497,7 @@ pub async fn status(app: &AppState, installed: bool) -> AppResult<Value> {
             .unwrap_or_default();
         for (key, service) in [
             ("traefik", traefik.as_str()),
-            ("mysql", "rdp-mysql"),
+            ("mysql", if sqlite { "" } else { "rdp-mysql" }),
             ("cloudflared", crate::services::tunnel_service::SERVICE),
         ] {
             if service.is_empty() {

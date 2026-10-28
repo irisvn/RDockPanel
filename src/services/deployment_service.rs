@@ -19,7 +19,7 @@ use rustcms::{AppError, AppResult, AppState};
 use sea_orm::sea_query::{Condition, Expr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    IntoActiveModel, QueryFilter, QuerySelect, Set, TransactionTrait,
+    IntoActiveModel, QueryFilter, QuerySelect, Set,
 };
 use serde_json::json;
 
@@ -1748,7 +1748,7 @@ async fn finish(
         .unwrap_or(true);
     let (service_id, deployment_id) = (row.service_id, row.id);
     // The deployment's end and the lock's release go together.
-    let txn = db.begin().await?;
+    let txn = rustcms::db::begin_write(db).await?;
     let mut active = row.into_active_model();
     active.status = Set(status.to_owned());
     active.error = Set(error);

@@ -75,7 +75,7 @@ feature is free: no project limits, no paid tiers.
   A certificate resolver per domain (Settings → Certificates: Let's Encrypt over HTTP or over DNS with
   a Cloudflare, DigitalOcean, Hetzner, Vultr or Linode token), applied to Traefik without SSH; or a
   certificate of your own, uploaded (checked, its key sealed, warned of before it expires).
-- **Settings → Version**: what the panel runs (and with: Core, Traefik, MySQL, Docker, the OS), whether a
+- **Settings → Version**: what the panel runs (and with: Core, Traefik, MySQL or SQLite, Docker, the OS), whether a
   newer release is out (checked every 6 hours, also said on the Dashboard), what changed, an **Update**
   button (an administrator's: the panel never updates by itself; its database dumped first, a rollback
   if the new version does not start), its history, and its old versions removed.
@@ -152,7 +152,9 @@ curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/inst
 ```
 
 Add `--domain panel.example.com --email you@example.com` for the panel on HTTPS (Let's Encrypt)
-and `--apps-domain apps.example.com` for generated app domains. See [docs/install.md](docs/install.md).
+and `--apps-domain apps.example.com` for generated app domains. The panel keeps its own data in
+MySQL 8.4 (the default) or SQLite (one file, for a small server): the installer asks at the first
+install, or takes `--database mysql|sqlite`. See [docs/install.md](docs/install.md).
 
 ## Quick start (development)
 
@@ -181,14 +183,14 @@ the real containers on your machine**. `dev-swarm.sh` turns it into a Swarm mana
 ## Tests
 
 ```sh
-export RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_BACKENDS=mysql
-cargo test                       # unit and feature tests against MySQL, Docker faked
+export RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_BACKENDS=mysql,sqlite
+cargo test                       # unit and feature tests on MySQL and SQLite, Docker faked
 PANEL_TEST_DOCKER=1 cargo test   # also against the real Docker engine (runs an alpine container)
 PANEL_TEST_SWARM=1 cargo test    # also deploys on the real Swarm and routes through Traefik
                                  # (after scripts/dev-swarm.sh)
 ```
 
-CI runs formatting, `clippy -D warnings` and the tests on MySQL 8.4 on pushes to `main` and pull
+CI runs formatting, `clippy -D warnings` and the tests on MySQL 8.4 and SQLite on pushes to `main` and pull
 requests, and a second job on a real Docker engine and Swarm with Traefik. That job deploys, makes
 rolling updates under load, and checks HTTPS and project isolation.
 
@@ -198,7 +200,7 @@ rolling updates under load, and checks HTTPS and project isolation.
   SeaORM: authentication, roles, audit log, job queue, the admin panel, server-sent events and
   WebSocket admin routes.
 - **[bollard](https://github.com/fussybeaver/bollard)** for the Docker Engine API (Swarm services,
-  tasks, networks), **sysinfo** and `/proc` for host metrics, **MySQL 8.4** for the panel's data.
+  tasks, networks), **sysinfo** and `/proc` for host metrics, **MySQL 8.4** or **SQLite** for the panel's data.
 - **Docker Swarm** runs the apps; **[Traefik](https://traefik.io)** v3 routes their domains, from
   files the panel writes.
 - The apps interface is React pages on RustCMS's extension host (the built files are committed:

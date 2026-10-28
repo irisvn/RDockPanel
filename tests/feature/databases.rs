@@ -97,6 +97,7 @@ db_test!(
             return;
         }
         let _swarm = support::swarm_lock().await;
+        let name = format!("db{}", support::run_id(&db));
         let app = support::app_with(
             db,
             BollardDocker::connect().expect("docker client"),
@@ -106,7 +107,6 @@ db_test!(
         let user = support::user_with(&app, "admin", &[]).await;
         app.make_super_admin(&user).await;
         let admin = app.acting_as(&user).await;
-        let name = format!("db{}", std::process::id());
         let project = create(&app, &admin, "projects", json!({"name": name})).await;
 
         let mut engines = vec![("postgres", "postgres:17"), ("redis", "redis:7")];

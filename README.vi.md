@@ -19,7 +19,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 - Vào `/admin` là thấy ngay **Dashboard**: số liệu server, các project với thẻ service, nút **+ Service** và **Templates**. Sidebar gồm Dashboard, Domains, Firewall, Actions, Settings và các trang Docker.
 - **Trang service** có header (trạng thái, Deploy, Start/Stop, Restart, Open, Logs, Shell) và các tab: Overview, Credentials (với database), Backups (với database và service có volume), Deployments, Environment, Domains, Redirects, Security, Maintenance, Scripts, Source, Storage, Advanced.
-- **Settings → Phiên bản**: panel đang chạy bản nào (cùng Core, Traefik, MySQL, Docker, hệ điều hành), có bản phát hành mới chưa (kiểm tra 6 giờ một lần, báo cả trên Bảng điều khiển), có gì mới, nút **Cập nhật** (admin bấm: panel không bao giờ tự cập nhật; database được backup trước, bản mới không chạy thì Swarm tự quay về), lịch sử, và dọn các bản cũ.
+- **Settings → Phiên bản**: panel đang chạy bản nào (cùng Core, Traefik, MySQL hoặc SQLite, Docker, hệ điều hành), có bản phát hành mới chưa (kiểm tra 6 giờ một lần, báo cả trên Bảng điều khiển), có gì mới, nút **Cập nhật** (admin bấm: panel không bao giờ tự cập nhật; database được backup trước, bản mới không chạy thì Swarm tự quay về), lịch sử, và dọn các bản cũ.
 - **Settings → Panel:** log và khởi động lại panel; Refresh IP và Reboot server; log và khởi động lại Traefik; dọn Docker mà không đụng tới dữ liệu của service.
 - **Tường lửa** (menu Workspace, chỉ quản trị viên): đóng mọi port với internet trừ SSH, 80 và 443, cùng các port anh mở cho địa chỉ chỉ định (ví dụ IP của VPN), cho máy chủ hoặc cho port service publish; chặn địa chỉ; xem các port đang lắng nghe và của ai. Mỗi thay đổi được thử trước, server tự quay về nếu không bấm Giữ; nạp lúc khởi động trước Docker ([docs/firewall.md](docs/firewall.md)).
 - **Trang chủ** ở địa chỉ của panel (`/`): giới thiệu RDockPanel, ảnh giao diện, lệnh cài đặt và link GitHub, bằng tiếng Anh hoặc tiếng Việt, không có thông tin nào của máy chủ. Tắt được trong Settings → Panel (khi đó `/` mở trang đăng nhập).
@@ -101,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/inst
   | sudo sh -s -- --admin-email ban@example.com
 ```
 
-Thêm `--domain panel.example.com --email ban@example.com` để panel chạy HTTPS (Let's Encrypt), và `--apps-domain apps.example.com` để có domain tự sinh cho app. Xem [docs/install.md](docs/install.md).
+Thêm `--domain panel.example.com --email ban@example.com` để panel chạy HTTPS (Let's Encrypt), và `--apps-domain apps.example.com` để có domain tự sinh cho app. Dữ liệu của panel nằm trong MySQL 8.4 (mặc định) hoặc SQLite (một file, hợp với server nhỏ): installer hỏi ở lần cài đầu, hoặc nhận `--database mysql|sqlite`. Xem [docs/install.md](docs/install.md).
 
 ## Chạy thử (môi trường dev)
 
@@ -130,14 +130,14 @@ các container thật trên máy bạn**. `dev-swarm.sh` biến Docker trên má
 ## Test
 
 ```sh
-export RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_BACKENDS=mysql
-cargo test                       # unit và feature test trên MySQL, Docker giả lập
+export RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql RUSTCMS_TEST_BACKENDS=mysql,sqlite
+cargo test                       # unit và feature test trên MySQL và SQLite, Docker giả lập
 PANEL_TEST_DOCKER=1 cargo test   # chạy thêm với Docker thật (tạo một container alpine)
 PANEL_TEST_SWARM=1 cargo test    # chạy thêm deploy trên Swarm thật và route qua Traefik
                                  # (sau khi chạy scripts/dev-swarm.sh)
 ```
 
-CI kiểm tra format, `clippy -D warnings` và chạy test trên MySQL 8.4 khi push lên `main` và khi có pull request. Một job thứ hai chạy với Docker và Swarm thật, có Traefik: deploy, rolling update khi đang có tải, kiểm tra HTTPS và việc cô lập giữa các project.
+CI kiểm tra format, `clippy -D warnings` và chạy test trên MySQL 8.4 và SQLite khi push lên `main` và khi có pull request. Một job thứ hai chạy với Docker và Swarm thật, có Traefik: deploy, rolling update khi đang có tải, kiểm tra HTTPS và việc cô lập giữa các project.
 
 ## Kiến trúc
 
@@ -146,7 +146,7 @@ CI kiểm tra format, `clippy -D warnings` và chạy test trên MySQL 8.4 khi p
   - **[bollard](https://github.com/fussybeaver/bollard)** cho Docker Engine API (gồm service, task, network của Swarm);
   - **Docker Swarm** chạy các app; **[Traefik](https://traefik.io)** v3 route domain cho chúng, từ các file do panel ghi;
   - **sysinfo** và `/proc` cho số liệu máy;
-  - **MySQL 8.4** lưu dữ liệu của panel.
+  - **MySQL 8.4** hoặc **SQLite** lưu dữ liệu của panel.
 - **Giao diện:** các trang admin viết bằng React, chạy trên extension host của RustCMS (file build được commit sẵn, chỉ cần Node khi sửa giao diện). Terminal dùng [xterm.js](https://xtermjs.org) (đi kèm trong repo, license MIT).
 
 Chi tiết xem [docs/architecture.md](docs/architecture.md).

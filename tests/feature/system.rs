@@ -642,3 +642,76 @@ async fn an_update_that_never_becomes_healthy_is_rolled_back() {
         std::panic::resume_unwind(panic);
     }
 }
+
+db_test!(
+    an_updates_sqlite_copy_is_whole,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        if !db.url().starts_with("sqlite") {
+            return; // MySQL's is mysqldump, in rdp-mysql.
+        }
+        use rdockpanel::models::service;
+        use rdockpanel::services::panel_update_service::snapshot;
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        let project =
+            crate::deployments::create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let web = crate::deployments::create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await;
+        admin
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &app.admin_api(&format!("x/apps/services/{web}/env")),
+                Some(&json!({"text": "SECRET=kept"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let dir = std::env::temp_dir().join(format!(
+            "rdp-copy-{}",
+            rdockpanel::services::database_service::random_string(12)
+        ));
+        let dir = dir.to_str().unwrap();
+
+        // Not a version: refused, nothing written.
+        assert!(snapshot(app.state().db(), dir, "1' x", 1).await.is_err());
+        let path = snapshot(app.state().db(), dir, "0.9.3", 7).await.unwrap();
+        assert!(
+            path.starts_with(dir) && path.ends_with("-7.sqlite"),
+            "{path}"
+        );
+        // What was committed (the write-ahead log's too), sealed values
+        // readable with the same key.
+        let copy = sea_orm::Database::connect(format!("sqlite://{path}?mode=ro"))
+            .await
+            .unwrap();
+        let row = service::Entity::find_by_id(web.parse::<i64>().unwrap())
+            .one(&copy)
+            .await
+            .unwrap()
+            .unwrap();
+        let env =
+            rdockpanel::services::deployment_service::service_env(&row, app.state().keyring())
+                .unwrap();
+        assert_eq!(env.get("SECRET").map(String::as_str), Some("kept"));
+        copy.close().await.unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        // Settings → Version names the database the panel runs on.
+        let version = admin.get(&app.admin_api("x/apps/system/version")).await;
+        version.assert_status(StatusCode::OK);
+        let components = &version.json()["components"];
+        assert!(
+            components["sqlite"]
+                .as_str()
+                .is_some_and(|v| v.starts_with('3')),
+            "{components}"
+        );
+        assert!(components.get("mysql").is_none(), "{components}");
+    }
+);

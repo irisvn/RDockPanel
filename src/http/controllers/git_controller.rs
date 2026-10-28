@@ -10,7 +10,7 @@ use rustcms::prelude::*;
 use rustcms::{AppError, AppResult, Json, ValidationErrors};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, TransactionTrait,
+    QuerySelect, Set,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -140,7 +140,7 @@ pub async fn create(
     // GitHub must accept it first: who it signs in as.
     let checked = github(&app).check(&token).await?;
     let db = app.db();
-    let txn = db.begin().await?;
+    let txn = rustcms::db::begin_write(db).await?;
     if git_provider::Entity::find()
         .filter(git_provider::Column::Name.eq(&name))
         .one(&txn)
@@ -205,7 +205,7 @@ pub async fn update(
         None => None,
     };
     let db = app.db();
-    let txn = db.begin().await?;
+    let txn = rustcms::db::begin_write(db).await?;
     let row = git_provider::Entity::find_by_id(id)
         .lock_exclusive()
         .one(&txn)
@@ -260,7 +260,7 @@ pub async fn delete(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let db = app.db();
-    let txn = db.begin().await?;
+    let txn = rustcms::db::begin_write(db).await?;
     let row = git_provider::Entity::find_by_id(id)
         .lock_exclusive()
         .one(&txn)

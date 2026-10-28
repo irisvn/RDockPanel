@@ -1204,11 +1204,11 @@ db_test!(
             return;
         }
         let _swarm = support::swarm_lock().await;
+        let project = format!("e{}", support::run_id(&db));
         let app = support::app(db).await;
         let user = support::user_with(&app, "admin", &[]).await;
         app.make_super_admin(&user).await;
         let admin = app.acting_as(&user).await;
-        let project = format!("e{}", std::process::id());
         let project_key = create(&app, &admin, "projects", json!({"name": project})).await;
         let service = create(
         &app,

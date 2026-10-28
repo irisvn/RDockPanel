@@ -377,3 +377,44 @@ db_test!(
         assert_eq!(stats["cpu_percent"], 25.0);
     }
 );
+
+db_test!(
+    a_save_waits_for_another_write,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use sea_orm::ConnectionTrait;
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        let project = create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let service = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await;
+        let env = app.admin_api(&format!("x/apps/services/{service}/env"));
+        // Another write holds the database (SQLite) or the row (MySQL)
+        // while the save starts; it commits a moment later. The save
+        // waits for it, then reads: it is kept (on SQLite a save reading
+        // first could not write after that commit: "database is locked").
+        let other = rustcms::db::begin_write(app.state().db()).await.unwrap();
+        other
+            .execute_unprepared(&format!(
+                "UPDATE services SET replicas = 2 WHERE id = {service}"
+            ))
+            .await
+            .unwrap();
+        let body = json!({"text": "MODE=prod"});
+        let (saved, ()) = tokio::join!(
+            admin.send(rustcms::axum::http::Method::PUT, &env, Some(&body)),
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                other.commit().await.unwrap();
+            }
+        );
+        saved.assert_status(StatusCode::OK);
+    }
+);

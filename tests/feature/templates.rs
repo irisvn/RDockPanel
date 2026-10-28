@@ -439,3 +439,46 @@ db_test!(
             .assert_status(StatusCode::OK);
     }
 );
+
+db_test!(
+    a_project_renamed_meanwhile_is_not_planned_for,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use sea_orm::ConnectionTrait;
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        let project = create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let schema = app.admin_api(&format!("x/apps/projects/{project}/schema"));
+        let body = json!({"schema": {"services": [{"type": "app", "data": {"serviceName": "web", "source": {"type": "image", "image": "nginx:1.27"}, "domains": [{"host": "$(EASYPANEL_DOMAIN)"}]}}]}});
+        // Renamed by another write that commits while the services are
+        // planned (with the old name): refused, nothing created.
+        let other = rustcms::db::begin_write(app.state().db()).await.unwrap();
+        other
+            .execute_unprepared(&format!(
+                "UPDATE projects SET name = 'store' WHERE id = {project}"
+            ))
+            .await
+            .unwrap();
+        let (applied, ()) = tokio::join!(admin.post_json(&schema, &body), async {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            other.commit().await.unwrap();
+        });
+        applied.assert_status(StatusCode::CONFLICT);
+        assert_eq!(applied.json()["code"], "project_renamed");
+        assert_eq!(
+            service::Entity::find()
+                .all(app.state().db())
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+        // Again: planned for its new name.
+        admin
+            .post_json(&schema, &body)
+            .await
+            .assert_status(StatusCode::OK);
+    }
+);

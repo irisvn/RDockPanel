@@ -120,6 +120,9 @@ pub struct NewService {
     pub groups: Vec<String>,
     /// Its basic authentication: (user, password); hashed when made.
     pub basic_auth: Vec<(String, String)>,
+    /// Their hashes, in that order, when made before the write
+    /// ([`hash_passwords`]: bcrypt is slow, a write holds SQLite's lock).
+    pub basic_auth_hashes: Vec<String>,
     pub redirects: Vec<NewRedirect>,
 }
 
@@ -144,6 +147,7 @@ impl NewService {
             compose: None,
             compose_git: None,
             basic_auth: vec![],
+            basic_auth_hashes: vec![],
             redirects: vec![],
             cap_add: vec![],
             cap_drop: vec![],
@@ -161,6 +165,24 @@ impl NewService {
             ..Self::app(name, "")
         }
     }
+}
+
+/// Hashes `new`'s basic authentication passwords, before the write that
+/// creates it: bcrypt takes a while, and a write on SQLite holds the whole
+/// database. A password `create` refuses is not hashed (its error comes
+/// from there).
+pub fn hash_passwords(new: &mut NewService) -> AppResult<()> {
+    new.basic_auth_hashes = new
+        .basic_auth
+        .iter()
+        .map(|(_, password)| {
+            if password.is_empty() || password.len() > 72 {
+                return Ok(String::new());
+            }
+            bcrypt::hash(password, 10).map_err(AppError::internal)
+        })
+        .collect::<AppResult<_>>()?;
+    Ok(())
 }
 
 /// Creates `new` in `project` (in `txn`, the caller's). Field errors are
@@ -590,8 +612,11 @@ pub async fn create(
         .await
         .map_err(|e| taken(e, "domains", format!("{} is already routed", domain.host)))?;
     }
-    for (user, password) in &new.basic_auth {
-        let hash = bcrypt::hash(password, 10).map_err(AppError::internal)?;
+    for (i, (user, password)) in new.basic_auth.iter().enumerate() {
+        let hash = match new.basic_auth_hashes.get(i) {
+            Some(hash) => hash.clone(),
+            None => bcrypt::hash(password, 10).map_err(AppError::internal)?,
+        };
         crate::models::service_basic_auth::ActiveModel {
             service_id: Set(row.id),
             username: Set(user.clone()),

@@ -1,8 +1,8 @@
 # RDockPanel — rules for working on this repository
 
 RDockPanel is a Docker Swarm panel (EasyPanel-like) built as a **RustCMS application**: one Rust
-binary (`rdockpanel`, axum on RustCMS-Core) with a React admin (`resources/admin`). Production and
-every test run on **MySQL 8.4 only**. Start with `docs/architecture.md`; the other guides are in
+binary (`rdockpanel`, axum on RustCMS-Core) with a React admin (`resources/admin`). The panel's own
+database is **MySQL 8.4 or SQLite** (chosen at install), and every test runs on both. Start with `docs/architecture.md`; the other guides are in
 `docs/` (api, development, install, permissions, security, firewall, ui-guidelines).
 
 The person who owns this project writes in Vietnamese. Answer in Vietnamese, plainly.
@@ -56,8 +56,14 @@ reference apps: the layout and the examples, not only a snippet. In the RustCMS-
 - **Input**: take JSON with `rustcms::Json` or `Validated<T>`. Malformed JSON is 400; a body of
   the wrong shape and field errors (`ValidationErrors`) are 422.
 - **Writes**
-  - Use `rustcms::db::begin_write` (MySQL: READ COMMITTED with the framework's lock wait).
-  - Lock the row you decide on (`lock_exclusive`) before reading what the decision depends on.
+  - Use `rustcms::db::begin_write` for every write transaction, never a plain `begin()` (MySQL:
+    READ COMMITTED with the framework's lock wait; SQLite: `BEGIN IMMEDIATE`, the whole database).
+    On SQLite a plain `begin()` that reads first fails ("database is locked") once another write
+    commits.
+  - Lock the row you decide on (`lock_exclusive`) before reading what the decision depends on
+    (a no-op on SQLite, where `begin_write` already holds the database).
+  - Keep slow work out of a write transaction (Docker and network calls, bcrypt): do it before
+    or after. On SQLite the transaction blocks every other writer.
   - Dispatch the jobs a write causes in that write's transaction. Keep job payloads to ids, with no
     secrets, and make retried effects idempotent.
 - **Audit**
@@ -72,7 +78,8 @@ reference apps: the layout and the examples, not only a snippet. In the RustCMS-
     `rustcms key:reencrypt` finds it.
   - RDockPanel: check the size with `deploy_rules_service::sealable` and answer 422. A service's
     files are sealed together when it deploys.
-- **Columns**: MySQL's `TEXT` holds 64 KiB (bytes), so a longer value needs `MEDIUMTEXT` on MySQL.
+- **Columns**: MySQL's `TEXT` holds 64 KiB (bytes), so a longer value needs `MEDIUMTEXT` on MySQL
+  (branch on `get_database_backend()`; SQLite's `TEXT` has no such limit).
   A field's `max_length` counts characters, and multi-byte text can overflow a byte-sized column.
 - **Configuration**: read a section with `config.section("x")?`. A value of the wrong kind is an
   error, never a silent default.
@@ -84,6 +91,8 @@ reference apps: the layout and the examples, not only a snippet. In the RustCMS-
   - Keep `use_transaction() -> Some(true)` unless a statement cannot run in one.
   - MySQL commits each DDL statement, so make a migration safe to run again after a partial
     failure. A `down` that would lose data refuses before changing anything.
+  - Every migration runs on SQLite too: one change per `ALTER TABLE`, no `MODIFY` or added
+    constraint there (MySQL-only DDL goes in a MySQL branch).
 
 ## 2. Follow the UI/UX guidelines
 
@@ -124,7 +133,7 @@ what ships. Its **§10 checklist** is binding: run it before showing anything.
 - A behaviour change needs a regression test that **fails without the change**: check it once by
   undoing the change. Test HTTP behaviour through feature tests, with the shared helpers in
   `tests/support/`. Real Swarm network tests hold `support::swarm_lock()`.
-- Before every commit, run the whole suite on MySQL (the optional switches are in
+- Before every commit, run the whole suite on MySQL and SQLite (the optional switches are in
   `docs/development.md`). Gate the commit on this block's exit code, and keep failures visible when
   piping output:
 
@@ -135,7 +144,7 @@ what ships. Its **§10 checklist** is binding: run it before showing anything.
     docker compose up -d          # MySQL 8.4
     sh scripts/dev-swarm.sh       # Swarm + Traefik for the Swarm tests
     RUSTCMS_TEST_MYSQL="${RUSTCMS_TEST_MYSQL:?the local test MySQL URL, see docs/development.md}" \
-      RUSTCMS_TEST_BACKENDS=mysql \
+      RUSTCMS_TEST_BACKENDS=mysql,sqlite \
       PANEL_TEST_DOCKER=1 PANEL_TEST_SWARM=1 cargo test --locked
     cargo fmt --check
     cargo clippy --locked --all-targets -- -D warnings

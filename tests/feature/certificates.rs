@@ -118,8 +118,18 @@ db_test!(
             )
             .await
             .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
-        // Values stored as checked: trimmed.
-        let spaced: i64 = create(&app, &admin, "cert_resolvers", json!({"name": " spaced ", "kind": "dns ", "provider": " digitalocean", "email": " ops@example.com ", "token": {"replace": "t"}})).await.parse().unwrap();
+        // A select takes one of its options exactly (RustCMS 0.11.0).
+        let refused = admin
+            .post_json(&url, &json!({"name": "padded", "kind": "dns ", "provider": " digitalocean", "email": "ops@example.com", "token": {"replace": "t"}}))
+            .await;
+        refused.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(refused.json()["issues"]["kind"][0]["code"], "not_option");
+        assert_eq!(
+            refused.json()["issues"]["provider"][0]["code"],
+            "not_option"
+        );
+        // Text values stored as checked: trimmed.
+        let spaced: i64 = create(&app, &admin, "cert_resolvers", json!({"name": " spaced ", "kind": "dns", "provider": "digitalocean", "email": " ops@example.com ", "token": {"replace": "t"}})).await.parse().unwrap();
         {
             use sea_orm::EntityTrait;
             let row = rdockpanel::models::cert_resolver::Entity::find_by_id(spaced)

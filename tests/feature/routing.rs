@@ -145,6 +145,7 @@ db_test!(
             "rdp-traefik",
             false,
         );
+        let tag = format!("r{}", support::run_id(&db));
         let app = support::app_with(
             db,
             BollardDocker::connect().expect("docker client"),
@@ -155,7 +156,6 @@ db_test!(
         app.make_super_admin(&user).await;
         let admin = app.acting_as(&user).await;
 
-        let tag = format!("r{}", std::process::id());
         let (a, b) = (format!("{tag}a"), format!("{tag}b"));
         let (host, secure) = (format!("{a}.localhost"), format!("s{a}.localhost"));
         let a_id = nginx(&app, &admin, &a, &[(&host, false), (&secure, true)]).await;

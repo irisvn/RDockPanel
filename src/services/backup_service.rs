@@ -20,7 +20,7 @@ use rustcms::{AppError, AppResult, AppState};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, PaginatorTrait, QueryFilter, QuerySelect, Set, TransactionTrait,
+    IntoActiveModel, PaginatorTrait, QueryFilter, QuerySelect, Set,
 };
 
 use crate::jobs::run_backup::RunBackup;
@@ -403,7 +403,7 @@ pub async fn run(state: &AppState, id: i64) -> AppResult<()> {
     // A dead run's command killed before another one is let in.
     recover_interrupted(db, state.service::<Docker>().as_deref()).await?;
     let now = Utc::now();
-    let txn = db.begin().await?;
+    let txn = rustcms::db::begin_write(db).await?;
     // The service locked: two runs claim one after the other.
     service::Entity::find_by_id(row.service_id)
         .lock_exclusive()
@@ -968,7 +968,7 @@ pub async fn tick(state: &AppState) -> AppResult<usize> {
         let Some(due) = latest_slot(&cron, since, now) else {
             continue;
         };
-        let txn = db.begin().await?;
+        let txn = rustcms::db::begin_write(db).await?;
         let mut claim = database_backup::Entity::update_many()
             .col_expr(database_backup::Column::LastSlotAt, Expr::value(due))
             .filter(database_backup::Column::Id.eq(config.id));

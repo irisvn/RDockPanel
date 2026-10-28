@@ -35,7 +35,7 @@ resources/admin/    src/: every page in React (built to js/rdockpanel/dashboard.
                     (dashboard.css, xterm.css), js/rdockpanel/vendor/ (xterm.js)
 resources/home/     the public homepage (HTML, CSS, its screens' viewer, images)
 scripts/            dev-swarm.sh (a development Swarm with Traefik)
-tests/              feature tests (MySQL), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER and
+tests/              feature tests (MySQL and SQLite), a FakeDocker, real-engine tests behind PANEL_TEST_DOCKER and
                     PANEL_TEST_SWARM
 ```
 
@@ -581,7 +581,11 @@ at the bottom of the sidebar (RustCMS 0.6.1, kept in the browser).
 
 ## Data
 
-MySQL 8.4 (`docker-compose.yml` for development). Besides the framework's tables (users, roles,
+MySQL 8.4 (`docker-compose.yml` for development) or SQLite, chosen at the install (one file,
+`/var/lib/rdockpanel/data/panel.sqlite`). On SQLite a write transaction (`begin_write`: `BEGIN
+IMMEDIATE`) holds the whole database, so every read-then-write uses `begin_write` (a plain
+`begin` that reads first cannot write after another write commits: "database is locked") and
+slow work (bcrypt, Docker calls) runs before or after it, never inside. Besides the framework's tables (users, roles,
 sessions, audit log, API tokens, jobs, schedule slots, …), the panel adds `actions`, then for Phase 2
 `projects`, `services`, `service_domains`, `service_ports`, `service_mounts` and `deployments` (each
 with its configuration snapshot, pinned image, status and log), then `service_redirects`,

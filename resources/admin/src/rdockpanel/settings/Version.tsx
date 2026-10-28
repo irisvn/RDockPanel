@@ -52,6 +52,7 @@ const COMPONENTS: Array<[string, string]> = [
   ["rustcms", "RustCMS Core"],
   ["traefik", "Traefik"],
   ["mysql", "MySQL"],
+  ["sqlite", "SQLite"],
   ["cloudflared", "cloudflared"],
   ["docker", "Docker Engine"],
   ["os", "Operating system"],

@@ -3,6 +3,17 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.10.0 — 2026-10-29
+
+- The panel can keep its own data in **SQLite** (one file, no database server: less memory on a
+  small server) instead of MySQL. The installer asks at the first install, or takes
+  `--database mysql|sqlite`; existing installs stay on MySQL. Settings → Version shows which one
+  runs, and its Update button backs SQLite up too.
+- Built on RustCMS 0.11.0 (from 0.10.3). A form's choice list now accepts only its exact values
+  (a value with extra spaces is refused); framework cleanups appear in System → Schedules.
+- Saving a service's environment, members, Git providers and a few other settings while another
+  change is being written now waits its turn instead of failing.
+
 ## 0.9.3 — 2026-10-24
 
 - Built on RustCMS 0.10.3 (from 0.8.2): framework fixes and security updates (`ctutils` 0.4.5,

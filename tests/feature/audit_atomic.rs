@@ -15,21 +15,23 @@ use crate::deployments::create;
 use crate::support::{self, fake_docker::FakeDocker};
 
 async fn audit_log(app: &TestApp, on: bool) {
-    let sql = if on {
-        "RENAME TABLE audit_logs_off TO audit_logs"
+    let (from, to) = if on {
+        ("audit_logs_off", "audit_logs")
     } else {
-        "RENAME TABLE audit_logs TO audit_logs_off"
+        ("audit_logs", "audit_logs_off")
     };
-    app.state().db().execute_unprepared(sql).await.unwrap();
+    let db = app.state().db();
+    let sql = match db.get_database_backend() {
+        sea_orm::DatabaseBackend::MySql => format!("RENAME TABLE {from} TO {to}"),
+        _ => format!("ALTER TABLE {from} RENAME TO {to}"),
+    };
+    db.execute_unprepared(&sql).await.unwrap();
 }
 
 db_test!(
     no_change_without_its_audit_entry,
     migrate = Migrator,
     |db: TestDb| async move {
-        if db.url().starts_with("sqlite") || db.url().starts_with("postgres") {
-            return; // RENAME TABLE … TO …: MySQL's (the panel's database).
-        }
         let app = support::app_with_docker(db, FakeDocker::default()).await;
         let root = support::user_with(&app, "root", &[]).await;
         app.make_super_admin(&root).await;

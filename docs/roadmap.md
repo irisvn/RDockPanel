@@ -19,7 +19,7 @@ Every feature free: no project limits, no paid tiers.
   zero-downtime image changes, HTTPS, isolated projects.
 - Encrypted environment variables and private registry credentials (RustCMS W8).
 - The installer (`install/install.sh`, the image `ghcr.io/irisvn/rdockpanel` for amd64 and arm64):
-  Swarm, MySQL, Traefik with Let's Encrypt, the panel; tried on Ubuntu 24.04 (install twice, reboot).
+  Swarm, MySQL or SQLite, Traefik with Let's Encrypt, the panel; tried on Ubuntu 24.04 (install twice, reboot).
 
 ## Phase 3: apps, builds and Settings (mostly done)
 

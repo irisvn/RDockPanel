@@ -4,7 +4,8 @@
 
 - Rust stable, Docker (Docker Desktop, or OrbStack on macOS), the `rustcms` CLI.
 - MySQL 8.4 from `docker-compose.yml` (`docker compose up -d`), with the same server flags as
-  production (`utf8mb4_0900_bin`, UTC). The panel uses MySQL everywhere: development, tests, CI.
+  production (`utf8mb4_0900_bin`, UTC). The panel also runs on SQLite (`DATABASE_URL=sqlite://…`,
+  see `.env.example`): an install chooses one of the two, and the tests run on both.
 - `.env` holds `APP_KEY` (`rustcms key:generate`) and `DATABASE_URL`.
 
 ```sh
@@ -32,7 +33,7 @@ other containers keep running.
 | Variable | Effect |
 |---|---|
 | `RUSTCMS_TEST_MYSQL=mysql://root:root@127.0.0.1:3306/mysql` | the test database server |
-| `RUSTCMS_TEST_BACKENDS=mysql` | run database tests on MySQL only (required) |
+| `RUSTCMS_TEST_BACKENDS=mysql,sqlite` | run database tests on MySQL and SQLite, both required (PostgreSQL is not a panel database) |
 | `PANEL_TEST_SWARM=1` | also run the Swarm tests (needs `scripts/dev-swarm.sh`: a Swarm manager and Traefik on 8080/8443): an overlay network and a service created, updated, removed; deployments; domains routed through Traefik, an image change under load without a failed request, HTTPS, projects isolated |
 | `PANEL_TEST_TEMPLATES=1` | runs every real template's generator (network; about 15 minutes) and requires 95% to plan |
 | `PANEL_TEST_ALL_DATABASES=1` | with `PANEL_TEST_SWARM=1`, the database test runs MySQL, MariaDB and MongoDB too (large images; CI runs PostgreSQL and Redis) |

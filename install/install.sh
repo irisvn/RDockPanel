@@ -12,6 +12,9 @@
 #   --apps-domain HOST   generated app domains <project>-<service>.HOST (a wildcard DNS record)
 #   --no-domain          back to http://<server-ip>:3000 (forgets --domain)
 #   --admin-email EMAIL  creates the first administrator (prints its password)
+#   --database KIND      the panel's own database, chosen at the first install and
+#                        then kept: mysql (MySQL 8.4, the default) or sqlite (one
+#                        file, for a small server); asked when run in a terminal
 #   --image IMAGE        the panel's image (default ghcr.io/irisvn/rdockpanel:main)
 #   --version X.Y.Z      that release of the panel (its image ghcr.io/irisvn/rdockpanel:X.Y.Z)
 #   --upgrade-system     MySQL and Traefik pulled again at their tags (else they are
@@ -26,6 +29,8 @@ ETC=/etc/rdockpanel
 BACKUPS=/var/lib/rdockpanel/backups
 # Compose services' files (relative paths of a Compose file resolve on the host).
 COMPOSE=/var/lib/rdockpanel/compose
+# The panel's SQLite database (with --database sqlite), the same path in its container.
+DATA=/var/lib/rdockpanel/data
 CONF="$ETC/install.conf"
 SYSTEM=rdockpanel.system=true
 MYSQL_IMAGE=mysql:8.4
@@ -42,6 +47,7 @@ IMAGE="ghcr.io/irisvn/rdockpanel:main"
 DOMAIN=""
 EMAIL=""
 APPS_DOMAIN=""
+DATABASE=""
 # Read as data, never run: KEY=value lines of these keys only (a value with
 # anything but the characters its option allows is refused below).
 if [ -f "$CONF" ]; then
@@ -52,12 +58,15 @@ if [ -f "$CONF" ]; then
       DOMAIN=*) DOMAIN="${line#DOMAIN=}" ;;
       EMAIL=*) EMAIL="${line#EMAIL=}" ;;
       APPS_DOMAIN=*) APPS_DOMAIN="${line#APPS_DOMAIN=}" ;;
-      *) die "$CONF: unknown line (keys: IMAGE, DOMAIN, EMAIL, APPS_DOMAIN)" ;;
+      DATABASE=*) DATABASE="${line#DATABASE=}" ;;
+      *) die "$CONF: unknown line (keys: IMAGE, DOMAIN, EMAIL, APPS_DOMAIN, DATABASE)" ;;
     esac
   done < "$CONF"
 fi
 ADMIN_EMAIL=""
 UPGRADE_SYSTEM=""
+# Set by --database.
+WANTED_DATABASE=""
 # Set by --image or --version: then that image, whatever runs.
 CHOSEN=""
 while [ $# -gt 0 ]; do
@@ -67,12 +76,13 @@ while [ $# -gt 0 ]; do
     --apps-domain) APPS_DOMAIN="${2:-}"; shift 2 ;;
     --no-domain) DOMAIN=""; shift ;;
     --admin-email) ADMIN_EMAIL="${2:-}"; shift 2 ;;
+    --database) WANTED_DATABASE="${2:-}"; shift 2 ;;
     --image) IMAGE="${2:-}"; CHOSEN=1; shift 2 ;;
     --version)
       printf '%s' "${2:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "--version: not a version like 1.2.3"
       IMAGE="ghcr.io/irisvn/rdockpanel:$2"; CHOSEN=1; shift 2 ;;
     --upgrade-system) UPGRADE_SYSTEM=1; shift ;;
-    -h|--help) sed -n '2,22p' "$0" 2>/dev/null || true; exit 0 ;;
+    -h|--help) sed -n '2,25p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
 done
@@ -89,6 +99,8 @@ email_ok() { one_line "$1" && printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._%+-]+@[a
 [ -z "$ADMIN_EMAIL" ] || email_ok "$ADMIN_EMAIL" || die "--admin-email: not an email address"
 one_line "$IMAGE" && printf '%s' "$IMAGE" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$' || die "--image: not an image reference"
 [ -z "$DOMAIN" ] || [ -n "$EMAIL" ] || die "--domain needs --email (its HTTPS certificate)"
+case "$WANTED_DATABASE" in ''|mysql|sqlite) ;; *) die "--database: mysql or sqlite" ;; esac
+case "$DATABASE" in ''|mysql|sqlite) ;; *) die "$CONF: DATABASE is mysql or sqlite" ;; esac
 
 # --- Docker and Swarm -------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
@@ -137,6 +149,50 @@ if [ -z "$CHOSEN" ] && docker service inspect rdockpanel >/dev/null 2>&1; then
   esac
 fi
 
+# --- The panel's database (chosen once, kept) ----------------------------------
+# Asked on the terminal (the script itself comes on stdin with `curl | sh`);
+# without one (cron, CI, `ssh host cmd`) or at its end, MySQL.
+ask_database() {
+  if ! (exec 3</dev/tty) 2>/dev/null; then
+    echo mysql
+    return
+  fi
+  exec 3</dev/tty
+  answer=""
+  while :; do
+    printf '%s' "Database for the panel: [1] MySQL 8.4 (default)  [2] SQLite (a small server) > " >/dev/tty 2>/dev/null || true
+    read -r answer <&3 || { answer=1; echo >/dev/tty 2>/dev/null || true; }
+    case "$answer" in
+      ''|1|mysql|MySQL) answer=mysql; break ;;
+      2|sqlite|SQLite) answer=sqlite; break ;;
+    esac
+  done
+  exec 3<&-
+  echo "$answer"
+}
+# A conf without it: an install of before (MySQL), or one whose conf was
+# lost, told by what it left.
+if [ -z "$DATABASE" ]; then
+  if docker service inspect rdp-mysql >/dev/null 2>&1 || docker secret inspect rdp_mysql_root >/dev/null 2>&1; then
+    DATABASE=mysql
+  elif docker secret inspect rdp_database_url >/dev/null 2>&1 || [ -s "$ETC/secrets/database_url" ]; then
+    case "$(cat "$ETC/secrets/database_url" 2>/dev/null)" in
+      sqlite:*) DATABASE=sqlite ;;
+      mysql:*) DATABASE=mysql ;;
+      *) die "the panel's database is unknown: put DATABASE=mysql or DATABASE=sqlite in $CONF (see docs/install.md)" ;;
+    esac
+  fi
+fi
+if [ -n "$DATABASE" ]; then
+  [ -z "$WANTED_DATABASE" ] || [ "$WANTED_DATABASE" = "$DATABASE" ] \
+    || die "this panel runs on $DATABASE: another database moves its data, which the installer does not do"
+elif [ -n "$WANTED_DATABASE" ]; then
+  DATABASE=$WANTED_DATABASE
+else
+  DATABASE=$(ask_database)
+fi
+say "The panel's database: $DATABASE"
+
 # --- Directories, options and secrets (made once, kept) -----------------------
 mkdir -p "$ETC/secrets" "$ETC/traefik/dynamic" "$ETC/traefik/acme" "$BACKUPS" "$COMPOSE"
 chmod 0700 "$BACKUPS" "$COMPOSE"
@@ -144,13 +200,21 @@ chmod 0700 "$ETC" "$ETC/secrets" "$ETC/traefik/acme"
 touch "$ETC/traefik/acme/acme.json"
 chmod 0600 "$ETC/traefik/acme/acme.json"
 umask 077
-printf 'IMAGE=%s\nDOMAIN=%s\nEMAIL=%s\nAPPS_DOMAIN=%s\n' "$IMAGE" "$DOMAIN" "$EMAIL" "$APPS_DOMAIN" > "$CONF"
+printf 'IMAGE=%s\nDOMAIN=%s\nEMAIL=%s\nAPPS_DOMAIN=%s\nDATABASE=%s\n' "$IMAGE" "$DOMAIN" "$EMAIL" "$APPS_DOMAIN" "$DATABASE" > "$CONF"
 
 random_hex() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 [ -s "$ETC/secrets/app_key" ] || printf 'base64:%s' "$(head -c 32 /dev/urandom | base64 | tr -d '\n')" > "$ETC/secrets/app_key"
-[ -s "$ETC/secrets/mysql_root" ] || random_hex > "$ETC/secrets/mysql_root"
-[ -s "$ETC/secrets/mysql_password" ] || random_hex > "$ETC/secrets/mysql_password"
-printf 'mysql://panel:%s@rdp-mysql:3306/panel' "$(cat "$ETC/secrets/mysql_password")" > "$ETC/secrets/database_url"
+if [ "$DATABASE" = mysql ]; then
+  [ -s "$ETC/secrets/mysql_root" ] || random_hex > "$ETC/secrets/mysql_root"
+  [ -s "$ETC/secrets/mysql_password" ] || random_hex > "$ETC/secrets/mysql_password"
+  printf 'mysql://panel:%s@rdp-mysql:3306/panel' "$(cat "$ETC/secrets/mysql_password")" > "$ETC/secrets/database_url"
+  SECRETS="app_key mysql_root mysql_password database_url"
+else
+  mkdir -p "$DATA"
+  chmod 0700 "$DATA"
+  printf 'sqlite://%s/panel.sqlite?mode=rwc' "$DATA" > "$ETC/secrets/database_url"
+  SECRETS="app_key database_url"
+fi
 umask 022
 
 # A Docker secret is made once from its file; a file that no longer matches
@@ -165,7 +229,7 @@ docker_secret() { # name
     docker secret create --label "$SYSTEM" --label "rdockpanel.sha256=$sum" "rdp_$1" "$ETC/secrets/$1" >/dev/null
   fi
 }
-for s in app_key mysql_root mysql_password database_url; do docker_secret "$s"; done
+for s in $SECRETS; do docker_secret "$s"; done
 
 docker network inspect rdp-internal >/dev/null 2>&1 \
   || docker network create --driver overlay --attachable --label "$SYSTEM" rdp-internal >/dev/null
@@ -179,65 +243,67 @@ constrained() { # service: on this node only (installs of before: on any manager
 }
 
 # --- MySQL 8.4 (the panel's database, on rdp-internal only) -------------------
-# Alive is enough (a ping answers before credentials; the first start
-# initializes the database for a minute or two).
-MYSQL_HEALTH='mysqladmin ping -h 127.0.0.1 --silent'
-# The panel's database is small (some 50 tables, 10 connections): MySQL's
-# defaults are for a server of its own. Under 2 GB of memory it gets less:
-# no instrumentation, no binary log (nothing replicates it; the backups are
-# dumps), smaller buffers and caches.
-MYSQL_ARGS="--character-set-server=utf8mb4 --collation-server=utf8mb4_0900_bin --default-time-zone=+00:00"
-MEMORY_KB=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
-if [ "${MEMORY_KB:-0}" -lt 2000000 ]; then
-  MYSQL_ARGS="$MYSQL_ARGS --performance-schema=OFF --skip-log-bin \
---innodb-buffer-pool-size=64M --innodb-log-buffer-size=8M \
---innodb-read-io-threads=1 --innodb-write-io-threads=1 \
---max-connections=40 --table-open-cache=400 --table-open-cache-instances=1 \
---table-definition-cache=400 --temptable-max-ram=32M --tmp-table-size=16M \
---max-heap-table-size=16M --key-buffer-size=1M"
-fi
-# A shutdown flushes the buffer pool: more than Swarm's 10 seconds (killed,
-# it recovers at the next start, and a new task may wait for its files).
-MYSQL_STOP=120s
-if exists rdp-mysql; then
-  constrained rdp-mysql
-  # Restarted only for another image (or --upgrade-system): never a newer
-  # patch of the same tag behind the database's back. Its arguments are the
-  # installer's: other ones (a rerun on a smaller or larger server) restart
-  # it once.
-  ARGS_NOW=$(docker service inspect --format '{{join .Spec.TaskTemplate.ContainerSpec.Args " "}}' rdp-mysql)
-  # In nanoseconds (`null` when never set).
-  STOP_NOW=$(docker service inspect --format '{{json .Spec.TaskTemplate.ContainerSpec.StopGracePeriod}}' rdp-mysql)
-  if [ -n "$UPGRADE_SYSTEM" ] || [ "$(image_of rdp-mysql)" != "$MYSQL_IMAGE" ]; then
-    say "Updating MySQL ($MYSQL_IMAGE)"
-    # shellcheck disable=SC2086 # the arguments split as meant
-    docker service update --quiet --image "$MYSQL_IMAGE" \
-      --health-cmd "$MYSQL_HEALTH" --health-start-period 120s \
-      --stop-grace-period "$MYSQL_STOP" --args "$(echo $MYSQL_ARGS)" rdp-mysql >/dev/null
-  elif [ "$ARGS_NOW" != "$(echo $MYSQL_ARGS)" ] || [ "$STOP_NOW" != "120000000000" ]; then
-    # Its image as it is (the digest Swarm pinned): settings only.
-    say "Updating MySQL's settings (it restarts)"
-    # shellcheck disable=SC2086 # the arguments split as meant
-    docker service update --quiet \
-      --stop-grace-period "$MYSQL_STOP" --args "$(echo $MYSQL_ARGS)" rdp-mysql >/dev/null
+if [ "$DATABASE" = mysql ]; then
+  # Alive is enough (a ping answers before credentials; the first start
+  # initializes the database for a minute or two).
+  MYSQL_HEALTH='mysqladmin ping -h 127.0.0.1 --silent'
+  # The panel's database is small (some 50 tables, 10 connections): MySQL's
+  # defaults are for a server of its own. Under 2 GB of memory it gets less:
+  # no instrumentation, no binary log (nothing replicates it; the backups are
+  # dumps), smaller buffers and caches.
+  MYSQL_ARGS="--character-set-server=utf8mb4 --collation-server=utf8mb4_0900_bin --default-time-zone=+00:00"
+  MEMORY_KB=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+  if [ "${MEMORY_KB:-0}" -lt 2000000 ]; then
+    MYSQL_ARGS="$MYSQL_ARGS --performance-schema=OFF --skip-log-bin \
+  --innodb-buffer-pool-size=64M --innodb-log-buffer-size=8M \
+  --innodb-read-io-threads=1 --innodb-write-io-threads=1 \
+  --max-connections=40 --table-open-cache=400 --table-open-cache-instances=1 \
+  --table-definition-cache=400 --temptable-max-ram=32M --tmp-table-size=16M \
+  --max-heap-table-size=16M --key-buffer-size=1M"
   fi
-else
-  say "Starting MySQL"
-  docker volume create --label "$SYSTEM" rdp-mysql-data >/dev/null
-  docker service create --quiet --name rdp-mysql \
-    --label "$SYSTEM" --container-label "$SYSTEM" \
-    --constraint "$PLACE" \
-    --network rdp-internal \
-    --mount type=volume,source=rdp-mysql-data,target=/var/lib/mysql \
-    --secret rdp_mysql_root --secret rdp_mysql_password \
-    --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/rdp_mysql_root \
-    --env MYSQL_DATABASE=panel --env MYSQL_USER=panel \
-    --env MYSQL_PASSWORD_FILE=/run/secrets/rdp_mysql_password \
-    --health-cmd "$MYSQL_HEALTH" --health-interval 5s --health-retries 30 \
-    --health-start-period 120s --stop-grace-period "$MYSQL_STOP" \
-    "$MYSQL_IMAGE" \
-    $MYSQL_ARGS \
-    >/dev/null
+  # A shutdown flushes the buffer pool: more than Swarm's 10 seconds (killed,
+  # it recovers at the next start, and a new task may wait for its files).
+  MYSQL_STOP=120s
+  if exists rdp-mysql; then
+    constrained rdp-mysql
+    # Restarted only for another image (or --upgrade-system): never a newer
+    # patch of the same tag behind the database's back. Its arguments are the
+    # installer's: other ones (a rerun on a smaller or larger server) restart
+    # it once.
+    ARGS_NOW=$(docker service inspect --format '{{join .Spec.TaskTemplate.ContainerSpec.Args " "}}' rdp-mysql)
+    # In nanoseconds (`null` when never set).
+    STOP_NOW=$(docker service inspect --format '{{json .Spec.TaskTemplate.ContainerSpec.StopGracePeriod}}' rdp-mysql)
+    if [ -n "$UPGRADE_SYSTEM" ] || [ "$(image_of rdp-mysql)" != "$MYSQL_IMAGE" ]; then
+      say "Updating MySQL ($MYSQL_IMAGE)"
+      # shellcheck disable=SC2086 # the arguments split as meant
+      docker service update --quiet --image "$MYSQL_IMAGE" \
+        --health-cmd "$MYSQL_HEALTH" --health-start-period 120s \
+        --stop-grace-period "$MYSQL_STOP" --args "$(echo $MYSQL_ARGS)" rdp-mysql >/dev/null
+    elif [ "$ARGS_NOW" != "$(echo $MYSQL_ARGS)" ] || [ "$STOP_NOW" != "120000000000" ]; then
+      # Its image as it is (the digest Swarm pinned): settings only.
+      say "Updating MySQL's settings (it restarts)"
+      # shellcheck disable=SC2086 # the arguments split as meant
+      docker service update --quiet \
+        --stop-grace-period "$MYSQL_STOP" --args "$(echo $MYSQL_ARGS)" rdp-mysql >/dev/null
+    fi
+  else
+    say "Starting MySQL"
+    docker volume create --label "$SYSTEM" rdp-mysql-data >/dev/null
+    docker service create --quiet --name rdp-mysql \
+      --label "$SYSTEM" --container-label "$SYSTEM" \
+      --constraint "$PLACE" \
+      --network rdp-internal \
+      --mount type=volume,source=rdp-mysql-data,target=/var/lib/mysql \
+      --secret rdp_mysql_root --secret rdp_mysql_password \
+      --env MYSQL_ROOT_PASSWORD_FILE=/run/secrets/rdp_mysql_root \
+      --env MYSQL_DATABASE=panel --env MYSQL_USER=panel \
+      --env MYSQL_PASSWORD_FILE=/run/secrets/rdp_mysql_password \
+      --health-cmd "$MYSQL_HEALTH" --health-interval 5s --health-retries 30 \
+      --health-start-period 120s --stop-grace-period "$MYSQL_STOP" \
+      "$MYSQL_IMAGE" \
+      $MYSQL_ARGS \
+      >/dev/null
+  fi
 fi
 
 # --- Traefik (ports 80 and 443; Let's Encrypt with --email) -------------------
@@ -382,6 +448,7 @@ if exists rdockpanel; then
   fi
   mounted "$BACKUPS" || set -- "$@" --mount-add "type=bind,source=$BACKUPS,target=$BACKUPS"
   mounted "$COMPOSE" || set -- "$@" --mount-add "type=bind,source=$COMPOSE,target=$COMPOSE"
+  [ "$DATABASE" = mysql ] || mounted "$DATA" || set -- "$@" --mount-add "type=bind,source=$DATA,target=$DATA"
   # Its health check again (an older panel's own restart could drop it).
   docker service update --quiet --image "$IMAGE" "$@" \
     --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-timeout 3s \
@@ -397,6 +464,8 @@ else
 "; done
   publish=""
   [ -z "$DOMAIN" ] && publish="--publish mode=host,published=3000,target=3000"
+  data=""
+  [ "$DATABASE" = mysql ] || data="--mount type=bind,source=$DATA,target=$DATA"
   # Each variable as one argument (values have no newlines).
   old_ifs=$IFS
   IFS='
@@ -408,7 +477,7 @@ else
   docker service create --quiet --name rdockpanel \
     --label "$SYSTEM" --container-label "$SYSTEM" \
     --constraint "$PLACE" \
-    --network rdp-internal $publish \
+    --network rdp-internal $publish $data \
     --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
     --mount type=bind,source="$ETC/traefik/dynamic",target=/etc/rdockpanel/traefik/dynamic \
     --mount type=bind,source=/proc,target=/host/proc,readonly \
