@@ -156,9 +156,11 @@ docker service scale rdockpanel=1
 Your apps' databases: a database service's Backups tab (scheduled dumps to a storage provider of
 Settings: a directory under `/var/lib/rdockpanel/backups`, or an S3-compatible bucket, better off
 the server). The panel itself: back up `/etc/rdockpanel` (secrets and certificates) and the database: with
-MySQL, `docker exec` into the `rdp-mysql` container and `mysqldump panel`; with SQLite, copy
-`/var/lib/rdockpanel/data` while the panel is stopped (`docker service scale rdockpanel=0`, then
-`=1`), or keep the copy Settings → Version's Update makes. Losing `APP_KEY` loses the encrypted environment
+MySQL, `docker exec` into the `rdp-mysql` container and `mysqldump panel`; with SQLite, copy the
+whole `/var/lib/rdockpanel/data` directory while the panel is stopped (`docker service scale
+rdockpanel=0`, then `=1`): the latest changes may still be in `panel.sqlite-wal`, so
+`panel.sqlite` alone is not a backup. Or keep the copy Settings → Version's Update makes (one
+self-contained file). Losing `APP_KEY` loses the encrypted environment
 variables, registry passwords and file mounts (see [security](security.md)).
 
 ## Uninstalling
