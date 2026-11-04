@@ -3,6 +3,10 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## Unreleased
+
+- Nâng RustCMS Core lên 0.12.0 (từ 0.11.0). Panel trông và hoạt động như trước.
+
 ## 0.10.0 — 2026-10-29
 
 - The panel can keep its own data in **SQLite** (one file, no database server: less memory on a
