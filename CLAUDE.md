@@ -134,22 +134,27 @@ what ships. Its **§10 checklist** is binding: run it before showing anything.
   undoing the change. Test HTTP behaviour through feature tests, with the shared helpers in
   `tests/support/`. Real Swarm network tests hold `support::swarm_lock()`.
 - Before every commit, run the whole suite on MySQL and SQLite (the optional switches are in
-  `docs/development.md`). Gate the commit on this block's exit code, and keep failures visible when
-  piping output:
+  `docs/development.md`). Commit only when this block prints `GATE OK` and exits 0:
 
   ```sh
   (
-    set -e
-    set -o pipefail
-    docker compose up -d          # MySQL 8.4
-    sh scripts/dev-swarm.sh       # Swarm + Traefik for the Swarm tests
+    fail() { echo "GATE FAILED: $1" >&2; exit 1; }
+    docker compose up -d || fail "docker compose"          # MySQL 8.4
+    sh scripts/dev-swarm.sh || fail "dev-swarm"            # Swarm + Traefik for the Swarm tests
+    docker service scale rdp-traefik=1 || fail "traefik"   # the clean-up step leaves it at 0
     RUSTCMS_TEST_MYSQL="${RUSTCMS_TEST_MYSQL:?the local test MySQL URL, see docs/development.md}" \
       RUSTCMS_TEST_BACKENDS=mysql,sqlite \
-      PANEL_TEST_DOCKER=1 PANEL_TEST_SWARM=1 cargo test --locked
-    cargo fmt --check
-    cargo clippy --locked --all-targets -- -D warnings
+      PANEL_TEST_DOCKER=1 PANEL_TEST_SWARM=1 cargo test --locked || fail "cargo test"
+    cargo fmt --check || fail "cargo fmt"
+    cargo clippy --locked --all-targets -- -D warnings || fail "cargo clippy"
+    echo "GATE OK"
   )
   ```
+
+  Every step ends in `|| fail`, because `set -e` cannot be trusted: it is ignored inside `if`,
+  `||` and `&&`, so a failed `cargo test` would run on to an exit code of 0. Do not pipe the block
+  (`| tail`, `| tee`): the pipe's exit code is the last command's. To keep a log, redirect it
+  (`> /tmp/gate.log 2>&1`), or run `set -o pipefail` in the calling shell first.
 
 - Do not use Nginx images for new demo or test services; prefer `ghcr.io/traefik/whoami`.
 - If OrbStack's Docker hangs (tests fail with `PoolTimedOut`), ask the owner to restart it; do not
