@@ -8,7 +8,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 
 > **Trạng thái: giai đoạn đầu phát triển.** Đã chạy được: giám sát server, quản lý Docker, app và
 > database trên Docker Swarm kèm domain và HTTPS, build từ Git hoặc Dockerfile, hơn 800 template
-> EasyPanel, service Compose, backup database và volume, thông báo, và installer cài bằng một lệnh.
+> ứng dụng có sẵn, service Compose, backup database và volume, thông báo, và installer cài bằng một lệnh.
 > Hãy thử trên một server test trước.
 
 ![Dashboard](docs/images/dashboard.png)
@@ -63,7 +63,7 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
   - trang service báo khi có thay đổi chưa deploy.
 - **Domain và HTTPS** qua **Traefik:** mỗi service có thể gắn nhiều domain và path; domain bật HTTPS thì HTTP tự chuyển sang HTTPS; domain wildcard (`*.example.com`, chỉ quản trị panel) và middleware Traefik tuỳ chỉnh; chuyển hướng (biểu thức chính quy), giới hạn request theo từng khách (qua Cloudflare vẫn đếm đúng IP thật, có danh sách IP được miễn), xác thực cơ bản (basic auth) và trang bảo trì (trang có sẵn hoặc HTML của riêng bạn, có giờ dự kiến trở lại và danh sách IP vẫn vào được site thật). Mỗi domain chọn được certificate resolver riêng (Settings → Chứng chỉ: Let's Encrypt qua HTTP, hoặc qua DNS bằng token Cloudflare, DigitalOcean, Hetzner, Vultr, Linode), áp dụng vào Traefik ngay trong panel, không cần SSH; hoặc tải chứng chỉ của riêng bạn lên (được kiểm tra, khoá được mã hoá, báo trước khi hết hạn).
 - **Database:** PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ với một cú bấm (chỉ cần đặt tên: mật khẩu tự sinh, dữ liệu trên volume, có healthcheck), kèm URL kết nối để copy.
-- **Hơn 800 template EasyPanel**, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải về khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
+- **Hơn 800 template ứng dụng có sẵn**, tạo bằng một cú bấm (tìm kiếm, điền form của chính template, deploy kèm database), tải về khi mở danh sách; hoặc dán kết quả của template ("Create from Schema").
 - **Build:** app từ repo Git (https, ssh với deploy key sinh sẵn, hoặc GitHub token ở Settings → Git được cấp cho project, chọn repo từ danh sách; branch, tag hoặc commit; thư mục con), build bằng Dockerfile của repo, hoặc từ Dockerfile viết ngay trong panel; log build nằm trong log deploy. URL kích hoạt deploy cho CI, và webhook GitHub có chữ ký để tự deploy mỗi lần push.
 - **Compose:** file Compose (viết trong panel hoặc lấy từ Git) chạy bằng `docker compose` trong network của project, domain trỏ tới một service trong file.
 - **Backup:** dump PostgreSQL, MySQL, MariaDB và MongoDB, và nén volume, theo lịch (cron) vào thư mục trên server hoặc bucket tương thích S3, giữ lại N bản, có log từng lần chạy, nút "Run now" và Khôi phục.

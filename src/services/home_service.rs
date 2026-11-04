@@ -204,17 +204,17 @@ const EN: Texts = &[
     ("f3_title", "App deployments"),
     (
         "f3",
-        "Deploy an image or build from Git with its Dockerfile, with history and rollback.",
+        "Deploy an image or build from Git with its Dockerfile, with history and rollback; or run a Compose file.",
     ),
     ("f4_title", "Domains and HTTPS"),
     (
         "f4",
-        "Domains through Traefik with Let's Encrypt, redirects, rate limits, basic auth and maintenance pages.",
+        "Domains through Traefik with Let's Encrypt (HTTP or DNS) or your own certificate, and Cloudflare Tunnel; redirects, rate limits, basic auth and maintenance pages.",
     ),
     ("f5_title", "Databases and templates"),
     (
         "f5",
-        "PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click, or 800+ EasyPanel templates.",
+        "PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click, or 800+ ready-made app templates.",
     ),
     ("f6_title", "Scheduled backups"),
     (
@@ -229,7 +229,27 @@ const EN: Texts = &[
     ("f8_title", "Automation and alerts"),
     (
         "f8",
-        "Deploy from CI or GitHub webhooks; alerts on Discord, Slack, Telegram, email and webhooks.",
+        "Deploy from CI or signed GitHub webhooks; alerts on Discord, Slack, Telegram, email and webhooks.",
+    ),
+    ("f9_title", "Firewall"),
+    (
+        "f9",
+        "Once on, every port is closed except SSH, 80 and 443; open one for the addresses you choose. A change undoes itself in two minutes unless you keep it.",
+    ),
+    ("f10_title", "One-click updates"),
+    (
+        "f10",
+        "Told when a new release is out; Update backs up the panel's data first and goes back if the new version fails. You can remove old versions to free disk. For a panel installed from a release (--version).",
+    ),
+    ("f11_title", "Room check before deploy"),
+    (
+        "f11",
+        "Says when the server's memory or disk runs low, and asks before deploying an app that does not fit.",
+    ),
+    ("f12_title", "Fits a small server"),
+    (
+        "f12",
+        "The panel keeps its data in MySQL or SQLite (one file, less memory). In English and Vietnamese, light and dark.",
     ),
     ("screens_title", "See it"),
     ("screens_sub", "The panel as it is, from a real server."),
@@ -246,12 +266,22 @@ const EN: Texts = &[
     ),
     (
         "install_note",
-        "Replace you@example.com with the administrator's email. More in the",
+        "Replace you@example.com with the administrator's email.",
     ),
+    ("install_https", "For HTTPS on a domain, add"),
+    (
+        "install_db",
+        "The panel keeps its data in MySQL (the default) or SQLite: the installer asks, or add",
+    ),
+    ("install_more", "More in the"),
     ("install_guide", "installation guide"),
     ("early", "Early development: try it on a test server first."),
-    ("footer", "RDockPanel · free and open source"),
+    (
+        "footer",
+        "RDockPanel · free and open source, MIT or Apache 2.0",
+    ),
     ("docs", "Docs"),
+    ("license", "License"),
     ("viewer", "Screens"),
     ("previous", "Previous"),
     ("next", "Next"),
@@ -312,17 +342,17 @@ const VI: Texts = &[
     ("f3_title", "Triển khai ứng dụng"),
     (
         "f3",
-        "Chạy một image hoặc build từ Git bằng Dockerfile, có lịch sử và rollback.",
+        "Chạy một image hoặc build từ Git bằng Dockerfile, có lịch sử và rollback; hoặc chạy file Compose.",
     ),
     ("f4_title", "Tên miền và HTTPS"),
     (
         "f4",
-        "Tên miền qua Traefik với Let's Encrypt, chuyển hướng, giới hạn request, basic auth và trang bảo trì.",
+        "Tên miền qua Traefik với Let's Encrypt (HTTP hoặc DNS) hoặc chứng chỉ riêng, và Cloudflare Tunnel; chuyển hướng, giới hạn request, basic auth và trang bảo trì.",
     ),
     ("f5_title", "Database và template"),
     (
         "f5",
-        "PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ một cú bấm, hoặc hơn 800 template của EasyPanel.",
+        "PostgreSQL, MySQL, MariaDB, MongoDB và Redis chỉ một cú bấm, hoặc hơn 800 template ứng dụng có sẵn.",
     ),
     ("f6_title", "Sao lưu theo lịch"),
     (
@@ -334,7 +364,27 @@ const VI: Texts = &[
     ("f8_title", "Tự động hoá và thông báo"),
     (
         "f8",
-        "Triển khai từ CI hay webhook GitHub; thông báo qua Discord, Slack, Telegram, email và webhook.",
+        "Triển khai từ CI hay webhook GitHub có chữ ký; thông báo qua Discord, Slack, Telegram, email và webhook.",
+    ),
+    ("f9_title", "Tường lửa"),
+    (
+        "f9",
+        "Khi bật, mọi port bị đóng trừ SSH, 80 và 443; mở port cho địa chỉ bạn chọn. Mỗi thay đổi được thử trước: không giữ thì sau 2 phút tự hoàn tác.",
+    ),
+    ("f10_title", "Cập nhật một cú bấm"),
+    (
+        "f10",
+        "Báo khi có bản mới; nút Cập nhật sao lưu dữ liệu của panel trước, lỗi thì tự quay lại bản cũ. Có thể xoá các bản cũ để giải phóng ổ đĩa. Áp dụng khi cài một bản phát hành (--version).",
+    ),
+    ("f11_title", "Kiểm tra trước khi deploy"),
+    (
+        "f11",
+        "Báo khi RAM hoặc ổ đĩa của máy chủ sắp hết, và hỏi lại trước khi deploy một ứng dụng không đủ chỗ chạy.",
+    ),
+    ("f12_title", "Hợp với máy chủ nhỏ"),
+    (
+        "f12",
+        "Panel lưu dữ liệu bằng MySQL hoặc SQLite (một file, ít RAM hơn). Có tiếng Anh, tiếng Việt, giao diện sáng và tối.",
     ),
     ("screens_title", "Hình ảnh"),
     (
@@ -354,15 +404,25 @@ const VI: Texts = &[
     ),
     (
         "install_note",
-        "Thay you@example.com bằng email của quản trị viên. Xem thêm trong",
+        "Thay you@example.com bằng email của quản trị viên.",
     ),
+    ("install_https", "Muốn có HTTPS với tên miền, thêm"),
+    (
+        "install_db",
+        "Panel lưu dữ liệu bằng MySQL (mặc định) hoặc SQLite: trình cài đặt sẽ hỏi, hoặc thêm",
+    ),
+    ("install_more", "Xem thêm trong"),
     ("install_guide", "hướng dẫn cài đặt"),
     (
         "early",
         "Đang phát triển: hãy thử trên một máy chủ thử nghiệm trước.",
     ),
-    ("footer", "RDockPanel · miễn phí, mã nguồn mở"),
+    (
+        "footer",
+        "RDockPanel · miễn phí, mã nguồn mở, MIT hoặc Apache 2.0",
+    ),
     ("docs", "Tài liệu"),
+    ("license", "Giấy phép"),
     ("viewer", "Hình ảnh"),
     ("previous", "Ảnh trước"),
     ("next", "Ảnh sau"),

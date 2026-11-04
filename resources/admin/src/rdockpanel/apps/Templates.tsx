@@ -262,7 +262,7 @@ export function Templates(props: PageProps<unknown> & { project: Project; onClos
           {list.error && <ErrorState error={list.error} />}
           {list.data && (
             <p className="rdp2-muted rdp2-small">
-              {list.data.templates.length} {t("templates from easypanel.io, fetched when opened.")}
+              {list.data.templates.length} {t("templates, fetched when opened.")}
             </p>
           )}
           <div className="rdp2-templates">

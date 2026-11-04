@@ -101,6 +101,7 @@ pre {
   white-space: pre-wrap; word-break: break-all;
 }
 .note { font-size: 14px; color: var(--muted-foreground); margin: 12px 0 0; }
+.note code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--code-fg); background: var(--code-bg); border-radius: calc(var(--radius) - 4px); padding: 0 4px; overflow-wrap: anywhere; }
 .warn { display: inline-block; font-size: 13px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; margin-top: 16px; }
 
 footer { border-top: 1px solid var(--border); padding: 28px 0; font-size: 14px; color: var(--muted-foreground); }

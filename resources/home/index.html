@@ -53,6 +53,10 @@
     <div class="feat"><h3><i></i>{{f6_title}}</h3><p>{{f6}}</p></div>
     <div class="feat"><h3><i></i>{{f7_title}}</h3><p>{{f7}}</p></div>
     <div class="feat"><h3><i></i>{{f8_title}}</h3><p>{{f8}}</p></div>
+    <div class="feat"><h3><i></i>{{f9_title}}</h3><p>{{f9}}</p></div>
+    <div class="feat"><h3><i></i>{{f10_title}}</h3><p>{{f10}}</p></div>
+    <div class="feat"><h3><i></i>{{f11_title}}</h3><p>{{f11}}</p></div>
+    <div class="feat"><h3><i></i>{{f12_title}}</h3><p>{{f12}}</p></div>
   </div>
 </div></section>
 <section id="screens"><div class="wrap">
@@ -72,7 +76,8 @@
   <p class="sub">{{install_sub}}</p>
   <pre><code>curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh \
   | sudo sh -s -- --admin-email you@example.com</code></pre>
-  <p class="note">{{install_note}} <a href="https://github.com/irisvn/rdockpanel/blob/main/docs/install.md">{{install_guide}}</a>.</p>
+  <p class="note">{{install_note}}</p>
+  <p class="note">{{install_https}} <code>--domain panel.example.com --email you@example.com</code>. {{install_db}} <code>--database sqlite</code>. {{install_more}} <a href="https://github.com/irisvn/rdockpanel/blob/main/docs/install.md">{{install_guide}}</a>.</p>
   <p class="warn">{{early}}</p>
 </div></section>
 <dialog id="viewer" class="viewer" aria-label="{{viewer}}">
@@ -93,6 +98,7 @@
   <nav aria-label="{{nav_footer}}">
     <a href="https://github.com/irisvn/rdockpanel">GitHub</a>
     <a href="https://github.com/irisvn/rdockpanel/tree/main/docs">{{docs}}</a>
+    <a href="https://github.com/irisvn/rdockpanel#license">{{license}}</a>
     <a href="/admin">{{sign_in}}</a>
   </nav>
 </div></footer>

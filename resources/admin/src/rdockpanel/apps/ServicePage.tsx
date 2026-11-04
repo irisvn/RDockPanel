@@ -737,8 +737,10 @@ function DomainsTab(props: { t: T; d: ServiceDetail; api: PageProps<unknown>["ap
                 return (
                   <tr key={domain.id}>
                     <td>
-                      <div className="rdp2-row">
-                        <span className="rdp2-mono rdp2-ellipsis">{url(domain)}</span>
+                      <div className="rdp2-row rdp2-wrap">
+                        <span className="rdp2-mono rdp2-ellipsis" title={url(domain)}>
+                          {url(domain)}
+                        </span>
                         {i === 0 && <span className="rdp2-badge">{t("Primary")}</span>}
                       </div>
                     </td>

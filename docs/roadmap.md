@@ -27,7 +27,7 @@ Done:
 
 - The interface (React): the Dashboard as the panel's home, service pages and their
   tabs, Actions, Settings (tabbed), server metrics on the Dashboard, ⌘K.
-- Databases (PostgreSQL, MySQL, MariaDB, MongoDB, Redis), 800+ EasyPanel templates, Create from Schema,
+- Databases (PostgreSQL, MySQL, MariaDB, MongoDB, Redis), 800+ ready-made app templates, Create from Schema,
   Compose services.
 - Builds from Git (the repository's Dockerfile) or an inline Dockerfile, trigger URLs, GitHub webhooks;
   GitHub tokens (Settings → Git) given to projects, their repositories picked from a list.
@@ -70,5 +70,5 @@ Next:
 | 0.8.x: `migrate --allow-newer` | an older panel starting on a newer database (Settings → Version's rollback) | released, in use |
 | 0.8.2: pages remounted after an action | Stop/Start from a service's tab without the error page | released, in use |
 | 0.10.3: media, rich text v2, editor layouts, action options (0.9–0.10) | security fixes; the panel keeps its look (success and warning stay neutral) | released, in use |
-| 0.11.0–0.12.0: options validated, framework cleanups as schedules, API mode, media hooks | exact choice values; framework cleanups on System → Schedules | released, in use (the pin) |
+| 0.11.0–0.12.1: options validated, framework cleanups as schedules, API mode, media hooks | exact choice values; framework cleanups on System → Schedules | released, in use (the pin) |
 | TOTP | two-factor authentication | planned |

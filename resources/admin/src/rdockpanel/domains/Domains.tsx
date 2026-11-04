@@ -43,6 +43,9 @@ type Row = Omit<Domain, "id"> & {
   via?: "server" | "cloudflare" | "elsewhere" | "none";
 };
 
+/** A row of the table: the panel's own domain, or a service's. */
+type Entry = Row | { panel: { host: string; url: string } };
+
 type List = {
   domains: Row[];
   panel: { host: string; url: string } | null;
@@ -68,7 +71,14 @@ export function Domains(props: PageProps<unknown>) {
   const [editing, setEditing] = useState<Row | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [confirm, confirmDialog] = useConfirm(t);
-  const rows = (list.data?.domains ?? []).filter((d) => !project || d.project === project);
+  // The panel's own domain is a row like the others: counted and paged with
+  // them, so the footer's total matches the rows shown. It belongs to no
+  // project, so a project filter hides it.
+  const panel = list.data?.panel;
+  const rows: Entry[] = [
+    ...(panel && !project ? [{ panel }] : []),
+    ...(list.data?.domains ?? []).filter((d) => !project || d.project === project),
+  ];
   const paged = usePaged(rows, project);
   const header = {
     title: props.title,
@@ -107,7 +117,7 @@ export function Domains(props: PageProps<unknown>) {
       setError(err);
     }
   };
-  const empty = rows.length === 0 && !(data.panel && !project);
+  const empty = rows.length === 0;
   return (
     <Page {...header} actions={addable && <Button onClick={() => setAdding(true)}>{t("Add domain")}</Button>}>
       <ErrorNote error={error} />
@@ -149,24 +159,30 @@ export function Domains(props: PageProps<unknown>) {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.panel && !project && paged.at === 0 && (
-                    <tr>
-                      <td>
-                        <span className="rdp2-mono">{data.panel.url}</span>
-                      </td>
-                      <td className="rdp2-muted">{t("RDockPanel (Settings → Panel)")}</td>
-                      <td className="rdp2-hide-sm rdp2-muted">–</td>
-                      <td>
-                        <StatusBadge tone="ok" label={t("Live")} />
-                      </td>
-                      <td>
-                        <RowActions label={t("Actions for {host}").replace("{host}", data.panel.host)}>
-                          <IconButton icon="externalLink" label={t("Open {url}").replace("{url}", data.panel.url)} href={data.panel.url} />
-                        </RowActions>
-                      </td>
-                    </tr>
-                  )}
-                  {paged.page.map((d) => {
+                  {paged.page.map((entry) => {
+                    if ("panel" in entry) {
+                      const panel = entry.panel;
+                      return (
+                        <tr key="panel">
+                          <td>
+                            <span className="rdp2-mono rdp2-ellipsis rdp2-cell-clip" title={panel.url}>
+                              {panel.url}
+                            </span>
+                          </td>
+                          <td className="rdp2-muted">{t("RDockPanel (Settings → Panel)")}</td>
+                          <td className="rdp2-hide-sm rdp2-muted">–</td>
+                          <td>
+                            <StatusBadge tone="ok" label={t("Live")} />
+                          </td>
+                          <td>
+                            <RowActions label={t("Actions for {host}").replace("{host}", panel.host)}>
+                              <IconButton icon="externalLink" label={t("Open {url}").replace("{url}", panel.url)} href={panel.url} />
+                            </RowActions>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    const d = entry;
                     const state = STATUS[d.status];
                     const menu: MenuItem[] = [];
                     if (data.can.update && mayChange(d)) menu.push({ label: t("Edit"), onSelect: () => setEditing(d) });
@@ -175,31 +191,45 @@ export function Domains(props: PageProps<unknown>) {
                     return (
                       <tr key={`${d.id ?? "gone"}-${d.host}${d.path}`}>
                         <td>
-                          <div className="rdp2-row">
-                            <span className={d.status === "removed" ? "rdp2-mono rdp2-ellipsis rdp2-gone" : "rdp2-mono rdp2-ellipsis"}>{url(d)}</span>
-                            {d.via === "cloudflare" && (
-                              <StatusBadge
-                                tone="off"
-                                label={t("via Cloudflare")}
-                                title={t("Its name leads to Cloudflare: through the tunnel, Cloudflare gives it HTTPS (HTTPS off here); proxied to this server, it needs a DNS resolver or an uploaded certificate.")}
-                              />
+                          <div className="rdp2-row rdp2-wrap">
+                            <span className={d.status === "removed" ? "rdp2-mono rdp2-ellipsis rdp2-gone" : "rdp2-mono rdp2-ellipsis"} title={url(d)}>
+                              {url(d)}
+                            </span>
+                            {(d.via === "cloudflare" || d.primary) && (
+                              <span className="rdp2-row">
+                                {d.via === "cloudflare" && (
+                                  <StatusBadge
+                                    tone="off"
+                                    label={t("via Cloudflare")}
+                                    title={t("Its name leads to Cloudflare: through the tunnel, Cloudflare gives it HTTPS (HTTPS off here); proxied to this server, it needs a DNS resolver or an uploaded certificate.")}
+                                  />
+                                )}
+                                {d.primary && <span className="rdp2-badge">{t("Primary")}</span>}
+                              </span>
                             )}
-                            {d.primary && <span className="rdp2-badge">{t("Primary")}</span>}
                           </div>
                         </td>
                         <td>
-                          <span className="rdp2-mono rdp2-ellipsis">{d.maintenance ? t("Maintenance page") : d.target}</span>
-                        </td>
-                        <td className="rdp2-hide-sm">
-                          {canOpen ? (
-                            <NavLink to={`/p/dashboard/${d.project}/${d.service}/domains`} navigate={props.navigate}>
-                              {d.project} / {d.service}
-                            </NavLink>
+                          {d.maintenance ? (
+                            <span>{t("Maintenance page")}</span>
                           ) : (
-                            <span>
-                              {d.project} / {d.service}
+                            <span className="rdp2-mono rdp2-ellipsis rdp2-cell-clip" title={d.target}>
+                              {d.target}
                             </span>
                           )}
+                        </td>
+                        <td className="rdp2-hide-sm">
+                          <span className="rdp2-ellipsis rdp2-cell-clip" title={`${d.project} / ${d.service}`}>
+                            {canOpen ? (
+                              <NavLink to={`/p/dashboard/${d.project}/${d.service}/domains`} navigate={props.navigate}>
+                                {d.project} / {d.service}
+                              </NavLink>
+                            ) : (
+                              <>
+                                {d.project} / {d.service}
+                              </>
+                            )}
+                          </span>
                         </td>
                         <td>
                           <StatusBadge tone={state.tone} label={t(state.label)} title={t(state.hint)} />

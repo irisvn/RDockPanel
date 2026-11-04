@@ -3,9 +3,15 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
-## Unreleased
+## 0.10.1 — 2026-11-05
 
-- Nâng RustCMS Core lên 0.12.0 (từ 0.11.0). Panel trông và hoạt động như trước.
+- The Domains page no longer lets long names and addresses run into the next column: they are cut
+  and shown in full on hover, and the count under the table includes the panel's own domain.
+- The homepage lists the newer features (firewall, one-click update, the memory check before a
+  deploy, Compose, certificates and Cloudflare Tunnel, MySQL or SQLite), how to turn HTTPS on at
+  install, and the license. Its screenshots come from 0.10.
+- The template picker shows only the number of templates, not where they come from.
+- Built on RustCMS 0.12.1 (from 0.11.0). Nothing changes in how the panel looks or works.
 
 ## 0.10.0 — 2026-10-29
 

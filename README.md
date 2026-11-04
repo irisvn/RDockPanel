@@ -7,7 +7,7 @@ feature is free: no project limits, no paid tiers.
 [Tiếng Việt](README.vi.md) · [Docs](docs/) · [Roadmap](docs/roadmap.md)
 
 > **Status: early development.** Server monitoring, Docker management, apps and databases on
-> Docker Swarm with domains and HTTPS, builds from Git or a Dockerfile, 800+ EasyPanel templates,
+> Docker Swarm with domains and HTTPS, builds from Git or a Dockerfile, 800+ ready-made app templates,
 > Compose services, database and volume backups, notifications, and a one-command installer work.
 > Try it on a test server first.
 
@@ -91,7 +91,7 @@ feature is free: no project limits, no paid tiers.
   turns it off (`/` then opens the sign-in).
 - **Databases**: PostgreSQL, MySQL, MariaDB, MongoDB and Redis in one click (a name is enough:
   credentials generated, data on a volume, health-checked), with their connection URL to copy.
-- **800+ EasyPanel templates** in one click (searched, filled in by their own form, deployed with
+- **800+ ready-made app templates** in one click (searched, filled in by their own form, deployed with
   their databases), fetched when you open the catalog; or paste a template's output ("Create from
   Schema").
 - **Builds**: an app from a Git repository (https, ssh with a generated deploy key, or a GitHub token of

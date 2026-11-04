@@ -290,7 +290,7 @@ window.rustcms?.registerTranslations?.("vi", {
   Templates: "Template",
   "Search templates": "Tìm template",
   "Create from schema": "Tạo từ Schema",
-  "templates from easypanel.io, fetched when opened.": "template từ easypanel.io, tải về khi mở.",
+  "templates, fetched when opened.": "template, tải về khi mở.",
   "Deploy now": "Deploy ngay",
   Schema: "Schema",
   Port: "Port",
