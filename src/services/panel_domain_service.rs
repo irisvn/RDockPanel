@@ -5,6 +5,7 @@
 //! change at once, with no way back if it did not come up): the command is
 //! run on the server, as the installer always is.
 
+use crate::services::deploy_rules_service::Install;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -198,7 +199,10 @@ pub async fn check<C: sea_orm::ConnectionTrait>(
             warnings.extend(warning);
         }
     }
-    let command = errors.is_empty().then(|| command(&domain, &email, &apps));
+    let install = crate::services::deploy_rules_service::Install::current();
+    let command = errors
+        .is_empty()
+        .then(|| command(install, &domain, &email, &apps));
     Ok(json!({
         "errors": errors,
         "warnings": warnings,
@@ -209,7 +213,7 @@ pub async fn check<C: sea_orm::ConnectionTrait>(
 
 /// The installer command applying them: the values were checked (host names
 /// and an email: nothing a shell would read differently).
-pub fn command(domain: &str, email: &str, apps: &str) -> String {
+pub fn command(install: Install, domain: &str, email: &str, apps: &str) -> String {
     let mut args = vec![];
     if domain.is_empty() {
         args.push("--no-domain".to_owned());
@@ -228,9 +232,27 @@ pub fn command(domain: &str, email: &str, apps: &str) -> String {
         args.push(format!("--apps-domain {apps}"));
     }
     format!(
-        "curl -fsSL {INSTALLER} \\\n  | sudo sh -s -- {}",
+        "curl -fsSL {INSTALLER} \\\n  | {} -s -- {}",
+        shell(install),
         args.join(" ")
     )
+}
+
+/// The command installing release `version` (Settings → Version).
+pub fn version_command(install: Install, version: &str) -> String {
+    format!(
+        "curl -fsSL {INSTALLER} | {} -s -- --version {version}",
+        shell(install)
+    )
+}
+
+/// What runs the installer: as root on a Linux server; as the user on a Mac
+/// (its state lives in their home, Docker is theirs).
+pub fn shell(install: Install) -> &'static str {
+    match install {
+        Install::MacOs => "sh",
+        _ => "sudo sh",
+    }
 }
 
 /// The installer's own email check (the same values pass both).
@@ -265,12 +287,35 @@ mod tests {
     #[test]
     fn commands() {
         assert_eq!(
-            command("panel.example.com", "ops@example.com", "apps.example.com"),
+            command(
+                Install::Linux,
+                "panel.example.com",
+                "ops@example.com",
+                "apps.example.com"
+            ),
             format!(
                 "curl -fsSL {INSTALLER} \\\n  | sudo sh -s -- --domain panel.example.com --email ops@example.com --apps-domain apps.example.com"
             )
         );
-        assert!(command("", "", "").ends_with("--no-domain --email '' --apps-domain ''"));
+        assert!(
+            command(Install::Linux, "", "", "")
+                .ends_with("--no-domain --email '' --apps-domain ''")
+        );
+        assert_eq!(
+            version_command(Install::Linux, "0.11.0"),
+            format!("curl -fsSL {INSTALLER} | sudo sh -s -- --version 0.11.0")
+        );
+        assert_eq!(
+            version_command(Install::MacOs, "0.11.0"),
+            format!("curl -fsSL {INSTALLER} | sh -s -- --version 0.11.0")
+        );
+        // On a Mac: as the user, never sudo.
+        assert_eq!(
+            command(Install::MacOs, "", "", ""),
+            format!(
+                "curl -fsSL {INSTALLER} \\\n  | sh -s -- --no-domain --email '' --apps-domain ''"
+            )
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@
 use rdockpanel::database::migrations::Migrator;
 use rdockpanel::models::{firewall_transaction, panel_setting};
 use rdockpanel::services::action_service::Initiator;
+use rdockpanel::services::deploy_rules_service::Install;
 use rdockpanel::services::docker_service::{Docker, SYSTEM_LABEL, SwarmService};
 use rdockpanel::services::firewall_service;
 use rdockpanel::services::traefik_service::Traefik;
@@ -81,7 +82,7 @@ db_test!(
         let by = system();
 
         // From source: nothing on the host is read.
-        let page = firewall_service::report(state, &engine, false)
+        let page = firewall_service::report(state, &engine, Install::FromSource)
             .await
             .unwrap();
         assert_eq!(page["available"], false);
@@ -201,7 +202,7 @@ db_test!(
             .lock()
             .unwrap()
             .push_back((0, discovered("installed=no\n")));
-        let page = firewall_service::report(state, &engine, true).await;
+        let page = firewall_service::report(state, &engine, Install::Linux).await;
         let page = page.unwrap_or_else(|e| {
             panic!(
                 "{e:?} calls={:?} left={:?}",
@@ -229,7 +230,7 @@ db_test!(
             .lock()
             .unwrap()
             .push_back((0, discovered("installed=no\n")));
-        let refused = firewall_service::apply(state, &engine, &by, true)
+        let refused = firewall_service::apply(state, &engine, &by, Install::Linux)
             .await
             .unwrap_err();
         assert!(format!("{refused:?}").contains("domain"), "{refused:?}");
@@ -242,7 +243,7 @@ db_test!(
             q.push_back((0, "installed\n".to_owned()));
             q.push_back((0, applied()));
         }
-        let tx = firewall_service::apply(state, &engine, &by, true)
+        let tx = firewall_service::apply(state, &engine, &by, Install::Linux)
             .await
             .unwrap();
         let txid = tx["txid"].as_str().unwrap().to_owned();
@@ -283,7 +284,7 @@ db_test!(
             .lock()
             .unwrap()
             .push_back((0, "state=applied\nboot=b\nnow=b\ntimer=active\n".to_owned()));
-        let busy = firewall_service::apply(state, &engine, &by, true)
+        let busy = firewall_service::apply(state, &engine, &by, Install::Linux)
             .await
             .unwrap_err();
         assert!(format!("{busy:?}").contains("waiting"), "{busy:?}");
@@ -294,7 +295,7 @@ db_test!(
             q.push_back((0, format!("installed=yes\nconfirmed=no\nlast={txid} applied\nboot_failed=none\n== table\n{TABLE}\n")));
             q.push_back((0, String::new()));
         }
-        firewall_service::keep(state, &engine, &by, &txid, true)
+        firewall_service::keep(state, &engine, &by, &txid, Install::Linux)
             .await
             .unwrap();
         let row = firewall_transaction::Entity::find_by_id(row.id)
@@ -310,7 +311,7 @@ db_test!(
             row.hash
         );
         // Kept twice: no longer waiting.
-        let again = firewall_service::keep(state, &engine, &by, &txid, true)
+        let again = firewall_service::keep(state, &engine, &by, &txid, Install::Linux)
             .await
             .unwrap_err();
         assert!(
@@ -325,13 +326,13 @@ db_test!(
             q.push_back((0, "installed\n".to_owned()));
             q.push_back((0, applied()));
         }
-        let second = firewall_service::apply(state, &engine, &by, true)
+        let second = firewall_service::apply(state, &engine, &by, Install::Linux)
             .await
             .unwrap();
         let second = second["txid"].as_str().unwrap().to_owned();
         let other = TABLE.replace("\"drop\":null", "\"accept\":null");
         outputs.lock().unwrap().push_back((0, format!("installed=yes\nconfirmed=yes\nlast={second} reverted\nboot_failed=none\n== table\n{other}\n")));
-        let stale = firewall_service::keep(state, &engine, &by, &second, true)
+        let stale = firewall_service::keep(state, &engine, &by, &second, Install::Linux)
             .await
             .unwrap_err();
         assert!(format!("{stale:?}").contains("not the one"), "{stale:?}");
@@ -341,7 +342,7 @@ db_test!(
             0,
             "state=reverted\nboot=b\nnow=b\ntimer=inactive\n".to_owned(),
         ));
-        firewall_service::revert(state, &engine, &by, &second, true)
+        firewall_service::revert(state, &engine, &by, &second, Install::Linux)
             .await
             .unwrap();
 
@@ -352,7 +353,7 @@ db_test!(
             q.push_back((0, "installed\n".to_owned()));
             q.push_back((1, String::new()));
         }
-        let failed = firewall_service::apply(state, &engine, &by, true)
+        let failed = firewall_service::apply(state, &engine, &by, Install::Linux)
             .await
             .unwrap_err();
         assert!(format!("{failed:?}").contains("refused"), "{failed:?}");
@@ -368,7 +369,7 @@ db_test!(
 
         // Off: the host's files and units removed.
         outputs.lock().unwrap().push_back((0, String::new()));
-        firewall_service::disable(state, &engine, &by, true)
+        firewall_service::disable(state, &engine, &by, Install::Linux)
             .await
             .unwrap();
         assert!(
@@ -386,5 +387,52 @@ db_test!(
             .filter(|c| c.starts_with("host helper"))
             .count();
         assert!(helpers >= 8, "{helpers}");
+    }
+);
+
+db_test!(
+    on_a_mac_the_firewall_is_not_offered,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        // Installed on a Mac: the firewall would be the Docker VM's, never
+        // touched (no host command, nothing saved).
+        let docker = FakeDocker::default();
+        installed(&docker);
+        let calls = docker.calls.clone();
+        let app = support::app_with_docker(db, docker).await;
+        let state = app.state();
+        let engine = state.service::<Docker>().unwrap();
+        let by = system();
+
+        let page = firewall_service::report(state, &engine, Install::MacOs)
+            .await
+            .unwrap();
+        assert_eq!(page["available"], false);
+        assert!(page["reason"].as_str().unwrap().contains("macOS"), "{page}");
+        assert!(
+            firewall_service::preview(state, &engine, Install::MacOs)
+                .await
+                .is_err()
+        );
+        let refused = firewall_service::apply(state, &engine, &by, Install::MacOs)
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{refused:?}").contains("Linux servers"),
+            "{refused:?}"
+        );
+        assert!(
+            firewall_service::disable(state, &engine, &by, Install::MacOs)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            firewall_service::check(state, &engine, Install::MacOs)
+                .await
+                .unwrap(),
+            None
+        );
+        let calls = calls.lock().unwrap();
+        assert!(!calls.iter().any(|c| c.starts_with("host")), "{calls:?}");
     }
 );

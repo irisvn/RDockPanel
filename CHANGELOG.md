@@ -3,6 +3,21 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.11.0 — 2026-11-12
+
+- The panel installs on a **Mac with Apple silicon** (OrbStack or Docker Desktop): the same
+  installer, run without `sudo`, and the same image as on a Linux server. Firewall and Reboot are
+  for Linux servers and are not offered there. See docs/install.md.
+- The installer stops, before changing anything, when it finds a Traefik it did not make (the
+  development one), instead of keeping it.
+- Giving the panel a domain with the installer now closes port 3000 (it stayed open on an install
+  that had no domain before).
+- The Cloudflare Tunnel no longer routes the panel when it has no domain of its own.
+- A service can never bind-mount the installer's own directory.
+- The versions line under Settings → Panel no longer runs off a phone's screen.
+- The README is shorter: an overview, screenshots and quick starts; every feature is in
+  docs/features.md.
+
 ## 0.10.1 — 2026-11-05
 
 - The Domains page no longer lets long names and addresses run into the next column: they are cut

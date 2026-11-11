@@ -281,7 +281,7 @@
   .rdp2-domain > [aria-hidden] { display: none; }
 }
 
-.rdp2-versions { margin: 0; text-align: center; font-size: var(--rdp-text-xs); line-height: 1rem; color: var(--muted-foreground); }
+.rdp2-versions { margin: 0; text-align: center; font-size: var(--rdp-text-xs); line-height: 1rem; color: var(--muted-foreground); overflow-wrap: anywhere; }
 
 /* Firewall: the change waiting to be kept, the apply bar, blocked addresses. */
 .rdp2-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }

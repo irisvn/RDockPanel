@@ -58,6 +58,56 @@ pub struct PanelConfig {
     /// Installed by install.sh (it sets RUSTCMS_PANEL__INSTALLED); else run
     /// from source.
     pub installed: bool,
+    /// The machine the installer ran on: a Linux server, or a Mac whose
+    /// Docker (Docker Desktop, OrbStack) runs in a Linux VM. Only a Linux
+    /// server is the panel's to reboot and firewall.
+    pub host_os: HostOs,
+    /// The installer's own directory on the host (secrets, Traefik's files):
+    /// never a service's bind mount, whatever the roots allow.
+    pub state_dir: PathBuf,
+}
+
+/// Where an installed panel runs (`[panel] host_os`): `linux` or `macos`,
+/// any other value a configuration error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HostOs {
+    #[default]
+    Linux,
+    Macos,
+}
+
+/// How this panel runs: from source (development), or installed by
+/// install.sh on a Linux server or on a Mac.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Install {
+    FromSource,
+    Linux,
+    MacOs,
+}
+
+impl Install {
+    /// This process's (`[panel] installed` and `host_os`).
+    pub fn current() -> Self {
+        let cfg = config();
+        match (cfg.installed, cfg.host_os) {
+            (false, _) => Self::FromSource,
+            (true, HostOs::Linux) => Self::Linux,
+            (true, HostOs::Macos) => Self::MacOs,
+        }
+    }
+
+    /// Installed by install.sh (Linux or macOS): its own service, logs,
+    /// restarts and updates.
+    pub fn installed(self) -> bool {
+        self != Self::FromSource
+    }
+
+    /// The host is the panel's to act on (reboot, firewall): a Linux server
+    /// it was installed on. On a Mac the "host" Docker shows is its VM.
+    pub fn manages_host(self) -> bool {
+        self == Self::Linux
+    }
 }
 
 impl Default for PanelConfig {
@@ -79,6 +129,8 @@ impl Default for PanelConfig {
             panel_host: String::new(),
             panel_url: String::new(),
             installed: false,
+            host_os: HostOs::Linux,
+            state_dir: PathBuf::from("/etc/rdockpanel"),
         }
     }
 }
@@ -306,7 +358,11 @@ impl BindRefusal {
 /// starts, so a directory replaced by a symlink in between could still point
 /// elsewhere: deployments check it again, and the roots must be directories
 /// that no service and no untrusted user can write.
-pub fn bind_source(source: &str, roots: &[PathBuf]) -> Result<PathBuf, BindRefusal> {
+pub fn bind_source(
+    source: &str,
+    roots: &[PathBuf],
+    state_dir: &Path,
+) -> Result<PathBuf, BindRefusal> {
     if roots.is_empty() {
         return Err(BindRefusal::NotAllowed);
     }
@@ -315,11 +371,15 @@ pub fn bind_source(source: &str, roots: &[PathBuf]) -> Result<PathBuf, BindRefus
         return Err(BindRefusal::NotAbsolute);
     }
     // Inside a forbidden place, or above one (its parent exposes it).
+    // The installer's directory too (on a Mac it is under /Users, which a
+    // root may well hold).
+    let state = (!state_dir.as_os_str().is_empty()).then_some(state_dir);
+    let near = |p: &Path, f: &Path| p.starts_with(f) || f.starts_with(p);
     let forbidden = |p: &Path| {
         p == Path::new("/")
-            || FORBIDDEN
-                .iter()
-                .any(|f| p.starts_with(f) || Path::new(f).starts_with(p))
+            || FORBIDDEN.iter().any(|f| near(p, Path::new(f)))
+            || state
+                .is_some_and(|f| near(p, f) || std::fs::canonicalize(f).is_ok_and(|f| near(p, &f)))
     };
     // As written, then as resolved (a symlink into a forbidden place).
     if forbidden(path) {
@@ -362,6 +422,8 @@ mod tests {
             ("panel.installed", serde_json::json!("yes")),
             ("panel.https_port", serde_json::json!("oops")),
             ("panel.reserved_ports", serde_json::json!("22,80")),
+            ("panel.host_os", serde_json::json!("windows")),
+            ("panel.host_os", serde_json::json!(1)),
         ] {
             let err = panel_config(path, value).unwrap_err();
             assert!(err.contains(path.trim_start_matches("panel.")), "{err}");
@@ -446,6 +508,46 @@ mod tests {
     }
 
     #[test]
+    fn the_host_os_and_the_install() {
+        assert_eq!(PanelConfig::default().host_os, HostOs::Linux);
+        let mac = panel_config("panel.host_os", serde_json::json!("macos")).unwrap();
+        assert_eq!(mac.host_os, HostOs::Macos);
+        assert!(Install::MacOs.installed() && !Install::MacOs.manages_host());
+        assert!(Install::Linux.installed() && Install::Linux.manages_host());
+        assert!(!Install::FromSource.installed() && !Install::FromSource.manages_host());
+    }
+
+    #[test]
+    fn the_installers_directory_is_never_a_bind_source() {
+        let base = std::env::temp_dir().join(format!("rdp-state-{}", std::process::id()));
+        let state = base.join(".rdockpanel");
+        std::fs::create_dir_all(state.join("secrets")).unwrap();
+        std::fs::create_dir_all(base.join("app")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(state.join("secrets"), base.join("app/link")).unwrap();
+        let roots = vec![base.clone()];
+        let s = |p: &Path| p.to_str().unwrap().to_owned();
+
+        // A root holding it (a Mac's home): the rest of the root is fine.
+        assert!(bind_source(&s(&base.join("app")), &roots, &state).is_ok());
+        // It, inside it, above it, or a link into it: refused.
+        for path in [state.clone(), state.join("secrets"), base.clone()] {
+            assert_eq!(
+                bind_source(&s(&path), &roots, &state),
+                Err(BindRefusal::Forbidden),
+                "{path:?}"
+            );
+        }
+        #[cfg(unix)]
+        assert_eq!(
+            bind_source(&s(&base.join("app/link")), &roots, &state),
+            Err(BindRefusal::Forbidden)
+        );
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn bind_sources_stay_under_roots() {
         let base = std::env::temp_dir().join(format!("rdp-binds-{}", std::process::id()));
         let root = base.join("root");
@@ -457,43 +559,46 @@ mod tests {
         let s = |p: &Path| p.to_str().unwrap().to_owned();
 
         assert_eq!(
-            bind_source(&s(&root.join("app")), &[]),
+            bind_source(&s(&root.join("app")), &[], Path::new("")),
             Err(BindRefusal::NotAllowed)
         );
         assert_eq!(
-            bind_source(&s(&root.join("app")), &roots),
+            bind_source(&s(&root.join("app")), &roots, Path::new("")),
             Ok(root.join("app").canonicalize().unwrap())
         );
-        assert_eq!(bind_source("app", &roots), Err(BindRefusal::NotAbsolute));
         assert_eq!(
-            bind_source(&s(&root.join("nope")), &roots),
+            bind_source("app", &roots, Path::new("")),
+            Err(BindRefusal::NotAbsolute)
+        );
+        assert_eq!(
+            bind_source(&s(&root.join("nope")), &roots, Path::new("")),
             Err(BindRefusal::Missing)
         );
         assert_eq!(
-            bind_source(&s(&base.join("outside")), &roots),
+            bind_source(&s(&base.join("outside")), &roots, Path::new("")),
             Err(BindRefusal::OutsideRoots)
         );
         #[cfg(unix)]
         assert_eq!(
-            bind_source(&s(&root.join("escape")), &roots),
+            bind_source(&s(&root.join("escape")), &roots, Path::new("")),
             Err(BindRefusal::OutsideRoots)
         );
         assert_eq!(
-            bind_source(&s(&root.join("app/../../outside")), &roots),
+            bind_source(&s(&root.join("app/../../outside")), &roots, Path::new("")),
             Err(BindRefusal::OutsideRoots)
         );
         assert_eq!(
-            bind_source("/", &[PathBuf::from("/")]),
+            bind_source("/", &[PathBuf::from("/")], Path::new("")),
             Err(BindRefusal::Forbidden)
         );
         assert_eq!(
-            bind_source("/proc/self", &[PathBuf::from("/")]),
+            bind_source("/proc/self", &[PathBuf::from("/")], Path::new("")),
             Err(BindRefusal::Forbidden)
         );
         // Above a forbidden place: its children would be exposed.
         for parent in ["/run", "/var/run", "/etc", "/var", "/var/lib"] {
             assert_eq!(
-                bind_source(parent, &[PathBuf::from("/")]),
+                bind_source(parent, &[PathBuf::from("/")], Path::new("")),
                 Err(BindRefusal::Forbidden),
                 "{parent}"
             );

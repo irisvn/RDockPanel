@@ -508,6 +508,17 @@ pub async fn sync_panel_route(app: &AppState) {
     }
 }
 
+/// Whether the tunnel routes the panel too: installed with a domain (the
+/// installer's `rdockpanel@file` route exists only then). An address or
+/// `localhost` (a Mac's install without `--domain`) is none.
+pub fn routes_the_panel(cfg: &crate::services::deploy_rules_service::PanelConfig) -> bool {
+    let host = &cfg.panel_host;
+    cfg.installed
+        && !host.is_empty()
+        && host != "localhost"
+        && host.parse::<std::net::IpAddr>().is_err()
+}
+
 /// What the tunnel's entrypoint serves beside the services' domains: Let's
 /// Encrypt's HTTP challenges (a domain reached only through the tunnel gets
 /// its certificate so: the challenge comes in here, not on port 80), and the
@@ -520,7 +531,7 @@ async fn write_panel_route(app: &AppState) -> std::io::Result<()> {
     };
     let path = traefik.dir.join("rdp-tunnel-panel.yml");
     let host = cfg.panel_host.clone();
-    let panel = cfg.installed && !host.is_empty() && host.parse::<std::net::IpAddr>().is_err();
+    let panel = routes_the_panel(cfg);
     // Traefik answers HTTP challenges (`acme-http@internal`) for the
     // installer's resolver and the panel's HTTP ones.
     let challenges = !cfg.cert_resolver.is_empty() || {
@@ -631,5 +642,21 @@ mod tests {
         assert!(!valid_token(&"A".repeat(60)));
         assert!(!valid_token("not a token"));
         assert!(!valid_token(""));
+    }
+
+    #[test]
+    fn the_tunnel_routes_the_panel_only_on_its_domain() {
+        let cfg =
+            |installed: bool, host: &str| crate::services::deploy_rules_service::PanelConfig {
+                installed,
+                panel_host: host.to_owned(),
+                ..Default::default()
+            };
+        assert!(routes_the_panel(&cfg(true, "panel.example.com")));
+        // No domain: an address (Linux) or localhost (a Mac); or from source.
+        assert!(!routes_the_panel(&cfg(true, "203.0.113.7")));
+        assert!(!routes_the_panel(&cfg(true, "localhost")));
+        assert!(!routes_the_panel(&cfg(true, "")));
+        assert!(!routes_the_panel(&cfg(false, "panel.example.com")));
     }
 }

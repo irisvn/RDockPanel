@@ -1141,6 +1141,8 @@ window.rustcms?.registerTranslations?.("vi", {
   "Traefik (the panel and the domains)": "Traefik (panel và các domain)",
   "Docker Swarm": "Docker Swarm",
   "Docker Swarm (VXLAN)": "Docker Swarm (VXLAN)",
+  "The firewall is for Linux servers. On macOS, use the Mac's own firewall (System Settings → Network → Firewall).": "Tường lửa chỉ dành cho server Linux. Trên macOS, hãy dùng tường lửa của máy Mac (Cài đặt hệ thống → Mạng → Tường lửa).",
+  "Docker's VM on macOS": "máy ảo Docker trên macOS",
   "Only an installed panel manages its server's firewall (this one runs from source).": "Chỉ panel cài bằng installer mới quản lý được tường lửa của server (panel này chạy từ mã nguồn).",
   "nft is not installed on the server": "server chưa cài nft",
   "the server does not run systemd": "server không chạy systemd",

@@ -163,6 +163,64 @@ rdockpanel=0`, then `=1`): the latest changes may still be in `panel.sqlite-wal`
 self-contained file). Losing `APP_KEY` loses the encrypted environment
 variables, registry passwords and file mounts (see [security](security.md)).
 
+## macOS (Apple silicon)
+
+The panel also installs on a Mac, with the same image as on a Linux server (its `linux/arm64`
+build), run by the Mac's Docker. Tested with OrbStack on Apple silicon; Docker Desktop should work
+the same way (its Swarm mode on).
+
+1. Install [OrbStack](https://orbstack.dev) or Docker Desktop, start it, and let it start at login.
+2. In a terminal, as yourself (**no `sudo`**):
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh \
+     | sh -s -- --admin-email you@example.com
+   ```
+
+3. Open http://localhost:3000/admin (also `http://<the Mac's address>:3000` from its network, while
+   it keeps that address).
+
+The options are the same as on Linux (`--version`, `--database`, `--domain`…). Run the same command
+again to upgrade or change them; Settings → Version's **Update** works as on a server.
+
+**Where things are.** `~/.rdockpanel` holds what `/etc/rdockpanel` holds on Linux (`install.conf`,
+`secrets/`, Traefik's `traefik/dynamic` and `traefik/acme`), plus `backups/` (seen by the panel as
+`/var/lib/rdockpanel/backups`: Settings → Backups' local directory and the update's database dumps)
+and `compose/` (Compose services' files, the same path inside the panel). The panel's data is in a
+Docker volume: `rdp-mysql-data` (MySQL) or `rdp-panel-data` (SQLite, never a file shared from the
+Mac: SQLite's locks are not safe across the VM's file sharing). Swarm runs on `127.0.0.1`.
+
+**What differs from a Linux server.**
+- Docker runs in a Linux VM: the "server" the panel shows (CPU, memory, network, hostname, kernel)
+  is that VM, its disk is Docker's data disk in the VM, and the memory check before a deploy counts
+  the VM's memory. Give the VM enough memory and
+  disk in OrbStack's or Docker Desktop's settings.
+- No **Firewall** and no **Reboot**: they would act on the VM. Use the Mac's own firewall
+  (System Settings → Network → Firewall); restart Docker or the Mac yourself.
+- The Mac must be awake and Docker running for the apps to answer. When Docker starts again, Swarm
+  starts the panel and the services again.
+- Ports 80 and 443 (and 3000 without a domain) must be free on the Mac: the installer stops,
+  naming the program, when one is taken (a program run by another user, root included, may not be
+  seen: Docker then fails to start Traefik).
+- A Mac behind a home or office router has no public address: **Let's Encrypt over HTTP** cannot
+  reach it. Use **Cloudflare Tunnel** (Settings → Cloudflare Tunnel, no port to open) or Let's
+  Encrypt **over DNS** (Settings → Certificates) for real domains; or domains such as
+  `app.localhost`, reached on the Mac itself.
+- A service's bind mounts see the VM's paths: only directories under `/Users` are the Mac's. They
+  stay off unless a root is added to `bind_roots` and mounted into the panel at the same path, as on
+  Linux; `~/.rdockpanel` itself is never mountable.
+- Refresh IP finds the address of the network the Mac is on, not a server's.
+- Do not run an installed panel and a development one (`rustcms serve` with
+  `scripts/dev-swarm.sh`) on the same Docker: the installer stops when it finds the development
+  Traefik.
+- OrbStack and Docker Desktop need a paid license for some company use: check theirs.
+
+**Uninstalling on macOS**: as on Linux below, without `sudo`; then remove the volume
+`rdp-panel-data` (SQLite) or `rdp-mysql-data` (MySQL) once the panel's container is gone (a few
+seconds after `docker service rm`), and `~/.rdockpanel` instead of `/etc/rdockpanel` and
+`/var/lib/rdockpanel/…`, keeping `~/.rdockpanel/compose` until the Compose services and their data
+(`./data` bind mounts live there) are removed.
+
 ## Uninstalling
 
 If the Firewall is on, turn it off first (Firewall → Turn off): Docker waits for it at boot. Without

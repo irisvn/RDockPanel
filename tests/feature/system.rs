@@ -6,6 +6,7 @@
 use rdockpanel::database::migrations::Migrator;
 use rdockpanel::models::action;
 use rdockpanel::services::action_service::{self, Initiator};
+use rdockpanel::services::deploy_rules_service::Install;
 use rdockpanel::services::docker_service::{Docker, SYSTEM_LABEL, SwarmService, VolumeItem};
 use rdockpanel::services::system_service;
 use rustcms::audit::AuditContext;
@@ -163,7 +164,7 @@ db_test!(
             audit: AuditContext::system(None),
         };
 
-        let status = system_service::status(state, Some(&docker), true).await;
+        let status = system_service::status(state, Some(&docker), Install::Linux).await;
         assert_eq!(status["service"], true);
         assert_eq!(status["image"], format!("{IMAGE}@sha256:aaa"));
 
@@ -202,10 +203,10 @@ db_test!(
         // Reboot: the hostname typed, then a host command of the panel's image.
         let host = system_service::hostname(state).await;
         assert!(!host.is_empty());
-        let wrong = system_service::reboot(state, &docker, &by, "not-it", true).await;
+        let wrong = system_service::reboot(state, &docker, &by, "not-it", Install::Linux).await;
         assert!(wrong.is_err());
         assert!(rows(&app, "server.reboot").await.is_empty());
-        system_service::reboot(state, &docker, &by, &host, true)
+        system_service::reboot(state, &docker, &by, &host, Install::Linux)
             .await
             .unwrap();
         let host_call = calls
@@ -713,5 +714,45 @@ db_test!(
             "{components}"
         );
         assert!(components.get("mysql").is_none(), "{components}");
+    }
+);
+
+db_test!(
+    on_a_mac_the_server_is_not_rebooted,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        // Installed on a Mac: its service is there and restarts, but the
+        // "server" Docker shows is its Linux VM, never rebooted.
+        let docker = FakeDocker::default();
+        installed(&docker);
+        let calls = docker.calls.clone();
+        let app = support::app_with_docker(db, docker).await;
+        let state = app.state();
+        let docker = state.service::<Docker>().unwrap();
+        let by = Initiator {
+            user_id: None,
+            audit: AuditContext::system(None),
+        };
+
+        let status = system_service::status(state, Some(&docker), Install::MacOs).await;
+        assert_eq!(status["installed"], true);
+        assert_eq!(status["service"], true);
+        assert_eq!(status["can_reboot"], false);
+        assert_eq!(status["host_os"], "macos");
+
+        let host = system_service::hostname(state).await;
+        let refused = system_service::reboot(state, &docker, &by, &host, Install::MacOs)
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{refused:?}").contains("Linux servers"),
+            "{refused:?}"
+        );
+        assert!(rows(&app, "server.reboot").await.is_empty());
+        assert_eq!(audited(&app, "system.server.reboot").await, 0);
+        assert!(
+            !calls.lock().unwrap().iter().any(|c| c.starts_with("host ")),
+            "no host command"
+        );
     }
 );

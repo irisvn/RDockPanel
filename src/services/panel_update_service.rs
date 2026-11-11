@@ -662,6 +662,27 @@ mod tests {
     }
 
     #[test]
+    fn an_update_keeps_what_the_installer_gave_the_panel() {
+        // A Mac's install: its OS, its data volume, its directories, its secrets.
+        let given = json!({
+            "Env": ["RUSTCMS_PANEL__HOST_OS=macos", "RUSTCMS_PANEL__STATE_DIR=/Users/me/.rdockpanel"],
+            "Mounts": [
+                {"Type": "volume", "Source": "rdp-panel-data", "Target": "/var/lib/rdockpanel/data"},
+                {"Type": "bind", "Source": "/Users/me/.rdockpanel/backups", "Target": "/var/lib/rdockpanel/backups"},
+            ],
+            "Secrets": [{"SecretName": "rdp_app_key"}, {"SecretName": "rdp_database_url"}],
+        });
+        let mut container = given.clone();
+        container["Image"] = json!("ghcr.io/irisvn/rdockpanel:0.11.0@sha256:a");
+        let spec = json!({"Name": "rdockpanel", "TaskTemplate": {"ContainerSpec": container}});
+        let spec = update_spec(spec, "ghcr.io/irisvn/rdockpanel:0.11.1@sha256:b");
+        let c = &spec["TaskTemplate"]["ContainerSpec"];
+        for key in ["Env", "Mounts", "Secrets"] {
+            assert_eq!(c[key], given[key], "{key}");
+        }
+    }
+
+    #[test]
     fn how_an_update_ended() {
         assert_eq!(outcome(Some("updating"), "0.5.1", "0.5.1"), None);
         assert_eq!(

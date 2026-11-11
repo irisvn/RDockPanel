@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 
 use crate::models::{firewall_blocked, firewall_opening, firewall_transaction, panel_setting};
 use crate::services::action_service::{self, Initiator};
+use crate::services::deploy_rules_service::Install;
 use crate::services::docker_service::{Docker, ExecChunk};
 use crate::services::firewall_host::{self as host, fw};
 use crate::services::firewall_rules::{
@@ -404,14 +405,25 @@ fn parse_listener(line: &str) -> Option<Listener> {
     })
 }
 
+/// Why this panel does not manage its host's firewall: run from source, or
+/// installed on a Mac (Docker's "host" there is its Linux VM, not the Mac).
+/// `None`: a Linux server it was installed on.
+pub fn unavailable(install: Install) -> Option<&'static str> {
+    match install {
+        Install::Linux => None,
+        Install::FromSource => Some(
+            "Only an installed panel manages its server's firewall (this one runs from source).",
+        ),
+        Install::MacOs => Some(
+            "The firewall is for Linux servers. On macOS, use the Mac's own firewall (System Settings → Network → Firewall).",
+        ),
+    }
+}
+
 /// The panel's own image, the host commands' helper (installed panels only).
-async fn image(docker: &Docker, installed: bool) -> AppResult<String> {
-    if !installed {
-        return Err(ValidationErrors::field(
-            "firewall",
-            "only an installed panel manages its server's firewall",
-        )
-        .into());
+async fn image(docker: &Docker, install: Install) -> AppResult<String> {
+    if let Some(reason) = unavailable(install) {
+        return Err(ValidationErrors::field("firewall", reason).into());
     }
     crate::services::system_service::own_image(docker)
         .await?
@@ -628,7 +640,7 @@ async fn host_tx_state(
 /// Settles what an interrupted change left (the panel restarted, a request
 /// went away): the host's journal decides; an expired change is reverted.
 /// Under [`LOCK`] (its callers hold it).
-async fn settle(app: &AppState, docker: &Docker, installed: bool) -> AppResult<()> {
+async fn settle(app: &AppState, docker: &Docker, install: Install) -> AppResult<()> {
     let db = app.db();
     let Some(row) = open_tx(db).await? else {
         return Ok(());
@@ -641,7 +653,7 @@ async fn settle(app: &AppState, docker: &Docker, installed: bool) -> AppResult<(
     {
         return Ok(());
     }
-    let image = image(docker, installed).await?;
+    let image = image(docker, install).await?;
     let (state, same_boot, timer) = host_tx_state(docker, &image, &row.txid).await?;
     let expired = row
         .deadline
@@ -718,18 +730,15 @@ async fn adopt(
 
 /// The Firewall page: the host, its listeners and what the firewall does
 /// with each, the policy, the change waiting to be kept.
-pub async fn report(app: &AppState, docker: &Docker, installed: bool) -> AppResult<Value> {
-    if !installed {
-        return Ok(json!({
-            "available": false,
-            "reason": "Only an installed panel manages its server's firewall (this one runs from source).",
-        }));
+pub async fn report(app: &AppState, docker: &Docker, install: Install) -> AppResult<Value> {
+    if let Some(reason) = unavailable(install) {
+        return Ok(json!({ "available": false, "reason": reason }));
     }
     if let Ok(_guard) = LOCK.try_lock() {
-        let _ = settle(app, docker, installed).await;
+        let _ = settle(app, docker, install).await;
     }
     let db = app.db();
-    let image = image(docker, installed).await?;
+    let image = image(docker, install).await?;
     let found = discover(docker, &image).await?;
     let saved = policy(db).await?;
     let enabled = found.host.confirmed;
@@ -934,9 +943,9 @@ async fn published_ports(
 
 /// What turning the firewall on (or applying the policy) closes and opens:
 /// the table it loads, and the listeners left closed.
-pub async fn preview(app: &AppState, docker: &Docker, installed: bool) -> AppResult<Value> {
+pub async fn preview(app: &AppState, docker: &Docker, install: Install) -> AppResult<Value> {
     let db = app.db();
-    let image = image(docker, installed).await?;
+    let image = image(docker, install).await?;
     let found = discover(docker, &image).await?;
     let saved = policy(db).await?;
     let ruleset = rules::render(&saved, &facts(&found));
@@ -970,11 +979,11 @@ pub async fn apply(
     app: &AppState,
     docker: &Docker,
     by: &Initiator,
-    installed: bool,
+    install: Install,
 ) -> AppResult<Value> {
     let _guard = LOCK.lock().await;
     let db = app.db();
-    settle(app, docker, installed).await?;
+    settle(app, docker, install).await?;
     if open_tx(db).await?.is_some() {
         return Err(ValidationErrors::field(
             "firewall",
@@ -982,7 +991,7 @@ pub async fn apply(
         )
         .into());
     }
-    let image = image(docker, installed).await?;
+    let image = image(docker, install).await?;
     let found = discover(docker, &image).await?;
     let mut why = found.unsupported();
     if !reached_by_name(app) {
@@ -1109,7 +1118,7 @@ pub async fn keep(
     docker: &Docker,
     by: &Initiator,
     txid: &str,
-    installed: bool,
+    install: Install,
 ) -> AppResult<Value> {
     let _guard = LOCK.lock().await;
     let db = app.db();
@@ -1121,7 +1130,7 @@ pub async fn keep(
     if row.state != "pending" || row.deadline.is_none_or(|d| Utc::now() > d) {
         return Err(ValidationErrors::field("txid", "this change is no longer waiting").into());
     }
-    let image = image(docker, installed).await?;
+    let image = image(docker, install).await?;
     let status = run_fw(docker, &image, &["status"], None).await?;
     let state = parse_status(&status.stdout);
     let now = state
@@ -1160,7 +1169,7 @@ pub async fn revert(
     docker: &Docker,
     by: &Initiator,
     txid: &str,
-    installed: bool,
+    install: Install,
 ) -> AppResult<Value> {
     let _guard = LOCK.lock().await;
     let db = app.db();
@@ -1172,7 +1181,7 @@ pub async fn revert(
     if !firewall_transaction::open(&row.state) {
         return Err(ValidationErrors::field("txid", "this change is no longer waiting").into());
     }
-    let image = image(docker, installed).await?;
+    let image = image(docker, install).await?;
     let out = action_service::run(db, by, "firewall.revert", "firewall", async {
         run_fw(docker, &image, &["revert", txid], None).await
     })
@@ -1194,11 +1203,11 @@ pub async fn disable(
     app: &AppState,
     docker: &Docker,
     by: &Initiator,
-    installed: bool,
+    install: Install,
 ) -> AppResult<Value> {
     let _guard = LOCK.lock().await;
     let db = app.db();
-    settle(app, docker, installed).await?;
+    settle(app, docker, install).await?;
     if open_tx(db).await?.is_some() {
         return Err(ValidationErrors::field(
             "firewall",
@@ -1206,7 +1215,7 @@ pub async fn disable(
         )
         .into());
     }
-    let image = image(docker, installed).await?;
+    let image = image(docker, install).await?;
     let out = action_service::run(db, by, "firewall.disable", "firewall", async {
         run_fw(docker, &image, &["disable"], None).await
     })
@@ -1225,16 +1234,16 @@ pub async fn disable(
 /// bridges given to the host when they changed; the table compared with
 /// the confirmed one, reloaded when it differs (an alert). A line for the
 /// schedules' history, or None when the firewall is off.
-pub async fn check(app: &AppState, docker: &Docker, installed: bool) -> AppResult<Option<String>> {
-    if !installed {
+pub async fn check(app: &AppState, docker: &Docker, install: Install) -> AppResult<Option<String>> {
+    if !install.manages_host() {
         return Ok(None);
     }
     let Ok(_guard) = LOCK.try_lock() else {
         return Ok(Some("a change is running".to_owned()));
     };
     let db = app.db();
-    settle(app, docker, installed).await?;
-    let image = image(docker, installed).await?;
+    settle(app, docker, install).await?;
+    let image = image(docker, install).await?;
     let found = discover(docker, &image).await?;
     if !found.host.confirmed {
         return Ok(None);

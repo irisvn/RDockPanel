@@ -214,7 +214,7 @@ impl ServiceProvider for AppServiceProvider {
                 Ok(crate::services::firewall_service::check(
                     &ctx.state,
                     &docker,
-                    crate::services::deploy_rules_service::config().installed,
+                    crate::services::deploy_rules_service::Install::current(),
                 )
                 .await?)
             }),
@@ -409,7 +409,8 @@ impl ServiceProvider for AppServiceProvider {
 /// Right after the start (an interrupted change settled), then each time
 /// Docker's networks change (a new bridge trusted at once).
 fn firewall_watch(state: &AppState) {
-    if !crate::services::deploy_rules_service::config().installed {
+    let install = crate::services::deploy_rules_service::Install::current();
+    if !install.manages_host() {
         return;
     }
     let app = state.clone();
@@ -418,7 +419,7 @@ fn firewall_watch(state: &AppState) {
         loop {
             if let Some(docker) = app.service::<crate::services::docker_service::Docker>()
                 && let Err(err) =
-                    crate::services::firewall_service::check(&app, &docker, true).await
+                    crate::services::firewall_service::check(&app, &docker, install).await
             {
                 tracing::debug!(%err, "firewall check");
             }

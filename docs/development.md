@@ -2,7 +2,9 @@
 
 ## Environment
 
-- Rust stable, Docker (Docker Desktop, or OrbStack on macOS), the `rustcms` CLI.
+- Rust stable, Docker (Docker Desktop, or OrbStack on macOS), the `rustcms` CLI
+  (`curl -fsSL https://irisvn.github.io/RustCMS/install.sh | sh`, then add `~/.rustcms/bin` to `PATH`;
+  every `rustcms …` command needs it).
 - MySQL 8.4 from `docker-compose.yml` (`docker compose up -d`), with the same server flags as
   production (`utf8mb4_0900_bin`, UTC). The panel also runs on SQLite (`DATABASE_URL=sqlite://…`,
   see `.env.example`): an install chooses one of the two, and the tests run on both.
@@ -55,6 +57,10 @@ the real routing test (`routing.rs`), which writes there for the development Tra
   `terminal.rs`).
 - Run `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, then the tests with `set -o pipefail`
   if you pipe their output.
+
+CI (`.github/workflows/ci.yml`) runs formatting, `clippy -D warnings` and the tests on MySQL 8.4
+and SQLite on pushes to `main` and pull requests, and a job on a real Docker engine and Swarm with
+Traefik (deploys, rolling updates under load, HTTPS, project isolation).
 
 If MySQL tests fail with `PoolTimedOut`, the Docker daemon may be stuck: restart Docker/OrbStack.
 

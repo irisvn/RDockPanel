@@ -19,9 +19,9 @@ use crate::services::docker_service::Docker;
 use crate::services::firewall_rules::{self as rules, Cidr, Protocol};
 use crate::services::firewall_service;
 
-/// Installed by install.sh (`[panel] installed`).
-fn installed() -> bool {
-    crate::services::deploy_rules_service::config().installed
+/// How this panel runs (from source, installed on Linux or on a Mac).
+fn installed() -> crate::services::deploy_rules_service::Install {
+    crate::services::deploy_rules_service::Install::current()
 }
 
 fn docker(app: &AppState) -> AppResult<std::sync::Arc<Docker>> {

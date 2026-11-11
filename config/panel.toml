@@ -58,3 +58,12 @@ templates_url = "https://raw.githubusercontent.com/easypanel-io/templates/main/t
 # Installed by install.sh (it sets RUSTCMS_PANEL__INSTALLED=true); false when
 # the panel runs from source (development). Settings → Panel says which.
 installed = false
+
+# Where install.sh ran (it sets RUSTCMS_PANEL__HOST_OS): linux, or macos for a
+# Mac whose Docker (Docker Desktop, OrbStack) runs in a Linux VM. On macOS the
+# panel neither reboots nor firewalls its "server" (that VM).
+host_os = "linux"
+
+# The installer's directory on the host (its secrets, Traefik's files; the
+# installer sets RUSTCMS_PANEL__STATE_DIR): never a service's bind mount.
+state_dir = "/etc/rdockpanel"

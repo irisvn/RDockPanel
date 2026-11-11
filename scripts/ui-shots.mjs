@@ -59,6 +59,7 @@ const PAGES = [
   ["database-backups", "/p/dashboard/demo/db/backups"],
   ["domains", "/p/domains"],
   ["actions", "/p/actions"],
+  ["firewall", "/p/firewall"],
   ["settings-panel", "/p/settings/panel"],
   ["settings-version", "/p/settings/version"],
   ["settings-traefik", "/p/settings/traefik"],

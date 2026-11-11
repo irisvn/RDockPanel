@@ -1,12 +1,14 @@
 #!/bin/sh
-# RDockPanel installer, for a fresh Linux server (Ubuntu or Debian):
+# RDockPanel installer, for a fresh Linux server (Ubuntu or Debian), or a Mac
+# with OrbStack or Docker Desktop running (as the user, without sudo):
 #
 #   curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh | sudo sh
 #   curl -fsSL …/install.sh | sudo sh -s -- --domain panel.example.com --email you@example.com \
 #       --apps-domain apps.example.com --admin-email you@example.com
+#   curl -fsSL …/install.sh | sh -s -- --admin-email you@example.com       # macOS
 #
-# Options (kept in /etc/rdockpanel/install.conf: a later run changes only
-# what it is given):
+# Options (kept in /etc/rdockpanel/install.conf, on macOS ~/.rdockpanel/install.conf:
+# a later run changes only what it is given):
 #   --domain HOST        the panel at https://HOST only (needs --email; DNS first)
 #   --email ADDRESS      Let's Encrypt account: HTTPS certificates for the panel and the apps
 #   --apps-domain HOST   generated app domains <project>-<service>.HOST (a wildcard DNS record)
@@ -24,23 +26,59 @@
 # is kept, its secrets first (APP_KEY, the database's passwords).
 set -eu
 
-ETC=/etc/rdockpanel
-# Backups to a "Local directory" storage provider (the same path in the panel).
-BACKUPS=/var/lib/rdockpanel/backups
-# Compose services' files (relative paths of a Compose file resolve on the host).
-COMPOSE=/var/lib/rdockpanel/compose
-# The panel's SQLite database (with --database sqlite), the same path in its container.
+say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
+die() { printf 'rdockpanel: %s\n' "$*" >&2; exit 1; }
+
+# A Linux server, or a Mac: its Docker (OrbStack, Docker Desktop) runs in a
+# Linux VM that shares /Users with the Mac at the same paths. The same image
+# runs on both; on a Mac the panel neither reboots nor firewalls that VM.
+case "$(uname -s)" in
+  Linux) MAC="" ;;
+  Darwin) MAC=1 ;;
+  *) die "RDockPanel installs on Linux or macOS" ;;
+esac
+if [ -n "$MAC" ]; then
+  [ "$(id -u)" != 0 ] || die "on macOS, run it without sudo (as the user whose Docker it is)"
+  # Its paths become Docker mount arguments: nothing but these characters.
+  case "${HOME:-}" in
+    /*[!A-Za-z0-9._/-]*|'') die "your home directory ($HOME) has characters Docker mounts do not take" ;;
+    /*) ;;
+    *) die "HOME is not an absolute path" ;;
+  esac
+  HOST_OS=macos
+  # The installer's own directory (options, secrets, Traefik's files).
+  ETC="$HOME/.rdockpanel"
+  BACKUPS="$ETC/backups"
+  COMPOSE="$ETC/compose"
+  # As the user (their Docker, their home).
+  RUN="sh"
+else
+  [ "$(id -u)" = 0 ] || die "run it as root (sudo)"
+  HOST_OS=linux
+  ETC=/etc/rdockpanel
+  # Backups to a "Local directory" storage provider (the same path in the panel).
+  BACKUPS=/var/lib/rdockpanel/backups
+  # Compose services' files (relative paths of a Compose file resolve on the host).
+  COMPOSE=/var/lib/rdockpanel/compose
+  RUN="sudo sh"
+fi
+# Where the panel sees its backups (its update's dumps, the default local
+# directory): the same on every host.
+BACKUPS_IN=/var/lib/rdockpanel/backups
+# The panel's SQLite database (with --database sqlite), the same path in its
+# container: a host directory on Linux; on a Mac a Docker volume (SQLite's
+# locks are not safe across the Mac's file sharing into the VM).
 DATA=/var/lib/rdockpanel/data
+DATA_VOLUME=rdp-panel-data
+if [ -n "$MAC" ]; then
+  DATA_MOUNT="type=volume,source=$DATA_VOLUME,target=$DATA"
+else
+  DATA_MOUNT="type=bind,source=$DATA,target=$DATA"
+fi
 CONF="$ETC/install.conf"
 SYSTEM=rdockpanel.system=true
 MYSQL_IMAGE=mysql:8.4
 TRAEFIK_IMAGE=traefik:v3.7
-
-say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
-die() { printf 'rdockpanel: %s\n' "$*" >&2; exit 1; }
-
-[ "$(id -u)" = 0 ] || die "run it as root (sudo)"
-[ "$(uname -s)" = Linux ] || die "RDockPanel installs on Linux"
 
 # What the last run chose, then what this one says.
 IMAGE="ghcr.io/irisvn/rdockpanel:main"
@@ -82,7 +120,7 @@ while [ $# -gt 0 ]; do
       printf '%s' "${2:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "--version: not a version like 1.2.3"
       IMAGE="ghcr.io/irisvn/rdockpanel:$2"; CHOSEN=1; shift 2 ;;
     --upgrade-system) UPGRADE_SYSTEM=1; shift ;;
-    -h|--help) sed -n '2,25p' "$0" 2>/dev/null || true; exit 0 ;;
+    -h|--help) sed -n '2,26p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
 done
@@ -104,22 +142,57 @@ case "$DATABASE" in ''|mysql|sqlite) ;; *) die "$CONF: DATABASE is mysql or sqli
 
 # --- Docker and Swarm -------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
+  [ -z "$MAC" ] || die "Docker is not installed: install OrbStack or Docker Desktop, start it, then run this again"
   say "Installing Docker"
   curl -fsSL https://get.docker.com | sh
 fi
-docker info >/dev/null 2>&1 || die "Docker is not running"
+if ! docker info >/dev/null 2>&1; then
+  [ -z "$MAC" ] || die "Docker is not running: start OrbStack or Docker Desktop, then run this again"
+  die "Docker is not running"
+fi
 
-ADDRESS=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' | head -n1)
-[ -n "$ADDRESS" ] || ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}')
-[ -n "$ADDRESS" ] || die "could not find this server's address"
+if [ -n "$MAC" ]; then
+  # The Mac's own ports, before anything changes: those this run publishes
+  # (80 and 443 for Traefik, 3000 for the panel without a domain) must be
+  # free, or already this install's.
+  publishes() { # service port
+    docker service inspect --format '{{range .Endpoint.Ports}}{{.PublishedPort}} {{end}}' "$1" 2>/dev/null | grep -qw "$2"
+  }
+  wanted="80:rdp-traefik 443:rdp-traefik"
+  [ -n "$DOMAIN" ] || wanted="$wanted 3000:rdockpanel"
+  for pair in $wanted; do
+    port=${pair%%:*}
+    if publishes "${pair#*:}" "$port"; then continue; fi
+    who=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR == 2 { print $1 " (pid " $2 ")" }')
+    [ -z "$who" ] || die "port $port is used by $who: stop it, then run this again"
+  done
+  # The Mac's address on its network (for apps that ask for the server's IP;
+  # it changes with the network). Swarm itself stays on 127.0.0.1.
+  iface=$(route -n get 1.1.1.1 2>/dev/null | awk '/interface:/ { print $2 }' | head -n1)
+  ADDRESS=""
+  if [ -n "$iface" ]; then ADDRESS=$(ipconfig getifaddr "$iface" 2>/dev/null || true); fi
+  SWARM_ADDRESS=127.0.0.1
+else
+  ADDRESS=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' | head -n1)
+  [ -n "$ADDRESS" ] || ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}')
+  [ -n "$ADDRESS" ] || die "could not find this server's address"
+  SWARM_ADDRESS=$ADDRESS
+fi
 
 # A swarm only when this engine is in none (its state can read "error" while
 # it works); it must then be a manager.
 if [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = inactive ]; then
-  say "Starting Docker Swarm on $ADDRESS"
-  docker swarm init --advertise-addr "$ADDRESS" >/dev/null
+  say "Starting Docker Swarm on $SWARM_ADDRESS"
+  docker swarm init --advertise-addr "$SWARM_ADDRESS" >/dev/null
 fi
 docker node ls >/dev/null 2>&1 || die "this server is in a Swarm but not one of its managers"
+# A Traefik of another making (scripts/dev-swarm.sh, for development) would
+# keep its own routes directory and ports: the installer does not take it over.
+if docker service inspect rdp-traefik >/dev/null 2>&1 \
+  && ! docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{println .Source}}{{end}}' rdp-traefik \
+    | grep -qxF "$ETC/traefik/dynamic"; then
+  die "the service rdp-traefik was not made by this installer (scripts/dev-swarm.sh?): remove it first (docker service rm rdp-traefik)"
+fi
 # The panel's services stay on this node: its database volume, routes and
 # certificates live here.
 NODE=$(docker info --format '{{.Swarm.NodeID}}')
@@ -210,8 +283,13 @@ if [ "$DATABASE" = mysql ]; then
   printf 'mysql://panel:%s@rdp-mysql:3306/panel' "$(cat "$ETC/secrets/mysql_password")" > "$ETC/secrets/database_url"
   SECRETS="app_key mysql_root mysql_password database_url"
 else
-  mkdir -p "$DATA"
-  chmod 0700 "$DATA"
+  if [ -n "$MAC" ]; then
+    docker volume inspect "$DATA_VOLUME" >/dev/null 2>&1 \
+      || docker volume create --label "$SYSTEM" "$DATA_VOLUME" >/dev/null
+  else
+    mkdir -p "$DATA"
+    chmod 0700 "$DATA"
+  fi
   printf 'sqlite://%s/panel.sqlite?mode=rwc' "$DATA" > "$ETC/secrets/database_url"
   SECRETS="app_key database_url"
 fi
@@ -219,8 +297,12 @@ umask 022
 
 # A Docker secret is made once from its file; a file that no longer matches
 # it (edited, restored, lost) stops the installer instead of diverging.
+# sha256sum, or macOS's shasum where it has none.
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-64
+}
 docker_secret() { # name
-  sum=$(sha256sum "$ETC/secrets/$1" | cut -c1-64)
+  sum=$(sha256 "$ETC/secrets/$1")
   if docker secret inspect "rdp_$1" >/dev/null 2>&1; then
     kept=$(docker secret inspect --format '{{index .Spec.Labels "rdockpanel.sha256"}}' "rdp_$1")
     [ -z "$kept" ] || [ "$kept" = "$sum" ] \
@@ -252,7 +334,12 @@ if [ "$DATABASE" = mysql ]; then
   # no instrumentation, no binary log (nothing replicates it; the backups are
   # dumps), smaller buffers and caches.
   MYSQL_ARGS="--character-set-server=utf8mb4 --collation-server=utf8mb4_0900_bin --default-time-zone=+00:00"
-  MEMORY_KB=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+  if [ -n "$MAC" ]; then
+    # Docker's VM: what the containers have.
+    MEMORY_KB=$(( $(docker info --format '{{.MemTotal}}') / 1024 ))
+  else
+    MEMORY_KB=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+  fi
   if [ "${MEMORY_KB:-0}" -lt 2000000 ]; then
     MYSQL_ARGS="$MYSQL_ARGS --performance-schema=OFF --skip-log-bin \
   --innodb-buffer-pool-size=64M --innodb-log-buffer-size=8M \
@@ -415,6 +502,12 @@ YAML
     chmod 0644 "$ETC/traefik/dynamic/.rdockpanel.yml.tmp"
     mv -f "$ETC/traefik/dynamic/.rdockpanel.yml.tmp" "$ROUTE"
   fi
+elif [ -n "$MAC" ]; then
+  # On the Mac itself; from its network too, while it keeps that address.
+  APP_URL="http://localhost:3000"
+  ORIGINS="[\"http://localhost:3000\"]"
+  [ -z "$ADDRESS" ] || ORIGINS="[\"http://localhost:3000\",\"http://$ADDRESS:3000\"]"
+  rm -f "$ETC/traefik/dynamic/rdockpanel.yml"
 else
   APP_URL="http://$ADDRESS:3000"
   ORIGINS="[\"http://$ADDRESS:3000\"]"
@@ -434,6 +527,8 @@ set -- --env-add "APP_URL=$APP_URL" \
   --env-add "RUSTCMS_PANEL__COMPOSE_DIR=$COMPOSE" \
   --env-add RUSTCMS_PANEL__INTERNAL_URL=http://rdockpanel:3000 \
   --env-add RUSTCMS_PANEL__INSTALLED=true \
+  --env-add "RUSTCMS_PANEL__HOST_OS=$HOST_OS" \
+  --env-add "RUSTCMS_PANEL__STATE_DIR=$ETC" \
   --env-add 'RUSTCMS_HTTP__TRUSTED_PROXIES=["10.0.0.0/8","172.16.0.0/12"]'
 
 mounted() { docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{.Target}} {{end}}' rdockpanel | grep -qw "$1"; }
@@ -442,13 +537,15 @@ if exists rdockpanel; then
   say "Updating RDockPanel ($IMAGE)"
   constrained rdockpanel
   if [ -n "$DOMAIN" ] && published; then
-    set -- "$@" --publish-rm 3000
+    # A host-mode port is removed only by its whole spec (`--publish-rm 3000`
+    # leaves it open).
+    set -- "$@" --publish-rm published=3000,target=3000,mode=host
   elif [ -z "$DOMAIN" ] && ! published; then
     set -- "$@" --publish-add mode=host,published=3000,target=3000
   fi
-  mounted "$BACKUPS" || set -- "$@" --mount-add "type=bind,source=$BACKUPS,target=$BACKUPS"
+  mounted "$BACKUPS_IN" || set -- "$@" --mount-add "type=bind,source=$BACKUPS,target=$BACKUPS_IN"
   mounted "$COMPOSE" || set -- "$@" --mount-add "type=bind,source=$COMPOSE,target=$COMPOSE"
-  [ "$DATABASE" = mysql ] || mounted "$DATA" || set -- "$@" --mount-add "type=bind,source=$DATA,target=$DATA"
+  [ "$DATABASE" = mysql ] || mounted "$DATA" || set -- "$@" --mount-add "$DATA_MOUNT"
   # Its health check again (an older panel's own restart could drop it).
   docker service update --quiet --image "$IMAGE" "$@" \
     --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-timeout 3s \
@@ -465,7 +562,7 @@ else
   publish=""
   [ -z "$DOMAIN" ] && publish="--publish mode=host,published=3000,target=3000"
   data=""
-  [ "$DATABASE" = mysql ] || data="--mount type=bind,source=$DATA,target=$DATA"
+  [ "$DATABASE" = mysql ] || data="--mount $DATA_MOUNT"
   # Each variable as one argument (values have no newlines).
   old_ifs=$IFS
   IFS='
@@ -481,7 +578,7 @@ else
     --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
     --mount type=bind,source="$ETC/traefik/dynamic",target=/etc/rdockpanel/traefik/dynamic \
     --mount type=bind,source=/proc,target=/host/proc,readonly \
-    --mount type=bind,source="$BACKUPS",target="$BACKUPS" \
+    --mount type=bind,source="$BACKUPS",target="$BACKUPS_IN" \
     --mount type=bind,source="$COMPOSE",target="$COMPOSE" \
     --secret rdp_app_key --secret rdp_database_url \
     --health-cmd 'curl -fsS http://127.0.0.1:3000/health' --health-interval 5s --health-timeout 3s \
@@ -512,5 +609,8 @@ say "RDockPanel is ready: $APP_URL/admin"
 if [ -z "$DOMAIN" ]; then
   echo "    Plain HTTP: give it a domain (--domain, --email) before using it over the internet."
 fi
-[ -z "$ADMIN_EMAIL" ] && echo "    Create the administrator: sudo sh install.sh --admin-email you@example.com"
+[ -z "$ADMIN_EMAIL" ] && echo "    Create the administrator: $RUN install.sh --admin-email you@example.com"
+if [ -n "$MAC" ]; then
+  echo "    macOS: the server it shows is Docker's VM; Firewall and Reboot are for Linux servers."
+fi
 exit 0

@@ -246,7 +246,7 @@ fn check(ctx: &Ctx, mut data: Data, record: Option<&service_mount::Model>) -> Ap
             } else {
                 match source
                     .as_deref()
-                    .map(|s| bind_source(s, &config().bind_roots))
+                    .map(|s| bind_source(s, &config().bind_roots, &config().state_dir))
                 {
                     None => errors.add("source", ctx.t("is required")),
                     Some(Err(refusal)) => errors.add("source", ctx.t(refusal.message())),

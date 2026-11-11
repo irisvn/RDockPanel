@@ -1335,7 +1335,7 @@ async fn apply(
 
     // Host directories are checked again: they may have changed since saved.
     for mount in snapshot.mounts.iter().filter(|m| m.kind == "bind") {
-        match bind_source(&mount.source, &config().bind_roots) {
+        match bind_source(&mount.source, &config().bind_roots, &config().state_dir) {
             Ok(resolved) if resolved.to_string_lossy() == mount.source => {}
             _ => {
                 return Err(Outcome::Failed(format!(

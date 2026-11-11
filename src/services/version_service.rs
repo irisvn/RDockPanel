@@ -11,6 +11,7 @@
 //! are scheduled every 6 hours; one asked by hand waits [`COOLDOWN`] after
 //! the last, and checks never run two at once.
 
+use crate::services::deploy_rules_service::Install;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -430,7 +431,8 @@ pub async fn check(app: &AppState, by_hand: bool) -> AppResult<Result<Check, Ref
 
 /// Settings → Version: this panel, the last check, the update (its notes and
 /// the installer's command for it), what it runs with, and the history.
-pub async fn status(app: &AppState, installed: bool) -> AppResult<Value> {
+pub async fn status(app: &AppState, install: Install) -> AppResult<Value> {
+    let installed = install.installed();
     use crate::services::docker_service::Docker;
     let docker = app.service::<Docker>();
     let own = match docker.as_deref() {
@@ -459,12 +461,9 @@ pub async fn status(app: &AppState, installed: bool) -> AppResult<Value> {
             .then(|| check.latest.clone())
             .flatten()
     });
-    let command = target.as_ref().map(|v| {
-        format!(
-            "curl -fsSL {} | sudo sh -s -- --version {v}",
-            crate::services::panel_domain_service::INSTALLER
-        )
-    });
+    let command = target
+        .as_ref()
+        .map(|v| crate::services::panel_domain_service::version_command(install, v));
     let mut components = json!({ "rustcms": env!("RDP_CORE_VERSION") });
     // The panel's database: SQLite in its process, or MySQL's service.
     let sqlite = app.db().get_database_backend() == sea_orm::DatabaseBackend::Sqlite;

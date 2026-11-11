@@ -2,6 +2,9 @@
 
 The **Firewall** page (Workspace menu, `system.manage`) shows what the server listens on and runs its firewall:
 
+(Linux servers only. A panel installed on macOS, or run from source, says so on the page and never
+touches the host: on a Mac the host Docker shows is its Linux VM; see [install](install.md#macos-apple-silicon).)
+
 - **Default deny inbound.** Every new inbound connection is closed, except:
   - SSH: every port the server's sshd listens on, TCP;
   - the web: TCP 80 and 443 (Traefik: the panel and every domain);

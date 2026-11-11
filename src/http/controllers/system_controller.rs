@@ -15,7 +15,12 @@ use crate::services::system_service::{self, SELF_SERVICE};
 
 /// Installed by install.sh (`[panel] installed`).
 fn installed() -> bool {
-    crate::services::deploy_rules_service::config().installed
+    install().installed()
+}
+
+/// How this panel runs (from source, installed on Linux or on a Mac).
+fn install() -> crate::services::deploy_rules_service::Install {
+    crate::services::deploy_rules_service::Install::current()
 }
 
 fn docker(app: &AppState) -> AppResult<std::sync::Arc<Docker>> {
@@ -26,7 +31,7 @@ fn docker(app: &AppState) -> AppResult<std::sync::Arc<Docker>> {
 pub async fn status(State(app): State<AppState>) -> AppResult<Json<Value>> {
     let docker = app.service::<Docker>();
     Ok(Json(
-        system_service::status(&app, docker.as_deref(), installed()).await,
+        system_service::status(&app, docker.as_deref(), install()).await,
     ))
 }
 
@@ -39,7 +44,7 @@ pub async fn logs(
 ) -> AppResult<EventStream> {
     let tail = tail.min(crate::services::panel_log::KEPT as u32);
     let docker = docker(&app)?;
-    let status = system_service::status(&app, Some(&docker), installed()).await;
+    let status = system_service::status(&app, Some(&docker), install()).await;
     if status["service"] == true {
         let query = LogQuery {
             follow: true,
@@ -103,7 +108,7 @@ pub async fn reboot(
 ) -> AppResult<Json<Value>> {
     let docker = docker(&app)?;
     let by = Initiator::user(auth.principal(), request);
-    system_service::reboot(&app, &docker, &by, &body.confirm, installed()).await?;
+    system_service::reboot(&app, &docker, &by, &body.confirm, install()).await?;
     Ok(Json(json!({ "rebooting": true })))
 }
 
@@ -137,7 +142,7 @@ pub async fn cleanup(
 /// Settings → Version.
 pub async fn version(State(app): State<AppState>) -> AppResult<Json<Value>> {
     Ok(Json(
-        crate::services::version_service::status(&app, installed()).await?,
+        crate::services::version_service::status(&app, install()).await?,
     ))
 }
 
@@ -150,7 +155,7 @@ pub async fn check_version(State(app): State<AppState>) -> AppResult<Json<Value>
             retry_after: wait.as_secs().max(1),
         });
     }
-    Ok(Json(version_service::status(&app, installed()).await?))
+    Ok(Json(version_service::status(&app, install()).await?))
 }
 
 /// The Dashboard's notice for the caller (a panel administrator): the

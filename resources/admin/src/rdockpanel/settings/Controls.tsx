@@ -18,6 +18,7 @@ type Status = {
   public_ip: string | null;
   service: boolean;
   can_reboot: boolean;
+  host_os?: "linux" | "macos";
 };
 
 type Report = { containers_deleted: number; images_deleted: number; volumes_deleted?: number; build_caches_deleted?: number; space_reclaimed: number };
@@ -179,7 +180,7 @@ export function Controls(props: PageProps<unknown>) {
             <tr>
               <td>
                 <div className="rdp2-strong-cell">{t("Server")}</div>
-                <div className="rdp2-muted rdp2-small">{s ? `${s.hostname}${s.public_ip ? ` · ${s.public_ip}` : ""}` : "–"}</div>
+                <div className="rdp2-muted rdp2-small">{s ? `${s.hostname}${s.public_ip ? ` · ${s.public_ip}` : ""}${s.host_os === "macos" ? ` · ${t("Docker's VM on macOS")}` : ""}` : "–"}</div>
               </td>
               <td>
                 <Status kind="health" status="running" t={t} />

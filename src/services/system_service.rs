@@ -15,7 +15,7 @@ use rustcms::{AppError, AppResult, ValidationErrors};
 use serde_json::{Value, json};
 
 use crate::services::action_service::{self, Initiator};
-use crate::services::deploy_rules_service::config;
+use crate::services::deploy_rules_service::{Install, config};
 use crate::services::docker_service::{Docker, DockerResult};
 
 /// The panel's Swarm service, as the installer names it.
@@ -148,7 +148,8 @@ fn repository(reference: &str) -> &str {
 /// What the controls show: the panel (version, image, `installed` by
 /// install.sh — `[panel] installed`), the server (hostname, address) and
 /// what each control can do here.
-pub async fn status(app: &rustcms::AppState, docker: Option<&Docker>, installed: bool) -> Value {
+pub async fn status(app: &rustcms::AppState, docker: Option<&Docker>, install: Install) -> Value {
+    let installed = install.installed();
     let image = match docker {
         Some(docker) if installed => own_image(docker).await.ok().flatten().map(|(r, _)| r),
         _ => None,
@@ -164,7 +165,12 @@ pub async fn status(app: &rustcms::AppState, docker: Option<&Docker>, installed:
         // Installed, the panel is a Swarm service: restarted by Swarm, its
         // logs Docker's; else its own process (from source).
         "service": installed && image.is_some(),
-        "can_reboot": installed && image.is_some(),
+        // A Mac's Docker VM is no server to reboot.
+        "can_reboot": install.manages_host() && image.is_some(),
+        "host_os": match install {
+            Install::MacOs => "macos",
+            _ => "linux",
+        },
     })
 }
 
@@ -222,10 +228,17 @@ pub async fn reboot(
     docker: &Docker,
     by: &Initiator,
     confirm: &str,
-    installed: bool,
+    install: Install,
 ) -> AppResult<()> {
+    if install == Install::MacOs {
+        return Err(ValidationErrors::field(
+            "server",
+            "Reboot is for Linux servers: on macOS, restart Docker (Docker Desktop or OrbStack) or the Mac",
+        )
+        .into());
+    }
     // The local image this process runs (its id when known): no pull.
-    let image = if installed {
+    let image = if install.installed() {
         own_image(docker)
             .await?
             .map(|(reference, id)| id.unwrap_or(reference))
