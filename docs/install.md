@@ -193,8 +193,10 @@ Mac: SQLite's locks are not safe across the VM's file sharing). Swarm runs on `1
 **What differs from a Linux server.**
 - Docker runs in a Linux VM: the "server" the panel shows (CPU, memory, network, hostname, kernel)
   is that VM, its disk is Docker's data disk in the VM, and the memory check before a deploy counts
-  the VM's memory. Give the VM enough memory and
-  disk in OrbStack's or Docker Desktop's settings.
+  the VM's memory. The VM has what its settings give it, never the
+  whole Mac: OrbStack uses every CPU and takes memory only as containers need it, up to its memory
+  limit (Settings → System, or `orb config set memory_mib 12288`, then restart OrbStack); Docker
+  Desktop's are in Settings → Resources (CPUs, memory, swap, disk). Leave macOS a few GB.
 - No **Firewall** and no **Reboot**: they would act on the VM. Use the Mac's own firewall
   (System Settings → Network → Firewall); restart Docker or the Mac yourself.
 - The Mac must be awake and Docker running for the apps to answer. When Docker starts again, Swarm

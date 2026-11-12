@@ -41,13 +41,19 @@ curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/inst
   | sudo sh -s -- --admin-email ban@example.com
 ```
 
+Trên máy Mac chip Apple đang chạy [OrbStack](https://orbstack.dev) hoặc Docker Desktop (chạy bằng
+user của bạn, **không dùng `sudo`**), rồi mở http://localhost:3000/admin:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh \
+  | sh -s -- --admin-email ban@example.com
+```
+
 - Thêm `--domain panel.example.com --email ban@example.com` để panel chạy HTTPS (Let's Encrypt), và
   `--apps-domain apps.example.com` để có domain tự sinh cho app.
 - Dữ liệu của panel nằm trong MySQL 8.4 (mặc định) hoặc SQLite (`--database mysql|sqlite`).
 - Thêm `--version X.Y.Z` để cài một bản phát hành (khi đó Settings → Phiên bản cập nhật được).
-- **Trên máy Mac** (chip Apple) đang chạy OrbStack hoặc Docker Desktop: dùng cùng lệnh nhưng thay
-  `| sudo sh -s -- …` bằng `| sh -s -- …`, rồi mở http://localhost:3000/admin (trên Mac không có
-  Tường lửa và Reboot).
+- Trên Mac, panel chạy trong máy ảo của Docker: không có Tường lửa và Reboot.
 
 Các tuỳ chọn, cách nâng cấp, backup và macOS: [docs/install.md](docs/install.md).
 

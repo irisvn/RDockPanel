@@ -40,13 +40,19 @@ curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/inst
   | sudo sh -s -- --admin-email you@example.com
 ```
 
+On a Mac with Apple silicon, with [OrbStack](https://orbstack.dev) or Docker Desktop running (as
+yourself, **without `sudo`**), then open http://localhost:3000/admin:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/irisvn/rdockpanel/main/install/install.sh \
+  | sh -s -- --admin-email you@example.com
+```
+
 - Add `--domain panel.example.com --email you@example.com` for the panel on HTTPS (Let's Encrypt),
   and `--apps-domain apps.example.com` for generated app domains.
 - The panel keeps its data in MySQL 8.4 (the default) or SQLite (`--database mysql|sqlite`).
 - Add `--version X.Y.Z` to install a release (Settings → Version can then update it).
-- **On a Mac** (Apple silicon) with OrbStack or Docker Desktop running: the same command with
-  `| sh -s -- …` instead of `| sudo sh -s -- …`, then http://localhost:3000/admin (no Firewall or
-  Reboot there).
+- On a Mac, the panel runs in Docker's VM: no Firewall or Reboot there.
 
 Options, upgrades, backups and macOS: [docs/install.md](docs/install.md).
 
