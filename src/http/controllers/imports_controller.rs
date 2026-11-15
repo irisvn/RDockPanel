@@ -372,3 +372,120 @@ pub async fn destroy(
     txn.commit().await?;
     Ok(Json(json!({ "deleted": id })))
 }
+
+#[derive(Deserialize)]
+pub struct Start {
+    /// The project's name, typed to confirm.
+    confirm: String,
+}
+
+/// Starts the import: 202, the steps run in the background.
+pub async fn start(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+    Json(body): Json<Start>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    crate::services::import_service::start(&app, auth.principal(), request, id, &body.confirm)
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": id }))))
+}
+
+/// Asks to undo: the step that holds the import sees it and undoes at its
+/// next look; an import that waits is undone at once.
+pub async fn undo(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    crate::services::import_run_service::ask_undo(&app, auth.principal(), request, id).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": id }))))
+}
+
+macro_rules! action {
+    ($name:ident, $call:path, $what:expr) => {
+        pub async fn $name(
+            State(app): State<AppState>,
+            auth: Auth,
+            request: RequestMeta,
+            Path(id): Path<i64>,
+        ) -> AppResult<(StatusCode, Json<Value>)> {
+            $call(&app, auth.principal(), request, id, $what).await?;
+            Ok((StatusCode::ACCEPTED, Json(json!({ "id": id }))))
+        }
+    };
+}
+
+action!(retry, crate::services::import_run_service::resume, "retry");
+action!(
+    continue_on,
+    crate::services::import_run_service::resume,
+    "continue"
+);
+
+/// Takes the services as they are, when every one runs.
+pub async fn accept(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    crate::services::import_run_service::accept(&app, auth.principal(), request, id).await?;
+    Ok(Json(json!({ "id": id })))
+}
+
+/// Ends the import: the originals are removed.
+pub async fn finish(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    crate::services::import_run_service::finish(&app, auth.principal(), request, id).await?;
+    Ok(Json(json!({ "id": id })))
+}
+
+/// Stops the originals that run again.
+pub async fn stop_originals(
+    State(app): State<AppState>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    let stopped = crate::services::import_run_service::stop_originals(&app, id).await?;
+    Ok(Json(json!({ "stopped": stopped })))
+}
+
+pub async fn stop_watching(
+    State(app): State<AppState>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<Value>> {
+    crate::services::import_run_service::stop_watching(&app, id).await?;
+    Ok(Json(json!({ "id": id })))
+}
+
+#[derive(Deserialize, Default)]
+pub struct Release {
+    /// Remove the original volume too.
+    #[serde(default)]
+    remove: bool,
+}
+
+pub async fn release_volume(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path((id, volume)): Path<(i64, i64)>,
+    Json(body): Json<Release>,
+) -> AppResult<Json<Value>> {
+    crate::services::import_run_service::release_volume(
+        &app,
+        auth.principal(),
+        request,
+        id,
+        volume,
+        body.remove,
+    )
+    .await?;
+    Ok(Json(json!({ "released": volume })))
+}

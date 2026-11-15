@@ -55,11 +55,37 @@ pub async fn app_with_docker(db: TestDb, docker: fake_docker::FakeDocker) -> Tes
     app_with(db, docker, scratch_traefik()).await
 }
 
+/// The application with a real Docker and the import's settings.
+pub async fn app_with_import(
+    db: TestDb,
+    docker: rdockpanel::services::docker_service::BollardDocker,
+    settings: rdockpanel::services::import_service::ImportSettings,
+) -> TestApp {
+    use rdockpanel::services::docker_service::Docker;
+    TestApp::new(
+        move |config| {
+            let mut app = bootstrap::build(config);
+            app.bind(Docker::new(docker));
+            app.bind(scratch_traefik());
+            app.bind(settings);
+            app
+        },
+        db,
+    )
+    .await
+}
+
 /// [`app_with_docker`] with the image of the import's helper containers.
 pub async fn app_with_helper(db: TestDb, docker: fake_docker::FakeDocker, helper: &str) -> TestApp {
     use rdockpanel::services::docker_service::Docker;
-    use rdockpanel::services::import_service::HelperImage;
-    let helper = HelperImage(Some(helper.to_owned()));
+    use rdockpanel::services::import_service::ImportSettings;
+    let helper = ImportSettings {
+        helper_image: Some(helper.to_owned()),
+        observe: std::time::Duration::ZERO,
+        deadline: std::time::Duration::from_millis(200),
+        poll: std::time::Duration::from_millis(10),
+        links_dir: None,
+    };
     TestApp::new(
         move |config| {
             let mut app = bootstrap::build(config);
@@ -164,6 +190,9 @@ fn sweep_dead_runs() {
                 format!("r{pid}b"),
                 format!("r{pid}sa"),
                 format!("r{pid}sb"),
+                // The import's real Swarm test (project `i<pid>`).
+                format!("i{pid}"),
+                format!("i{pid}s"),
             ]
             .iter()
             .any(|p| {

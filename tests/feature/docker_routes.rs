@@ -207,6 +207,33 @@ db_test!(
                 Case::new(Method::PATCH, "/imports/999/plan")
                     .expect("operator", &operator, StatusCode::FORBIDDEN)
                     .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/imports/999/start")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::UNPROCESSABLE_ENTITY),
+                Case::new(Method::POST, "/imports/999/undo")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/imports/999/retry")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/imports/999/continue")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/imports/999/accept")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/imports/999/finish")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/imports/999/stop-originals")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
+                Case::new(Method::POST, "/imports/999/stop-watching")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
+                Case::new(Method::POST, "/imports/999/volumes/1/release")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
                 Case::new(Method::POST, "/imports/999/rescan")
                     .expect("operator", &operator, StatusCode::FORBIDDEN)
                     .expect("manager", &manager, StatusCode::NOT_FOUND),

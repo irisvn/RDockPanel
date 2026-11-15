@@ -16,7 +16,7 @@ impl ServiceProvider for AppServiceProvider {
                 .unwrap_or_default(),
         );
         app.bind(crate::services::docker_service::Docker::from_env());
-        app.bind(crate::services::import_service::HelperImage::from_config());
+        app.bind(crate::services::import_service::ImportSettings::from_config());
         app.bind(crate::services::template_service::Templates::new(
             crate::services::deploy_rules_service::config()
                 .templates_url
@@ -74,6 +74,15 @@ impl ServiceProvider for AppServiceProvider {
         app.job::<crate::jobs::publish_routes::PublishRoutes>();
         app.job::<crate::jobs::run_backup::RunBackup>();
         app.job::<crate::jobs::import_discover::ImportDiscover>();
+        app.job::<crate::jobs::import_step::ImportStep>();
+        // Imports whose step lost its lease, and originals that run again.
+        app.schedule(
+            rustcms::schedule::Schedule::every("import-tick", std::time::Duration::from_secs(60))
+                .task(|ctx| async move {
+                    let n = crate::services::import_run_service::tick(&ctx.state).await?;
+                    Ok((n > 0).then(|| format!("{n} import steps queued")))
+                }),
+        );
         // Backups whose cron fired: queued (each configuration's own
         // schedule; the slot claimed in the database).
         app.schedule(

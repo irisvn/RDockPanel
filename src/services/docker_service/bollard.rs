@@ -1379,6 +1379,17 @@ end HUP; sleep 2; end KILL; true"#
         read
     }
 
+    async fn tag_image(&self, id: &str, repo: &str, tag: &str) -> DockerResult<()> {
+        let options = ::bollard::query_parameters::TagImageOptionsBuilder::new()
+            .repo(repo)
+            .tag(tag)
+            .build();
+        self.client
+            .tag_image(id, Some(options))
+            .await
+            .map_err(map_err)
+    }
+
     async fn update_container_restart(&self, id: &str, policy: &str) -> DockerResult<()> {
         use ::bollard::models::{ContainerUpdateBody, RestartPolicy, RestartPolicyNameEnum};
         let name = match policy {

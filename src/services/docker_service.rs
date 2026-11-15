@@ -550,6 +550,12 @@ pub trait DockerApi: Send + Sync {
         let _ = (image, host_path, max);
         Err(unsupported("reading a host file"))
     }
+    /// Gives the image `id` the name `repo:tag` (a second name: nothing is
+    /// copied).
+    async fn tag_image(&self, id: &str, repo: &str, tag: &str) -> DockerResult<()> {
+        let _ = (id, repo, tag);
+        Err(unsupported("tagging an image"))
+    }
     /// Changes a container's restart policy (`no`, `always`, …).
     async fn update_container_restart(&self, id: &str, policy: &str) -> DockerResult<()> {
         let _ = (id, policy);

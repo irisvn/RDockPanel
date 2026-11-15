@@ -75,6 +75,18 @@ pub struct Detail {
     pub image_user: String,
     pub entrypoint: Vec<String>,
     pub image_entrypoint: Vec<String>,
+    /// `Config.Cmd` and the image's own.
+    pub cmd: Vec<String>,
+    pub image_cmd: Vec<String>,
+    /// `Config.Healthcheck`: `Test`, interval (ns) and retries.
+    pub health_test: Vec<String>,
+    pub health_interval_ns: i64,
+    pub health_retries: i64,
+    /// `HostConfig.Memory` (bytes, 0: none).
+    pub memory: i64,
+    /// The image the container runs (`sha256:…`) and its `RepoDigests`.
+    pub image_id: String,
+    pub repo_digests: Vec<String>,
     /// The image's own environment (a pair equal to one here is left out).
     pub image_env: Vec<(String, String)>,
     pub ports: Vec<Port>,
@@ -142,6 +154,18 @@ impl Detail {
                 .to_owned(),
             entrypoint: strings(&doc["Config"]["Entrypoint"]),
             image_entrypoint: strings(&image_doc["Config"]["Entrypoint"]),
+            cmd: strings(&doc["Config"]["Cmd"]),
+            image_cmd: strings(&image_doc["Config"]["Cmd"]),
+            health_test: strings(&doc["Config"]["Healthcheck"]["Test"]),
+            health_interval_ns: doc["Config"]["Healthcheck"]["Interval"]
+                .as_i64()
+                .unwrap_or(0),
+            health_retries: doc["Config"]["Healthcheck"]["Retries"]
+                .as_i64()
+                .unwrap_or(0),
+            memory: doc["HostConfig"]["Memory"].as_i64().unwrap_or(0),
+            image_id: doc["Image"].as_str().unwrap_or_default().to_owned(),
+            repo_digests: strings(&image_doc["RepoDigests"]),
             image_env,
             ports,
             size_rw: doc["SizeRw"].as_i64(),
@@ -246,6 +270,25 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
                 None,
             ));
         }
+    }
+    // A secret in the command line moves to the environment: the panel does
+    // not rewrite a command yet, so it is the admin's to do.
+    let known: Vec<String> = m
+        .env
+        .iter()
+        .filter(|(name, value)| {
+            crate::services::secret_scan_service::secret_name(name) && !value.is_empty()
+        })
+        .map(|(_, value)| value.clone())
+        .collect();
+    if crate::services::secret_scan_service::redact_args(&detail.cmd, &known) != detail.cmd {
+        out.push(finding(
+            "argv_secret",
+            Level::Block,
+            "command",
+            "its command line holds a secret",
+            Some("Make it read the secret from an environment variable, then read again."),
+        ));
     }
     if detail.user != detail.image_user {
         out.push(finding(
@@ -444,6 +487,21 @@ pub fn plan_of(
                     &edge.signal,
                     "it is tied to another container by its network mode or an address in its settings",
                     None,
+                ));
+            }
+            // A volume of the panel belongs to one service: two members sharing
+            // one would each get a copy, and stop sharing without a word.
+            if closure
+                .edges
+                .iter()
+                .any(|e| e.kind == "volume" && (e.from == *id || e.to == *id))
+            {
+                found.push(finding(
+                    "shared_volume",
+                    Level::Block,
+                    "volume",
+                    "it shares a volume with another container: in the panel a volume belongs to one service",
+                    Some("Give each its own volume, or run them as one service."),
                 ));
             }
             let mut env_names: Vec<String> = m
@@ -685,6 +743,29 @@ mod tests {
     }
 
     #[test]
+    fn a_secret_in_the_command_line_blocks_until_it_is_in_the_environment() {
+        let panel = PanelFacts::default();
+        let mut d = detail("a", "cache");
+        d.member.command = vec!["valkey-server --requirepass s3cr3t-value".to_owned()];
+        d.cmd = vec![
+            "valkey-server".to_owned(),
+            "--requirepass".to_owned(),
+            "s3cr3t-value".to_owned(),
+        ];
+        let found = findings(&d, &panel);
+        let f = found.iter().find(|f| f.code == "argv_secret").unwrap();
+        assert_eq!(f.level, Level::Block);
+        assert!(!format!("{found:?}").contains("s3cr3t-value"));
+        // A command without one is left alone.
+        d.cmd = vec![
+            "valkey-server".to_owned(),
+            "--port".to_owned(),
+            "6379".to_owned(),
+        ];
+        assert!(!codes(&findings(&d, &panel)).contains(&"argv_secret"));
+    }
+
+    #[test]
     fn env_limits_are_the_panels() {
         let panel = PanelFacts::default();
         let mut d = detail("a", "web");
@@ -730,14 +811,15 @@ mod tests {
     fn a_blocked_member_blocks_the_group_it_shares_data_with() {
         let mut web = detail("web1", "web");
         let mut db = detail("db1", "db");
+        // A shared folder: it ties them (a volume is blocked on its own).
         let m = |source: &str| crate::services::import_graph_service::Mount {
-            kind: "volume".to_owned(),
+            kind: "bind".to_owned(),
             source: source.to_owned(),
             destination: "/data".to_owned(),
             writable: true,
         };
-        web.member.mounts = vec![m("shared")];
-        db.member.mounts = vec![m("shared")];
+        web.member.mounts = vec![m("/srv/shared")];
+        db.member.mounts = vec![m("/srv/shared")];
         db.privileged = true;
         let mut free = detail("free1", "free");
         free.member.networks[0].network = "other".to_owned();
@@ -762,6 +844,39 @@ mod tests {
         assert_eq!(by("web1").hard_group, by("db1").hard_group);
         assert!(plan.blocked());
         assert!(!plan.items.iter().any(|i| i.container_id == "free1"));
+    }
+
+    #[test]
+    fn two_services_cannot_share_a_volume_in_the_panel() {
+        let m = |source: &str| crate::services::import_graph_service::Mount {
+            kind: "volume".to_owned(),
+            source: source.to_owned(),
+            destination: "/data".to_owned(),
+            writable: true,
+        };
+        let mut web = detail("web1", "web");
+        let mut worker = detail("work1", "worker");
+        web.member.mounts = vec![m("shared")];
+        worker.member.mounts = vec![m("shared")];
+        let members = [web.member.clone(), worker.member.clone()];
+        let c = closure(&members, &["web1".to_owned()]);
+        let plan = plan_of(
+            &[web, worker],
+            &c,
+            "web1",
+            "p",
+            &PanelFacts::default(),
+            "fp",
+        );
+        for item in &plan.items {
+            assert_eq!(item.choice, Choice::Blocked, "{}", item.name);
+            let f = item
+                .findings
+                .iter()
+                .find(|f| f.code == "shared_volume")
+                .unwrap();
+            assert_eq!(f.level, Level::Block);
+        }
     }
 
     #[test]

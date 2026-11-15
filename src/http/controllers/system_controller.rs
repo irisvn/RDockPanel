@@ -245,6 +245,9 @@ pub async fn prune(
     Path(kind): Path<String>,
 ) -> AppResult<Json<Value>> {
     let kind: PruneKind = serde_json::from_value(json!(kind)).map_err(|_| AppError::NotFound)?;
+    if kind == PruneKind::Containers {
+        crate::services::import_service::guard_prune_containers(app.db()).await?;
+    }
     let docker = docker(&app)?;
     let by = Initiator::user(auth.principal(), request);
     let name = serde_json::to_value(kind)

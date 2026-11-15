@@ -63,8 +63,21 @@ pub struct NewComposeGit {
 
 #[derive(Debug, Clone)]
 pub enum NewMount {
-    Volume { name: String, target: String },
-    File { content: String, target: String },
+    Volume {
+        name: String,
+        target: String,
+    },
+    File {
+        content: String,
+        target: String,
+    },
+    /// A host folder an import uses where it is: `source` is the symlink the
+    /// panel made to it, `link_target` the folder.
+    Link {
+        source: String,
+        link_target: String,
+        target: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -424,7 +437,9 @@ pub async fn create(
     let mut targets = std::collections::BTreeSet::new();
     for mount in &mounts {
         let target = match mount {
-            NewMount::Volume { target, .. } | NewMount::File { target, .. } => target,
+            NewMount::Volume { target, .. }
+            | NewMount::File { target, .. }
+            | NewMount::Link { target, .. } => target,
         };
         if !targets.insert(target.clone()) {
             errors.add("mounts", format!("{target} is mounted twice"));
@@ -434,6 +449,7 @@ pub async fn create(
         let (target, ok) = match mount {
             NewMount::Volume { name, target } => (target, valid_volume_name(name)),
             NewMount::File { content, target } => (target, sealable(content)),
+            NewMount::Link { source, target, .. } => (target, source.starts_with('/')),
         };
         if !ok || !valid_container_path(target) {
             errors.add("mounts", format!("{target} is not a valid mount"));
@@ -444,7 +460,7 @@ pub async fn create(
         .iter()
         .filter_map(|m| match m {
             NewMount::File { content, target } => Some((target.as_str(), content.as_str())),
-            NewMount::Volume { .. } => None,
+            NewMount::Volume { .. } | NewMount::Link { .. } => None,
         })
         .collect();
     if !sealable(&files) {
@@ -646,15 +662,32 @@ pub async fn create(
         .await?;
     }
     for mount in &mounts {
-        let (kind, name, content, target) = match mount {
-            NewMount::Volume { name, target } => ("volume", Some(name.clone()), None, target),
-            NewMount::File { content, target } => ("file", None, Some(content.clone()), target),
+        let (kind, name, content, target, source, link_target) = match mount {
+            NewMount::Volume { name, target } => {
+                ("volume", Some(name.clone()), None, target, None, None)
+            }
+            NewMount::File { content, target } => {
+                ("file", None, Some(content.clone()), target, None, None)
+            }
+            NewMount::Link {
+                source,
+                link_target,
+                target,
+            } => (
+                "link",
+                None,
+                None,
+                target,
+                Some(source.clone()),
+                Some(link_target.clone()),
+            ),
         };
         service_mount::ActiveModel {
             service_id: Set(row.id),
             kind: Set(kind.to_owned()),
             name: Set(name),
-            source: Set(None),
+            source: Set(source),
+            link_target: Set(link_target),
             target: Set(target.clone()),
             read_only: Set(kind == "file"),
             sealed_content: Set(content

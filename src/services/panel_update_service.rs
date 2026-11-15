@@ -232,6 +232,7 @@ pub async fn start(
         if gate.is_some_and(|g| gate_until(&g.value).is_some()) || running(&txn).await?.is_some() {
             return Err(busy_updating());
         }
+        crate::services::import_service::refuse_updating_while_importing(&txn).await?;
         // A restart or a reboot running: it would cut the update (one older
         // than a quarter of an hour did not happen: a failed reboot command;
         // its helper runs `sleep 3; systemctl reboot` and ends at once — one

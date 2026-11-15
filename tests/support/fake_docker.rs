@@ -73,6 +73,10 @@ pub struct FakeDocker {
     /// The helpers run, and the exit code the next ones return.
     pub helpers: Arc<Mutex<Vec<HelperSpec>>>,
     pub helper_exit: Arc<Mutex<i64>>,
+    /// The exit code a stopped container reports (0 by default).
+    pub stop_exit: Arc<Mutex<i64>>,
+    /// Containers a helper's run starts (what `compose up` does meanwhile).
+    pub started_by_helper: Arc<Mutex<Vec<String>>>,
 }
 
 pub fn labels(system: bool) -> HashMap<String, String> {
@@ -214,11 +218,43 @@ impl DockerApi for FakeDocker {
         )
     }
     async fn container_action(&self, id: &str, action: ContainerAction) -> DockerResult<()> {
-        self.by_id(id)?;
+        let c = self.by_id(id)?;
         self.record(format!(
             "{} {id}",
             serde_json::to_value(action).unwrap().as_str().unwrap()
         ));
+        // What an inspect (and the list) then say.
+        let state = match action {
+            ContainerAction::Start | ContainerAction::Restart => Some(("running", 0)),
+            ContainerAction::Stop | ContainerAction::Kill => {
+                Some(("exited", *self.stop_exit.lock().unwrap()))
+            }
+            _ => None,
+        };
+        if let Some((status, code)) = state {
+            if let Some(doc) = self.inspected.lock().unwrap().get_mut(&c.name) {
+                doc["State"] =
+                    json!({"Status": status, "Running": status == "running", "ExitCode": code});
+            }
+            if let Some(item) = self
+                .containers
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|i| i.id == c.id)
+            {
+                item.state = status.to_owned();
+            }
+            for listed in self
+                .detailed
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .filter(|d| d["Id"] == c.id)
+            {
+                listed["State"] = json!(status);
+            }
+        }
         Ok(())
     }
     async fn remove_container(&self, id: &str, _force: bool) -> DockerResult<()> {
@@ -337,8 +373,24 @@ impl DockerApi for FakeDocker {
     }
     async fn run_helper(&self, spec: HelperSpec) -> DockerResult<i64> {
         self.record(format!("helper {}", spec.name));
+        let starting = self.started_by_helper.lock().unwrap().clone();
+        for id in starting {
+            self.container_action(&id, ContainerAction::Start).await?;
+        }
         self.helpers.lock().unwrap().push(spec);
         Ok(*self.helper_exit.lock().unwrap())
+    }
+    async fn tag_image(&self, id: &str, repo: &str, tag: &str) -> DockerResult<()> {
+        self.record(format!("tag {id} {repo}:{tag}"));
+        self.images.lock().unwrap().push(ImageItem {
+            id: id.to_owned(),
+            tags: vec![format!("{repo}:{tag}")],
+            size: 1,
+            created: 0,
+            containers: 0,
+            labels: HashMap::new(),
+        });
+        Ok(())
     }
     async fn update_container_restart(&self, id: &str, policy: &str) -> DockerResult<()> {
         self.record(format!("restart-policy {id} {policy}"));

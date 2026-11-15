@@ -390,7 +390,7 @@ impl Snapshot {
             .iter()
             .filter_map(|m| {
                 let source = match m.kind.as_str() {
-                    "bind" => m.source.clone()?,
+                    "bind" | "link" => m.source.clone()?,
                     "file" => String::new(),
                     _ => m.name.clone()?,
                 };
@@ -913,7 +913,8 @@ fn limits(cpu_millis: Option<u32>, mem_mb: Option<u32>) -> Value {
 
 fn mount(snapshot: &Snapshot, mount: &Mount) -> Value {
     match mount.kind.as_str() {
-        "bind" => {
+        // A `link` is the symlink an import made, bound like a folder.
+        "bind" | "link" => {
             json!({"Type": "bind", "Source": mount.source, "Target": mount.target, "ReadOnly": mount.read_only})
         }
         _ => json!({
@@ -1756,6 +1757,29 @@ mod tests {
             internal_url: String::new(),
             tunnel: false,
         }
+    }
+
+    #[test]
+    fn a_link_mount_is_a_bind_of_its_symlink_and_older_panels_refuse_it() {
+        let mut snapshot = snapshot();
+        let link = Mount {
+            target: "/data".to_owned(),
+            kind: "link".to_owned(),
+            source: "/Users/me/.rdockpanel/links/p_web/data".to_owned(),
+            read_only: false,
+            content_digest: None,
+        };
+        snapshot.mounts = vec![link];
+        let out = desired(&snapshot, &pinned(), &Runtime::default(), &production());
+        let text = canonical(&out.spec);
+        assert!(text.contains("\"Type\": \"bind\""), "{text}");
+        assert!(
+            text.contains("/Users/me/.rdockpanel/links/p_web/data"),
+            "{text}"
+        );
+        // A volume of that name would hold `/`: Docker refuses it (what an
+        // older panel, which reads an unknown kind as a volume, would send).
+        assert!(volume_name("p", "web", "/Users/me/x").contains('/'));
     }
 
     #[test]

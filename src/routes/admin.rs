@@ -504,6 +504,51 @@ pub fn routes() -> AdminRoutes {
             imports::change_plan,
         )
         .post(
+            "/imports/{id}/start",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::start,
+        )
+        .post(
+            "/imports/{id}/undo",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::undo,
+        )
+        .post(
+            "/imports/{id}/retry",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::retry,
+        )
+        .post(
+            "/imports/{id}/continue",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::continue_on,
+        )
+        .post(
+            "/imports/{id}/accept",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::accept,
+        )
+        .post(
+            "/imports/{id}/finish",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::finish,
+        )
+        .post(
+            "/imports/{id}/stop-originals",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::stop_originals,
+        )
+        .post(
+            "/imports/{id}/stop-watching",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::stop_watching,
+        )
+        .post(
+            "/imports/{id}/volumes/{vid}/release",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::release_volume,
+        )
+        .post(
             "/imports/{id}/rescan",
             AdminAccess::can(permissions::SYSTEM_MANAGE),
             imports::rescan,

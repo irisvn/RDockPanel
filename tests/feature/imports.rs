@@ -36,7 +36,8 @@ db_test!(
 const SECRET: &str = "hunter2-do-not-leak";
 
 /// A Compose project `shop`: `web` (a secret in its env and command) and
-/// `db`, sharing the volume `shared`; and `tika`, alone in another project.
+/// `db`, each with a volume of its own and `web` calling `db` by name; and
+/// `tika`, alone in another project.
 fn shop(fake: &FakeDocker) {
     let container = |name: &str, service: &str, project: &str, env: Value, volume: bool| {
         let id = format!("id-{service}");
@@ -60,7 +61,7 @@ fn shop(fake: &FakeDocker) {
                 "State": "running", "Labels": labels}),
         );
         let mounts = if volume {
-            json!([{"Type": "volume", "Name": "shared", "Destination": "/data", "RW": true}])
+            json!([{"Type": "volume", "Name": format!("{service}data"), "Destination": "/data", "RW": true}])
         } else {
             json!([])
         };
@@ -70,7 +71,7 @@ fn shop(fake: &FakeDocker) {
                 "Id": id, "Name": format!("/{name}"), "Image": format!("sha256:{service}"),
                 "State": {"Status": "running"},
                 "Config": {"Image": format!("{service}:1"), "Env": env, "Labels": labels,
-                    "Cmd": ["serve", "--requirepass", SECRET]},
+                    "Cmd": ["serve", "--port", "80"]},
                 "HostConfig": {"RestartPolicy": {"Name": "always"}, "NetworkMode": "default"},
                 "Mounts": mounts,
                 "NetworkSettings": {"Ports": {}, "Networks": {
@@ -157,16 +158,33 @@ db_test!(
         };
         assert!(!plan_row.0.unwrap().contains(SECRET));
 
-        // They share writable data: neither can be left behind.
+        // `web` calls `db` by name: leaving `db` behind breaks that call, said
+        // and confirmed.
         let url = app.admin_api(&format!("x/imports/{id}/plan"));
         admin
             .send(
                 Method::PATCH,
                 &url,
-                Some(&json!({"choices": {"id-web": "leave"}})),
+                Some(&json!({"choices": {"id-db": "leave"}})),
             )
             .await
-            .assert_validation_error("choices");
+            .assert_validation_error("confirm");
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"choices": {"id-db": "leave"}, "confirm": true})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"choices": {"id-db": "bring"}})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
         // The project's name: valid ones only.
         admin
             .send(
@@ -319,5 +337,1054 @@ db_test!(
         let info = &read["plan"]["compose"][0];
         assert_eq!(info["files"][0]["read"], false);
         assert!(info["notes"][0].as_str().unwrap().contains("may read"));
+    }
+);
+
+/// An import in `state` that owns `service` (its item).
+async fn import_owning(app: &TestApp, service: Option<i64>, state: &str) -> i64 {
+    use rdockpanel::models::{container_import, container_import_item};
+    use sea_orm::{ActiveModelTrait, Set};
+    let now = chrono::Utc::now();
+    let row = container_import::ActiveModel {
+        project_name: Set("shop".to_owned()),
+        source_kind: Set("project".to_owned()),
+        source_ref: Set("shop".to_owned()),
+        state: Set(state.to_owned()),
+        auto_undo: Set(true),
+        undo_requested: Set(false),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    }
+    .insert(app.state().db())
+    .await
+    .unwrap();
+    container_import_item::ActiveModel {
+        import_id: Set(row.id),
+        service_id: Set(service),
+        container_id: Set("id-web".to_owned()),
+        container_name: Set("web".to_owned()),
+        level: Set(0),
+        choice: Set("bring".to_owned()),
+        was_running: Set(true),
+        state: Set("pending".to_owned()),
+        ..Default::default()
+    }
+    .insert(app.state().db())
+    .await
+    .unwrap();
+    row.id
+}
+
+async fn set_state(app: &TestApp, import: i64, state: &str) {
+    use rdockpanel::models::container_import;
+    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
+    let mut row = container_import::Entity::find_by_id(import)
+        .one(app.state().db())
+        .await
+        .unwrap()
+        .unwrap()
+        .into_active_model();
+    row.state = Set(state.to_owned());
+    row.update(app.state().db()).await.unwrap();
+}
+
+db_test!(
+    nothing_touches_a_service_while_its_import_runs,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use crate::deployments::{action, create};
+        use rdockpanel::services::{import_service, panel_update_service};
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let project = create(&app, &admin, "projects", json!({"name": "shop"})).await;
+        let service = create(
+            &app,
+            &admin,
+            "services",
+            json!({"project_id": project, "name": "web", "image": "nginx:1.27", "replicas": 1}),
+        )
+        .await;
+        let id: i64 = service.parse().unwrap();
+        let import = import_owning(&app, Some(id), "copying").await;
+        let db = app.state().db();
+
+        // Every trigger is refused while it runs (and while it needs the admin).
+        for state in ["queued", "deploying", "undoing", "needs_attention"] {
+            set_state(&app, import, state).await;
+            let refused = action(&app, &admin, "services", "deploy", &service).await;
+            assert_eq!(
+                refused.status,
+                StatusCode::CONFLICT,
+                "{state}: {}",
+                refused.text()
+            );
+            assert_eq!(refused.json()["code"], "import_in_progress");
+            // The panel does not update under a running import (waiting for the
+            // admin is not running).
+            assert_eq!(
+                import_service::refuse_updating_while_importing(db)
+                    .await
+                    .is_err(),
+                state != "needs_attention",
+                "{state}"
+            );
+        }
+        // Not while it only waits for the admin to start or when it is over.
+        for state in ["planned", "active", "finished", "reverted"] {
+            set_state(&app, import, state).await;
+            assert!(
+                import_service::refuse_updating_while_importing(db)
+                    .await
+                    .is_ok(),
+                "{state}"
+            );
+        }
+        set_state(&app, import, "active").await;
+        action(&app, &admin, "services", "deploy", &service)
+            .await
+            .assert_status(StatusCode::OK);
+        // The update's gate is the same one.
+        let _ = panel_update_service::KIND;
+    }
+);
+
+db_test!(
+    the_originals_of_an_import_are_not_touched_through_docker,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::container_import_volume;
+        use sea_orm::{ActiveModelTrait, Set};
+        let fake = FakeDocker::with_app_and_panel();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        // An import that holds `web` (id-web) and its volume `web-data`.
+        let import = import_owning(&app, None, "active").await;
+        container_import_volume::ActiveModel {
+            import_id: Set(Some(import)),
+            original_name: Set("web-data".to_owned()),
+            mode: Set("copy".to_owned()),
+            panel_volume: Set(Some("rdp_shop_web_data".to_owned())),
+            ..Default::default()
+        }
+        .insert(app.state().db())
+        .await
+        .unwrap();
+        let refused = |what: &str, response: rustcms_testing::TestResponse| {
+            assert_eq!(
+                response.status,
+                StatusCode::CONFLICT,
+                "{what}: {}",
+                response.text()
+            );
+            assert_eq!(response.json()["code"], "import_in_progress", "{what}");
+        };
+        let api = |path: &str| app.admin_api(&format!("x/docker/{path}"));
+        refused(
+            "stop",
+            admin
+                .post_json(&api("containers/web/stop"), &json!({}))
+                .await,
+        );
+        refused(
+            "start",
+            admin
+                .post_json(&api("containers/id-web/start"), &json!({}))
+                .await,
+        );
+        refused(
+            "remove",
+            admin
+                .send(Method::DELETE, &api("containers/web"), None)
+                .await,
+        );
+        refused(
+            "volume",
+            admin
+                .send(Method::DELETE, &api("volumes/web-data"), None)
+                .await,
+        );
+        refused("prune", admin.post_json(&api("prune"), &json!({})).await);
+        refused(
+            "prune containers",
+            admin
+                .post_json(&app.admin_api("x/apps/system/prune/containers"), &json!({}))
+                .await,
+        );
+        assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+        // Over (reverted): the original is the user's again.
+        set_state(&app, import, "reverted").await;
+        admin
+            .post_json(&api("containers/web/stop"), &json!({}))
+            .await
+            .assert_status(StatusCode::OK);
+    }
+);
+
+/// `shop` of [`shop`], with the volume `shared` known to the fake and web's own
+/// data volume; read into a plan for `import`, ready to start.
+async fn planned_shop(app: &TestApp, admin: &TestClient<'_>) -> i64 {
+    let made = admin
+        .post_json(
+            &app.admin_api("x/imports"),
+            &json!({"source_kind": "project", "source_ref": "shop"}),
+        )
+        .await;
+    made.assert_status(StatusCode::ACCEPTED);
+    let id = made.json()["id"].as_i64().unwrap();
+    assert_eq!(wait_planned(app, admin, id).await["state"], "planned");
+    id
+}
+
+db_test!(
+    starting_an_import_makes_the_project_the_services_and_their_claims,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::{
+            container_import, container_import_claim, container_import_item,
+            container_import_volume, project, service,
+        };
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let fake = FakeDocker::default();
+        shop(&fake);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let id = planned_shop(&app, &admin).await;
+        let start = app.admin_api(&format!("x/imports/{id}/start"));
+
+        // The project's name is typed to confirm.
+        admin
+            .post_json(&start, &json!({"confirm": "nope"}))
+            .await
+            .assert_validation_error("confirm");
+        let started = admin.post_json(&start, &json!({"confirm": "shop"})).await;
+        started.assert_status(StatusCode::ACCEPTED);
+
+        let db = app.state().db();
+        let row = container_import::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.state, "queued");
+        let projects = project::Entity::find().all(db).await.unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "shop");
+        let mut names: Vec<String> = service::Entity::find()
+            .all(db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        names.sort();
+        assert_eq!(names, ["db", "web"]);
+        // Env values went into the service's sealed environment, not a plan.
+        let web = service::Entity::find()
+            .filter(service::Column::Name.eq("web"))
+            .one(db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(web.env.is_some());
+        let items = container_import_item::Entity::find().all(db).await.unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(
+            items
+                .iter()
+                .all(|i| i.service_id.is_some() && i.state == "pending")
+        );
+        let claims = container_import_claim::Entity::find()
+            .all(db)
+            .await
+            .unwrap();
+        assert!(
+            claims
+                .iter()
+                .any(|c| c.container_id.as_deref() == Some("id-web"))
+        );
+        assert!(
+            claims
+                .iter()
+                .any(|c| c.volume.as_deref() == Some("webdata"))
+        );
+        let mut volumes = container_import_volume::Entity::find()
+            .all(db)
+            .await
+            .unwrap();
+        volumes.sort_by_key(|v| v.original_name.clone());
+        assert_eq!(volumes.len(), 2);
+        assert_eq!(volumes[0].original_name, "dbdata");
+        assert_eq!(
+            volumes[1].panel_volume.as_deref(),
+            Some("rdp_shop_web_webdata")
+        );
+        assert_eq!(volumes[1].mode, "copy");
+        // Started once: the same plan again is refused.
+        let again = admin.post_json(&start, &json!({"confirm": "shop"})).await;
+        assert_eq!(again.status, StatusCode::CONFLICT, "{}", again.text());
+        // Another import of one of the containers loses the claim.
+        let second = admin
+            .post_json(
+                &app.admin_api("x/imports"),
+                &json!({"source_kind": "container", "source_ref": "shop-db-1"}),
+            )
+            .await
+            .json()["id"]
+            .as_i64()
+            .unwrap();
+        assert_eq!(wait_planned(&app, &admin, second).await["state"], "planned");
+        let lost = admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{second}/start")),
+                &json!({"confirm": "shop-db-1"}),
+            )
+            .await;
+        assert_eq!(lost.status, StatusCode::CONFLICT, "{}", lost.text());
+    }
+);
+
+async fn import_state(app: &TestApp, id: i64) -> String {
+    use rdockpanel::models::container_import;
+    use sea_orm::EntityTrait;
+    container_import::Entity::find_by_id(id)
+        .one(app.state().db())
+        .await
+        .unwrap()
+        .unwrap()
+        .state
+}
+
+db_test!(
+    an_import_runs_to_active_then_can_be_undone,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::{container_import_volume, project, service};
+        use sea_orm::EntityTrait;
+        let fake = FakeDocker::default();
+        shop(&fake);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let id = planned_shop(&app, &admin).await;
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/start")),
+                &json!({"confirm": "shop"}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        rustcms::queue::run_until_idle(app.state(), None, 100)
+            .await
+            .unwrap();
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+
+        // The originals were stopped (not restarting by themselves) …
+        let calls = fake.calls();
+        for call in [
+            "restart-policy id-web no",
+            "stop id-web",
+            "restart-policy id-db no",
+            "stop id-db",
+        ] {
+            assert!(calls.contains(&call.to_owned()), "{call}: {calls:?}");
+        }
+        // … their volumes copied by a helper into volumes of the panel's …
+        let volumes = container_import_volume::Entity::find()
+            .all(app.state().db())
+            .await
+            .unwrap();
+        assert!(volumes.iter().all(|v| v.copied_at.is_some()), "{volumes:?}");
+        assert_eq!(fake.helpers.lock().unwrap().len(), 2);
+        let panel_volumes: Vec<String> = fake
+            .volumes
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|v| v.name.clone())
+            .collect();
+        assert!(
+            panel_volumes.contains(&"rdp_shop_web_webdata".to_owned()),
+            "{panel_volumes:?}"
+        );
+        // … and the services run in Swarm, `db` before `web`.
+        let swarm: Vec<String> = fake.services.lock().unwrap().keys().cloned().collect();
+        assert!(swarm.contains(&"shop_web".to_owned()) && swarm.contains(&"shop_db".to_owned()));
+        let created: Vec<&String> = calls
+            .iter()
+            .filter(|c| c.starts_with("create shop_"))
+            .collect();
+        let _ = created;
+
+        // Undone: the services go, the originals run again as they did.
+        admin
+            .post_json(&app.admin_api(&format!("x/imports/{id}/undo")), &json!({}))
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        rustcms::queue::run_until_idle(app.state(), None, 100)
+            .await
+            .unwrap();
+        assert_eq!(
+            import_state(&app, id).await,
+            "reverted",
+            "{:?}",
+            fake.calls()
+        );
+        assert!(fake.services.lock().unwrap().is_empty());
+        let calls = fake.calls();
+        for call in [
+            "start id-web",
+            "start id-db",
+            "restart-policy id-web always",
+        ] {
+            assert!(calls.contains(&call.to_owned()), "{call}: {calls:?}");
+        }
+        let db = app.state().db();
+        assert!(service::Entity::find().all(db).await.unwrap().is_empty());
+        assert!(project::Entity::find().all(db).await.unwrap().is_empty());
+        // The copies are kept (they may hold what was written since).
+        assert!(
+            fake.volumes
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|v| v.name == "rdp_shop_web_webdata")
+        );
+    }
+);
+
+/// A started `shop` import on a fake Docker, not yet run.
+async fn started_shop(db: TestDb) -> (TestApp, FakeDocker, i64) {
+    let fake = FakeDocker::default();
+    shop(&fake);
+    let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+    let root = support::user_with(&app, "root", &[]).await;
+    app.make_super_admin(&root).await;
+    let admin = app.acting_as(&root).await;
+    let id = planned_shop(&app, &admin).await;
+    admin
+        .post_json(
+            &app.admin_api(&format!("x/imports/{id}/start")),
+            &json!({"confirm": "shop"}),
+        )
+        .await
+        .assert_status(StatusCode::ACCEPTED);
+    (app, fake, id)
+}
+
+/// A second super admin (the first one is the test's own).
+async fn ops(app: &TestApp) -> TestClient<'_> {
+    let user = support::user_with(app, "ops", &[]).await;
+    app.make_super_admin(&user).await;
+    app.acting_as(&user).await
+}
+
+async fn run_all(app: &TestApp) {
+    rustcms::queue::run_until_idle(app.state(), None, 200)
+        .await
+        .unwrap();
+}
+
+db_test!(
+    a_failed_copy_undoes_the_import_by_itself,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::{project, service};
+        use sea_orm::EntityTrait;
+        let (app, fake, id) = started_shop(db).await;
+        *fake.helper_exit.lock().unwrap() = 1;
+        run_all(&app).await;
+        let row_state = import_state(&app, id).await;
+        assert_eq!(row_state, "reverted", "{:?}", fake.calls());
+        // Nothing was deployed, the originals run as before, nothing is left.
+        assert!(fake.services.lock().unwrap().is_empty());
+        let calls = fake.calls();
+        assert!(calls.contains(&"start id-web".to_owned()), "{calls:?}");
+        assert!(calls.contains(&"start id-db".to_owned()), "{calls:?}");
+        let db = app.state().db();
+        assert!(service::Entity::find().all(db).await.unwrap().is_empty());
+        assert!(project::Entity::find().all(db).await.unwrap().is_empty());
+    }
+);
+
+async fn hold_lease(app: &TestApp, id: i64, until: chrono::DateTime<chrono::Utc>) {
+    use rdockpanel::models::container_import;
+    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
+    let mut row = container_import::Entity::find_by_id(id)
+        .one(app.state().db())
+        .await
+        .unwrap()
+        .unwrap()
+        .into_active_model();
+    row.lease_token = Set(Some("another".to_owned()));
+    row.lease_expires_at = Set(Some(until));
+    row.update(app.state().db()).await.unwrap();
+}
+
+db_test!(
+    a_lease_held_by_another_keeps_the_step_waiting_until_it_expires,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let (app, _fake, id) = started_shop(db).await;
+        hold_lease(&app, id, chrono::Utc::now() + chrono::Duration::minutes(5)).await;
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "queued");
+        // Expired (its holder died): the tick queues the step again and the
+        // import completes.
+        hold_lease(&app, id, chrono::Utc::now() - chrono::Duration::seconds(1)).await;
+        rdockpanel::services::import_run_service::tick(app.state())
+            .await
+            .unwrap();
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active");
+    }
+);
+
+db_test!(
+    a_forced_stop_waits_for_the_admin_who_can_go_on,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let (app, fake, id) = started_shop(db).await;
+        *fake.stop_exit.lock().unwrap() = 137;
+        run_all(&app).await;
+        // Stopped by force: the data may be inconsistent, the admin decides.
+        assert_eq!(
+            import_state(&app, id).await,
+            "needs_attention",
+            "{:?}",
+            fake.calls()
+        );
+        let admin = ops(&app).await;
+        let got = admin
+            .get(&app.admin_api(&format!("x/imports/{id}")))
+            .await
+            .json();
+        assert!(got["error"].as_str().unwrap().contains("137"), "{got}");
+        // Nothing touches its services meanwhile.
+        use crate::deployments::action;
+        // Go on: the rest runs and the import is active.
+        *fake.stop_exit.lock().unwrap() = 0;
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/continue")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        let _ = action;
+    }
+);
+
+db_test!(
+    a_finished_import_removes_the_originals_and_releases_its_volumes,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::container_import_volume;
+        use sea_orm::EntityTrait;
+        let (app, fake, id) = started_shop(db).await;
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active");
+        let admin = ops(&app).await;
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/finish")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(import_state(&app, id).await, "finished");
+        let calls = fake.calls();
+        assert!(calls.contains(&"remove id-web".to_owned()), "{calls:?}");
+        assert!(calls.contains(&"remove id-db".to_owned()), "{calls:?}");
+        // The original volumes stay until released (typing their name).
+        let volumes = container_import_volume::Entity::find()
+            .all(app.state().db())
+            .await
+            .unwrap();
+        let web = volumes
+            .iter()
+            .find(|v| v.original_name == "webdata")
+            .unwrap();
+        let removal = admin
+            .send(
+                Method::DELETE,
+                &app.admin_api("x/docker/volumes/webdata"),
+                None,
+            )
+            .await;
+        assert_eq!(removal.status, StatusCode::CONFLICT, "{}", removal.text());
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/volumes/{}/release", web.id)),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let freed = container_import_volume::Entity::find_by_id(web.id)
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(freed.released_at.is_some());
+    }
+);
+
+db_test!(
+    an_original_started_again_is_stopped_again,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::docker_service::ContainerAction;
+        use rdockpanel::services::docker_service::DockerApi;
+        let (app, fake, id) = started_shop(db).await;
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active");
+        let stops = |fake: &FakeDocker| fake.calls().iter().filter(|c| *c == "stop id-web").count();
+        assert_eq!(stops(&fake), 1);
+        // `docker compose up` (or a person) starts the original again.
+        fake.container_action("id-web", ContainerAction::Start)
+            .await
+            .unwrap();
+        rdockpanel::services::import_run_service::tick(app.state())
+            .await
+            .unwrap();
+        assert_eq!(stops(&fake), 2, "{:?}", fake.calls());
+        // Until the admin says to stop watching.
+        let admin = ops(&app).await;
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/stop-watching")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        fake.container_action("id-web", ContainerAction::Start)
+            .await
+            .unwrap();
+        rdockpanel::services::import_run_service::tick(app.state())
+            .await
+            .unwrap();
+        assert_eq!(stops(&fake), 2);
+    }
+);
+
+db_test!(
+    an_original_that_starts_while_copying_voids_the_copy,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let (app, fake, id) = started_shop(db).await;
+        fake.started_by_helper
+            .lock()
+            .unwrap()
+            .push("id-web".to_owned());
+        run_all(&app).await;
+        // The copy cannot be trusted: undone, the original runs, nothing deployed.
+        assert_eq!(
+            import_state(&app, id).await,
+            "reverted",
+            "{:?}",
+            fake.calls()
+        );
+        assert!(fake.services.lock().unwrap().is_empty());
+        let admin = ops(&app).await;
+        let got = admin
+            .get(&app.admin_api(&format!("x/imports/{id}")))
+            .await
+            .json();
+        assert!(got["error"].as_str().unwrap().contains("void"), "{got}");
+    }
+);
+
+db_test!(
+    a_volume_of_the_same_name_that_is_not_the_imports_is_never_written_over,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::docker_service::{DockerApi, VolumeItem};
+        let _ = std::marker::PhantomData::<VolumeItem>;
+        let fake = FakeDocker::default();
+        shop(&fake);
+        // Someone's volume, with the name the copy would take.
+        fake.create_volume("rdp_shop_web_webdata").await.unwrap();
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let id = planned_shop(&app, &admin).await;
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/start")),
+                &json!({"confirm": "shop"}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(
+            import_state(&app, id).await,
+            "reverted",
+            "{:?}",
+            fake.calls()
+        );
+        // Nothing was copied into it.
+        assert!(
+            fake.helpers
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|h| h.mounts.iter().all(|m| m.source != "rdp_shop_web_webdata"))
+        );
+        let got = admin
+            .get(&app.admin_api(&format!("x/imports/{id}")))
+            .await
+            .json();
+        assert!(
+            got["error"].as_str().unwrap().contains("not this import's"),
+            "{got}"
+        );
+    }
+);
+
+fn docker_cli(args: &[&str]) -> std::process::Output {
+    std::process::Command::new("docker")
+        .args(args)
+        .output()
+        .expect("docker")
+}
+
+fn cli_ok(args: &[&str]) -> String {
+    let out = docker_cli(args);
+    assert!(
+        out.status.success(),
+        "docker {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+// A real container with a volume and a folder, imported into a real Swarm
+// (`PANEL_TEST_DOCKER=1 PANEL_TEST_SWARM=1`, `scripts/dev-swarm.sh`): the
+// copy has the files, the folder is reached through the panel's symlink,
+// the Compose file is renamed; undone, all of it is back.
+db_test!(
+    an_import_on_a_real_swarm,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::docker_service::BollardDocker;
+        use rdockpanel::services::import_service::ImportSettings;
+        if std::env::var_os("PANEL_TEST_SWARM").is_none() {
+            return;
+        }
+        let _swarm = support::swarm_lock().await;
+        let tag = format!("i{}", support::run_id(&db));
+        // Outside the repository: a panel run from source never imports what
+        // runs its own files.
+        let base = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+            .join(format!(".rdp-import-test-{tag}"));
+        let (data, proj, links) = (base.join("data"), base.join("proj"), base.join("links"));
+        let text = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        let original = format!("{tag}-web");
+        let volume = format!("{tag}vol");
+        let copy = format!("rdp_{tag}_web_{volume}");
+        // Also when an assertion fails: the Drop below runs it.
+        struct Clean<F: Fn()>(F);
+        impl<F: Fn()> Drop for Clean<F> {
+            fn drop(&mut self) {
+                (self.0)();
+            }
+        }
+        let network = format!("rdp_{tag}");
+        let cleanup = || {
+            let _ = docker_cli(&["rm", "-f", &original]);
+            let _ = docker_cli(&["service", "rm", &format!("{tag}_web")]);
+            // Once the tasks' containers are gone.
+            for _ in 0..30 {
+                let volumes = docker_cli(&["volume", "rm", &volume, &copy]);
+                let net = docker_cli(&["network", "rm", &network]);
+                let gone = |o: &std::process::Output| {
+                    o.status.success() || String::from_utf8_lossy(&o.stderr).contains("No such")
+                };
+                if (gone(&volumes)
+                    || String::from_utf8_lossy(&volumes.stderr)
+                        .matches("No such")
+                        .count()
+                        == 2)
+                    && gone(&net)
+                {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            // Made by helpers, as root: removed by one.
+            if base.exists() {
+                let _ = docker_cli(&[
+                    "run",
+                    "--rm",
+                    "-v",
+                    &format!("{}:/b", text(&base)),
+                    "alpine:3",
+                    "rm",
+                    "-rf",
+                    "/b/links",
+                ]);
+                let _ = std::fs::remove_dir_all(&base);
+            }
+        };
+        cleanup();
+        let _clean = Clean(&cleanup);
+        for dir in [&data, &proj, &links] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(data.join("x"), "bind").unwrap();
+        let compose = "services:\n  web:\n    image: ghcr.io/traefik/whoami\n";
+        std::fs::write(proj.join("docker-compose.yml"), compose).unwrap();
+        cli_ok(&["volume", "create", &volume]);
+        cli_ok(&[
+            "run",
+            "--rm",
+            "-v",
+            &format!("{volume}:/d"),
+            "alpine:3",
+            "sh",
+            "-c",
+            "echo hi > /d/f; chown 999:998 /d/f",
+        ]);
+        cli_ok(&[
+            "run",
+            "-d",
+            "--name",
+            &original,
+            "--restart",
+            "unless-stopped",
+            "--label",
+            &format!("com.docker.compose.project={tag}"),
+            "--label",
+            "com.docker.compose.service=web",
+            "--label",
+            &format!("com.docker.compose.project.working_dir={}", text(&proj)),
+            "--label",
+            &format!(
+                "com.docker.compose.project.config_files={}/docker-compose.yml",
+                text(&proj)
+            ),
+            "-v",
+            &format!("{volume}:/data"),
+            "-v",
+            &format!("{}:/bind", text(&data)),
+            "ghcr.io/traefik/whoami",
+        ]);
+
+        let settings = ImportSettings {
+            helper_image: Some("alpine:3".to_owned()),
+            observe: std::time::Duration::from_secs(2),
+            deadline: std::time::Duration::from_secs(60),
+            poll: std::time::Duration::from_millis(500),
+            links_dir: Some(links.clone()),
+        };
+        let app = support::app_with_import(db, BollardDocker::connect().unwrap(), settings).await;
+        let admin = ops(&app).await;
+        let made = admin
+            .post_json(
+                &app.admin_api("x/imports"),
+                &json!({"source_kind": "project", "source_ref": tag}),
+            )
+            .await;
+        made.assert_status(StatusCode::ACCEPTED);
+        let id = made.json()["id"].as_i64().unwrap();
+        let read = wait_planned(&app, &admin, id).await;
+        assert_eq!(read["state"], "planned", "{read}");
+        assert!(
+            read["plan"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|i| i["choice"] == "bring"),
+            "{}",
+            read["plan"]["items"]
+        );
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/start")),
+                &json!({"confirm": tag}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        let state = import_state(&app, id).await;
+        let shown = admin
+            .get(&app.admin_api(&format!("x/imports/{id}")))
+            .await
+            .text();
+        assert_eq!(state, "active", "{shown}");
+
+        // The original is stopped and does not come back by itself.
+        assert_eq!(
+            cli_ok(&[
+                "inspect",
+                "-f",
+                "{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}",
+                &original
+            ]),
+            "false no"
+        );
+        // The copy has the file, with its owner.
+        assert_eq!(
+            cli_ok(&[
+                "run",
+                "--rm",
+                "-v",
+                &format!("{copy}:/d"),
+                "alpine:3",
+                "sh",
+                "-c",
+                "cat /d/f; stat -c %u:%g /d/f"
+            ]),
+            "hi\n999:998"
+        );
+        // The folder is reached through the panel's symlink.
+        let link = std::fs::read_dir(links.join(format!("{tag}_web")))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(
+            cli_ok(&[
+                "run",
+                "--rm",
+                "-v",
+                &format!("{}:/b", text(&link)),
+                "alpine:3",
+                "cat",
+                "/b/x"
+            ]),
+            "bind"
+        );
+        // The Compose file is renamed (so `compose up` starts nothing old).
+        assert!(proj.join("docker-compose.yml.rdockpanel-imported").exists());
+        assert!(!proj.join("docker-compose.yml").exists());
+        // The service runs in Swarm.
+        cli_ok(&["service", "inspect", &format!("{tag}_web")]);
+
+        // Undone: the service goes, the original runs as it did, the file is back.
+        admin
+            .post_json(&app.admin_api(&format!("x/imports/{id}/undo")), &json!({}))
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "reverted");
+        assert!(
+            !docker_cli(&["service", "inspect", &format!("{tag}_web")])
+                .status
+                .success()
+        );
+        assert_eq!(
+            cli_ok(&[
+                "inspect",
+                "-f",
+                "{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}",
+                &original
+            ]),
+            "true unless-stopped"
+        );
+        assert!(proj.join("docker-compose.yml").exists());
+    }
+);
+
+db_test!(
+    a_container_that_changed_since_the_plan_stops_the_start,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        // Someone changes `web` after the plan was read.
+        {
+            let mut inspected = fake.inspected.lock().unwrap();
+            let env = &mut inspected.get_mut("shop-web-1").unwrap()["Config"]["Env"];
+            env.as_array_mut().unwrap().push(json!("NEW=1"));
+        }
+        let refused = admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/start")),
+                &json!({"confirm": "shop"}),
+            )
+            .await;
+        assert_eq!(refused.status, StatusCode::CONFLICT, "{}", refused.text());
+        assert_eq!(refused.json()["code"], "plan_stale");
+        // Nothing was created, and a new reading gives a plan that starts.
+        assert_eq!(import_state(&app, id).await, "planned");
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/rescan")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        assert_eq!(wait_planned(&app, &admin, id).await["state"], "planned");
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/start")),
+                &json!({"confirm": "shop"}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+    }
+);
+
+db_test!(
+    an_undo_does_not_start_the_originals_while_a_task_container_lives,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let (app, fake, id) = started_shop(db).await;
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active");
+        let admin = ops(&app).await;
+        // The tasks' containers outlive the services (Swarm removes them late).
+        fake.detailed.lock().unwrap().push(json!({
+            "Id": "task-web-1", "Names": ["/shop_web.1.abc"], "State": "running",
+            "Labels": {"com.docker.swarm.service.name": "shop_web"}
+        }));
+        admin
+            .post_json(&app.admin_api(&format!("x/imports/{id}/undo")), &json!({}))
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(
+            import_state(&app, id).await,
+            "needs_attention",
+            "{:?}",
+            fake.calls()
+        );
+        assert!(
+            !fake.calls().contains(&"start id-web".to_owned()),
+            "{:?}",
+            fake.calls()
+        );
+        // Gone: retry goes on and the originals run again.
+        fake.detailed
+            .lock()
+            .unwrap()
+            .retain(|c| c["Id"] != "task-web-1");
+        admin
+            .post_json(&app.admin_api(&format!("x/imports/{id}/retry")), &json!({}))
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(
+            import_state(&app, id).await,
+            "reverted",
+            "{:?}",
+            fake.calls()
+        );
+        assert!(fake.calls().contains(&"start id-web".to_owned()));
     }
 );

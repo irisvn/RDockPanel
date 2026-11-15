@@ -334,8 +334,24 @@ pub async fn request<C: ConnectionTrait>(
     user_id: Option<i64>,
     keyring: &Keyring,
 ) -> AppResult<deployment::Model> {
+    request_with(txn, service, trigger, rollback_to, user_id, keyring, None).await
+}
+
+/// [`request`] for the step of the import `by_import`: the only one a
+/// service of that import accepts while it runs.
+pub async fn request_with<C: ConnectionTrait>(
+    txn: &C,
+    service: &service::Model,
+    trigger: Trigger,
+    rollback_to: Option<&deployment::Model>,
+    user_id: Option<i64>,
+    keyring: &Keyring,
+    by_import: Option<i64>,
+) -> AppResult<deployment::Model> {
     // Nothing new while the panel updates (it waits for what runs).
     crate::services::panel_update_service::refuse_while_updating(txn).await?;
+    // Nor while an import holds the service.
+    crate::services::import_service::refuse_while_importing(txn, service.id, by_import).await?;
     let now = Utc::now();
     // The service and its project as they are now, locked until the
     // transaction ends: a rename waits for it, or went first (then the

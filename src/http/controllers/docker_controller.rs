@@ -90,6 +90,7 @@ pub async fn container_action(
     request: RequestMeta,
     Path((id, action)): Path<(String, ContainerAction)>,
 ) -> AppResult<Json<Value>> {
+    crate::services::import_service::guard_container(app.db(), &id).await?;
     let docker = docker(&app)?;
     let kind = format!("container.{}", json!(action).as_str().unwrap_or_default());
     let by = initiator(&auth, request);
@@ -118,6 +119,7 @@ pub async fn remove_container(
     Path(id): Path<String>,
     Query(Force { force }): Query<Force>,
 ) -> AppResult<Json<Value>> {
+    crate::services::import_service::guard_container(app.db(), &id).await?;
     let docker = docker(&app)?;
     let by = initiator(&auth, request);
     action_service::run(
@@ -573,6 +575,7 @@ pub async fn prune(
     auth: Auth,
     request: RequestMeta,
 ) -> AppResult<Json<Value>> {
+    crate::services::import_service::guard_prune_containers(app.db()).await?;
     let docker = docker(&app)?;
     let by = initiator(&auth, request);
     let report =
@@ -631,6 +634,7 @@ pub async fn remove_volume(
     request: RequestMeta,
     Path(name): Path<String>,
 ) -> AppResult<Json<Value>> {
+    crate::services::import_service::guard_volume(app.db(), &name).await?;
     let docker = docker(&app)?;
     let by = initiator(&auth, request);
     action_service::run(

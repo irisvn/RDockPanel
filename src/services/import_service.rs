@@ -6,15 +6,161 @@
 use std::collections::BTreeMap;
 
 use rustcms::{AppError, AppResult, AppState};
-use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter, QuerySelect, Set,
+};
 use serde_json::{Value, json};
 
-use crate::models::container_import;
+use crate::models::{container_import, container_import_item, container_import_volume};
 use crate::services::deploy_rules_service::config;
 use crate::services::docker_service::Docker;
 use crate::services::import_compose_service as compose;
 use crate::services::import_graph_service::{self, Member, PanelFacts};
 use crate::services::import_plan_service::{self, Detail};
+
+/// The states in which an import is running: it holds its services and the
+/// panel does not update.
+pub const RUNNING: [&str; 11] = [
+    "queued",
+    "preparing",
+    "stopping",
+    "draining",
+    "copying",
+    "editing_compose",
+    "deploying",
+    "observing",
+    "undoing",
+    "draining_panel",
+    "restoring",
+];
+
+/// Refuses what would touch a service of an import that runs or waits for
+/// the admin (`needs_attention`): a deployment, a backup, a restore. The
+/// import's own steps pass `by_import`. Called in the write that would act.
+pub async fn refuse_while_importing<C: ConnectionTrait>(
+    txn: &C,
+    service_id: i64,
+    by_import: Option<i64>,
+) -> AppResult<()> {
+    let items = container_import_item::Entity::find()
+        .filter(container_import_item::Column::ServiceId.eq(service_id))
+        .all(txn)
+        .await?;
+    for item in items {
+        if Some(item.import_id) == by_import {
+            continue;
+        }
+        let import = container_import::Entity::find_by_id(item.import_id)
+            .lock_shared()
+            .one(txn)
+            .await?;
+        if import
+            .is_some_and(|i| i.state == "needs_attention" || RUNNING.contains(&i.state.as_str()))
+        {
+            return Err(AppError::Conflict {
+                code: "import_in_progress",
+                reason: "importing",
+                message: "This service is being imported: wait for the import, or undo it",
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Refuses an update of the panel while an import runs.
+pub async fn refuse_updating_while_importing<C: ConnectionTrait>(txn: &C) -> AppResult<()> {
+    let running = container_import::Entity::find()
+        .filter(container_import::Column::State.is_in(RUNNING))
+        .count(txn)
+        .await?;
+    if running > 0 {
+        return Err(AppError::Conflict {
+            code: "import_in_progress",
+            reason: "importing",
+            message: "Containers are being imported: update the panel when it is done",
+        });
+    }
+    Ok(())
+}
+
+/// An import holds its originals (stopped, to undo to) and the volumes it
+/// copied until it is `finished` or `reverted`.
+async fn holding<C: ConnectionTrait>(txn: &C, import_id: i64) -> AppResult<bool> {
+    Ok(container_import::Entity::find_by_id(import_id)
+        .one(txn)
+        .await?
+        .is_some_and(|i| !matches!(i.state.as_str(), "finished" | "reverted")))
+}
+
+fn conflict() -> AppError {
+    AppError::Conflict {
+        code: "import_in_progress",
+        reason: "importing",
+        message: "An import holds this: finish or undo the import first",
+    }
+}
+
+/// Refuses a start, stop or removal of a container an import holds
+/// (`reference` as the caller wrote it: an id, a short id or a name).
+pub async fn guard_container<C: ConnectionTrait>(txn: &C, reference: &str) -> AppResult<()> {
+    let items = container_import_item::Entity::find().all(txn).await?;
+    for item in items.iter().filter(|i| {
+        i.container_id == reference
+            || i.container_name == reference
+            || (reference.len() >= 4 && i.container_id.starts_with(reference))
+    }) {
+        if holding(txn, item.import_id).await? {
+            return Err(conflict());
+        }
+    }
+    Ok(())
+}
+
+/// Refuses the removal of a volume an import copied from or to, until the
+/// admin releases it.
+pub async fn guard_volume<C: ConnectionTrait>(txn: &C, name: &str) -> AppResult<()> {
+    let volumes = container_import_volume::Entity::find()
+        .filter(container_import_volume::Column::ReleasedAt.is_null())
+        .all(txn)
+        .await?;
+    for volume in volumes
+        .iter()
+        .filter(|v| v.original_name == name || v.panel_volume.as_deref() == Some(name))
+    {
+        let state = match volume.import_id {
+            Some(id) => container_import::Entity::find_by_id(id)
+                .one(txn)
+                .await?
+                .map(|i| i.state),
+            // Its import is deleted: the volume still holds data.
+            None => Some("finished".to_owned()),
+        };
+        let kept = match state.as_deref() {
+            // Undone: the original is the user's again, and the copy theirs to keep or remove.
+            Some("reverted") => false,
+            // The originals' volumes stay until released; the copies serve the
+            // services while the import is not over.
+            Some("finished") => volume.original_name == name,
+            Some(_) | None => true,
+        };
+        if kept {
+            return Err(conflict());
+        }
+    }
+    Ok(())
+}
+
+/// Refuses a prune of containers while an import holds stopped originals.
+pub async fn guard_prune_containers<C: ConnectionTrait>(txn: &C) -> AppResult<()> {
+    let items = container_import_item::Entity::find().all(txn).await?;
+    for item in &items {
+        if holding(txn, item.import_id).await? {
+            return Err(conflict());
+        }
+    }
+    Ok(())
+}
 
 /// What marks the panel's own database: the loopback ports of its URL, and
 /// the working directory of a panel that runs from source.
@@ -44,22 +190,73 @@ fn port_of(url: &str) -> Option<u16> {
         .flatten()
 }
 
-/// The image of the helper containers (one with `cp` and `sh`): `[panel]
-/// helper_image`, else the panel's own. Bound as a service so that tests can
-/// bind another.
-#[derive(Clone, Debug, Default)]
-pub struct HelperImage(pub Option<String>);
+/// How an import runs. Bound as a service so that tests can bind other
+/// timings and a helper image of their own.
+#[derive(Clone, Debug)]
+pub struct ImportSettings {
+    /// The image of the helper containers (one with `cp` and `sh`): `[panel]
+    /// helper_image`, else the panel's own (`None`).
+    pub helper_image: Option<String>,
+    /// How long the new services are watched before the import is `active`.
+    pub observe: std::time::Duration,
+    /// The longest a wait takes (the originals gone, the old tasks gone).
+    pub deadline: std::time::Duration,
+    /// Between two looks at Docker.
+    pub poll: std::time::Duration,
+    /// Where the symlinks of imported folders are made (a host path Docker
+    /// can bind): the installer's folder on a Mac, `/var/lib/rdockpanel/links`
+    /// on Linux, unless set.
+    pub links_dir: Option<std::path::PathBuf>,
+}
 
-impl HelperImage {
-    pub fn from_config() -> Self {
-        let configured = &config().helper_image;
-        Self((!configured.is_empty()).then(|| configured.clone()))
+impl Default for ImportSettings {
+    fn default() -> Self {
+        Self {
+            helper_image: None,
+            observe: std::time::Duration::from_secs(60),
+            deadline: std::time::Duration::from_secs(120),
+            poll: std::time::Duration::from_secs(1),
+            links_dir: None,
+        }
     }
 }
 
-async fn helper_image(state: &AppState, docker: &Docker) -> Option<String> {
-    if let Some(HelperImage(Some(image))) = state.service::<HelperImage>().as_deref() {
-        return Some(image.clone());
+impl ImportSettings {
+    pub fn from_config() -> Self {
+        let configured = &config().helper_image;
+        Self {
+            helper_image: (!configured.is_empty()).then(|| configured.clone()),
+            ..Self::default()
+        }
+    }
+
+    /// Where the symlinks of imported folders are made.
+    pub fn links(&self) -> std::path::PathBuf {
+        self.links_dir
+            .clone()
+            .unwrap_or_else(|| match config().host_os {
+                crate::services::deploy_rules_service::HostOs::Macos => {
+                    config().state_dir.join("links")
+                }
+                crate::services::deploy_rules_service::HostOs::Linux => {
+                    std::path::PathBuf::from("/var/lib/rdockpanel/links")
+                }
+            })
+    }
+}
+
+pub fn settings(state: &AppState) -> ImportSettings {
+    state
+        .service::<ImportSettings>()
+        .map(|s| (*s).clone())
+        .unwrap_or_default()
+}
+
+/// The image of the helper containers (one with `cp` and `sh`): `[panel]
+/// helper_image`, else the panel's own.
+pub async fn helper_image(state: &AppState, docker: &Docker) -> Option<String> {
+    if let Some(image) = settings(state).helper_image {
+        return Some(image);
     }
     crate::services::system_service::own_image(docker)
         .await
@@ -100,26 +297,36 @@ pub async fn discover(state: &AppState, import_id: i64) -> AppResult<()> {
     Ok(())
 }
 
-/// The plan (as JSON) and its fingerprint.
-async fn read(state: &AppState, row: &container_import::Model) -> Result<(Value, String), String> {
+/// What Docker says about the containers an import is about, read now.
+pub struct Gathered {
+    /// The raw inspects of the members (their environments are in them: they
+    /// stay on the server).
+    pub docs: BTreeMap<String, Value>,
+    /// Every container of the host the graph looked at.
+    pub members: Vec<Member>,
+    pub closure: import_graph_service::Closure,
+    pub details: Vec<Detail>,
+    pub fingerprint: String,
+}
+
+async fn gather(state: &AppState, row: &container_import::Model) -> Result<Gathered, String> {
     let docker = docker(state).map_err(|e| e.to_string())?;
     let engine = docker.engine();
     let listed = engine
         .containers_detailed()
         .await
         .map_err(|e| e.to_string())?;
-    // Raw inspects stay here: their environments are never sent on.
-    let mut docs: BTreeMap<String, Value> = BTreeMap::new();
+    let mut all_docs: BTreeMap<String, Value> = BTreeMap::new();
     for item in &listed {
         let system = item["Labels"]["rdockpanel.system"] == "true";
         let Some(id) = item["Id"].as_str().filter(|_| !system) else {
             continue;
         };
         if let Ok(doc) = engine.inspect_container_raw(id, false).await {
-            docs.insert(id.to_owned(), doc);
+            all_docs.insert(id.to_owned(), doc);
         }
     }
-    let members: Vec<Member> = docs.values().map(Member::from_inspect).collect();
+    let members: Vec<Member> = all_docs.values().map(Member::from_inspect).collect();
     let seeds: Vec<String> = members
         .iter()
         .filter(|m| match row.source_kind.as_str() {
@@ -133,12 +340,15 @@ async fn read(state: &AppState, row: &container_import::Model) -> Result<(Value,
     }
     let closure = import_graph_service::closure(&members, &seeds);
     let mut details = Vec::new();
-    let mut taken = Vec::new();
+    let mut docs = BTreeMap::new();
     for id in &closure.members {
-        let (Some(doc), Some(image)) = (docs.get(id), docs.get(id).map(image_of)) else {
+        let Some(doc) = all_docs.get(id) else {
             continue;
         };
-        let image_doc = engine.image_config(&image).await.unwrap_or(Value::Null);
+        let image_doc = engine
+            .image_config(&image_of(doc))
+            .await
+            .unwrap_or(Value::Null);
         // The size is slow: asked for the members only.
         let sized = engine
             .inspect_container_raw(id, true)
@@ -159,23 +369,38 @@ async fn read(state: &AppState, row: &container_import::Model) -> Result<(Value,
                 );
             }
         }
-        taken.push(doc.clone());
+        docs.insert(id.clone(), doc.clone());
         details.push(detail);
     }
     let key = state.keyring().current().derive("rdockpanel.import");
+    let taken: Vec<Value> = docs.values().cloned().collect();
     let fingerprint = import_plan_service::fingerprint(&taken, &key);
-    let compose_info = compose_of(state, &docker, &members, &closure.members).await;
+    Ok(Gathered {
+        docs,
+        members,
+        closure,
+        details,
+        fingerprint,
+    })
+}
+
+/// The plan (as JSON) and its fingerprint.
+async fn read(state: &AppState, row: &container_import::Model) -> Result<(Value, String), String> {
+    let gathered = gather(state, row).await?;
+    let docker = docker(state).map_err(|e| e.to_string())?;
+    let compose_info =
+        compose_of(state, &docker, &gathered.members, &gathered.closure.members).await;
     let plan = import_plan_service::plan_of(
-        &details,
-        &closure,
+        &gathered.details,
+        &gathered.closure,
         &row.source_ref,
         &row.project_name,
         &panel_facts(),
-        &fingerprint,
+        &gathered.fingerprint,
     );
     let mut plan = serde_json::to_value(&plan).map_err(|e| e.to_string())?;
     plan["compose"] = compose_info;
-    Ok((plan, fingerprint))
+    Ok((plan, gathered.fingerprint))
 }
 
 /// What the Compose files of the members' projects say. Read through a
@@ -293,4 +518,405 @@ fn image_of(doc: &Value) -> String {
         .or_else(|| doc["Config"]["Image"].as_str())
         .unwrap_or_default()
         .to_owned()
+}
+
+/// A name the panel takes for a service or a volume, from a Docker one.
+fn sanitized(name: &str) -> String {
+    let mut out: String = name
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_lowercase() || c.is_ascii_digit() {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    out = out.trim_matches('-').to_owned();
+    if !out.starts_with(|c: char| c.is_ascii_lowercase()) {
+        out = format!("s{out}");
+    }
+    out.truncate(40);
+    out.trim_end_matches('-').to_owned()
+}
+
+/// The symlink of a folder an imported service uses.
+pub fn link_path(links: &std::path::Path, project: &str, service: &str, name: &str) -> String {
+    links
+        .join(format!("{project}_{service}"))
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// A volume or folder to copy or link: what the original was, what the panel
+/// names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Moved {
+    pub original: String,
+    /// The volume's short name in the service, or the link's name.
+    pub name: String,
+    /// `copy` (a named volume) or `link` (a folder).
+    pub mode: &'static str,
+}
+
+/// What a plan item becomes: the service to create, what to move, and the
+/// image (`None`: a digest pins it; `Some(id)`: only this machine has it and
+/// it is tagged first).
+pub struct Made {
+    pub service: crate::services::creation_service::NewService,
+    pub moved: Vec<Moved>,
+    pub local_image: Option<String>,
+    pub healthcheck: Option<(String, i32, i32)>,
+}
+
+/// The service a container becomes (an app: databases map to apps for now).
+pub fn new_service_of(
+    detail: &Detail,
+    project: &str,
+    links: &std::path::Path,
+) -> Result<Made, String> {
+    use crate::services::creation_service::{NewMount, NewPort, NewService};
+    let m = &detail.member;
+    let name = sanitized(m.compose_service().unwrap_or(&m.name));
+    if !crate::services::deploy_rules_service::valid_name(&name) {
+        return Err(format!("`{}` is not a name the panel takes", m.name));
+    }
+    let (image, local_image) = match detail.repo_digests.first() {
+        Some(digest) => (digest.clone(), None),
+        None => {
+            let tag: String = detail
+                .image_id
+                .trim_start_matches("sha256:")
+                .chars()
+                .take(12)
+                .collect();
+            (
+                format!(
+                    "{}{project}/{name}:{tag}",
+                    crate::services::deployment_service::LOCAL_REGISTRY
+                ),
+                Some(detail.image_id.clone()),
+            )
+        }
+    };
+    let mut new = NewService::app(&name, image);
+    new.env = m
+        .env
+        .iter()
+        .filter(|pair| !detail.image_env.contains(pair))
+        .cloned()
+        .collect();
+    if !detail.cmd.is_empty() && detail.cmd != detail.image_cmd {
+        new.command = Some(shell_words::join(&detail.cmd));
+    }
+    if detail.memory > 0 {
+        new.mem_limit_mb = u32::try_from(detail.memory / (1024 * 1024)).ok();
+    }
+    let reserved = &config().reserved_ports;
+    for port in &detail.ports {
+        let loopback = matches!(port.host_ip.as_str(), "127.0.0.1" | "::1");
+        if !loopback && !reserved.contains(&port.host_port) {
+            new.ports.push(NewPort {
+                published: port.host_port,
+                target: port.container_port,
+                protocol: port.protocol.clone(),
+            });
+        }
+    }
+    let mut moved = Vec::new();
+    for (n, mount) in m.mounts.iter().enumerate() {
+        let short = if mount.kind == "volume"
+            && crate::services::deploy_rules_service::valid_volume_name(&mount.source)
+            && mount.source.len() < 40
+        {
+            mount.source.clone()
+        } else {
+            format!("data{}", n + 1)
+        };
+        if mount.kind == "volume" {
+            new.mounts.push(NewMount::Volume {
+                name: short.clone(),
+                target: mount.destination.clone(),
+            });
+            moved.push(Moved {
+                original: mount.source.clone(),
+                name: short,
+                mode: "copy",
+            });
+        } else {
+            new.mounts.push(NewMount::Link {
+                source: link_path(links, project, &name, &short),
+                link_target: mount.source.clone(),
+                target: mount.destination.clone(),
+            });
+            moved.push(Moved {
+                original: mount.source.clone(),
+                name: short,
+                mode: "link",
+            });
+        }
+    }
+    // Two tasks must not write the same data (also checked when it deploys).
+    new.zero_downtime = m.mounts.iter().all(|mount| !mount.writable);
+    let healthcheck = match detail.health_test.as_slice() {
+        [kind, rest @ ..] if !rest.is_empty() => {
+            let command = if kind == "CMD-SHELL" {
+                rest.join(" ")
+            } else {
+                shell_words::join(rest)
+            };
+            let interval =
+                i32::try_from((detail.health_interval_ns / 1_000_000_000).max(1)).unwrap_or(30);
+            let retries = i32::try_from(detail.health_retries.max(1)).unwrap_or(3);
+            Some((command, interval, retries))
+        }
+        _ => None,
+    };
+    Ok(Made {
+        service: new,
+        moved,
+        local_image,
+        healthcheck,
+    })
+}
+
+/// Starts an import: the plan read again (it must be the one the admin
+/// saw), then in one write the project, a service for each container, what
+/// the import holds (its items, volumes, claims), its audit entry and its
+/// first step. Docker is read and the images tagged before the write.
+pub async fn start(
+    app: &AppState,
+    principal: &rustcms::Principal,
+    request: rustcms::audit::RequestMeta,
+    import_id: i64,
+    confirm: &str,
+) -> AppResult<()> {
+    use rustcms::ValidationErrors;
+    use rustcms::audit::{self, AuditActor, AuditContext, AuditEntry};
+
+    use crate::models::{container_import_claim, project, service as service_model};
+    let row = container_import::Entity::find_by_id(import_id)
+        .one(app.db())
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if row.state != "planned" {
+        return Err(AppError::Conflict {
+            code: "import_not_planned",
+            reason: "state",
+            message: "Only a plan that is ready can be started",
+        });
+    }
+    if confirm != row.project_name {
+        return Err(
+            ValidationErrors::field("confirm", "type the project's name to confirm").into(),
+        );
+    }
+    let plan: Value = row
+        .plan
+        .as_deref()
+        .and_then(|p| serde_json::from_str(p).ok())
+        .ok_or(AppError::NotFound)?;
+    let items = plan["items"].as_array().cloned().unwrap_or_default();
+    if items.iter().any(|i| i["choice"] == "blocked") {
+        return Err(
+            ValidationErrors::field("plan", "something in the plan blocks the import").into(),
+        );
+    }
+    for permission in ["projects.create", "services.create"] {
+        if !crate::services::access_service::admits(app.db(), principal, permission).await? {
+            return Err(AppError::Forbidden);
+        }
+    }
+    // The containers as they are now: the plan must still be true.
+    let gathered = gather(app, &row)
+        .await
+        .map_err(|why| AppError::BadRequest(format!("Docker could not be read: {why}")))?;
+    if Some(&gathered.fingerprint) != row.fingerprint.as_ref() {
+        return Err(AppError::Conflict {
+            code: "plan_stale",
+            reason: "stale",
+            message: "The containers changed since the plan was read: read it again",
+        });
+    }
+    let brought: Vec<&Value> = items.iter().filter(|i| i["choice"] == "bring").collect();
+    let mut made = Vec::new();
+    for item in &brought {
+        let id = item["container_id"].as_str().unwrap_or_default();
+        let detail = gathered
+            .details
+            .iter()
+            .find(|d| d.member.id == id)
+            .ok_or_else(|| AppError::BadRequest("a container of the plan is gone".into()))?;
+        let one = new_service_of(detail, &row.project_name, &settings(app).links())
+            .map_err(AppError::BadRequest)?;
+        made.push((
+            id.to_owned(),
+            detail.member.name.clone(),
+            detail.member.compose_service().map(str::to_owned),
+            one,
+        ));
+    }
+    // Images only this machine has are tagged first (a second name).
+    let docker = docker(app)?;
+    for (_, _, _, one) in &made {
+        if let Some(image_id) = &one.local_image {
+            let reference = one.service.image.clone().unwrap_or_default();
+            let (repo, tag) = reference.rsplit_once(':').unwrap_or((&reference, "latest"));
+            docker
+                .engine()
+                .tag_image(image_id, repo, tag)
+                .await
+                .map_err(|e| AppError::BadRequest(format!("an image could not be kept: {e}")))?;
+        }
+    }
+    let levels: Vec<Vec<String>> =
+        serde_json::from_value(plan["levels"].clone()).unwrap_or_default();
+    let level_of = |id: &str| -> i32 {
+        levels
+            .iter()
+            .position(|l| l.iter().any(|x| x == id))
+            .and_then(|p| i32::try_from(p).ok())
+            .unwrap_or(0)
+    };
+    let txn = rustcms::db::begin_write(app.db()).await?;
+    let current = container_import::Entity::find_by_id(import_id)
+        .lock_exclusive()
+        .one(&txn)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if current.state != "planned" {
+        return Err(AppError::Conflict {
+            code: "import_not_planned",
+            reason: "state",
+            message: "Only a plan that is ready can be started",
+        });
+    }
+    if project::Entity::find()
+        .filter(project::Column::Name.eq(&row.project_name))
+        .one(&txn)
+        .await?
+        .is_some()
+    {
+        return Err(ValidationErrors::field(
+            "project_name",
+            "a project of that name exists: choose another",
+        )
+        .into());
+    }
+    let now = chrono::Utc::now();
+    let project = project::ActiveModel {
+        name: Set(row.project_name.clone()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    }
+    .insert(&txn)
+    .await?;
+    let claimed = |e: sea_orm::DbErr| -> AppError {
+        let text = e.to_string().to_lowercase();
+        if text.contains("unique") || text.contains("duplicate") {
+            AppError::Conflict {
+                code: "import_claimed",
+                reason: "importing",
+                message: "Another import holds one of these containers or volumes",
+            }
+        } else {
+            e.into()
+        }
+    };
+    let mut claimed_volumes = std::collections::BTreeSet::new();
+    for (container_id, container_name, compose_service, one) in made {
+        let created = crate::services::creation_service::create(
+            &txn,
+            app.keyring(),
+            &project,
+            one.service.clone(),
+        )
+        .await?;
+        let admin_only = one.local_image.is_some() || one.moved.iter().any(|m| m.mode == "link");
+        let mut change = created.clone().into_active_model();
+        if let Some((command, interval, retries)) = &one.healthcheck {
+            change.healthcheck_cmd = Set(Some(command.clone()));
+            change.healthcheck_interval_s = Set(Some(*interval));
+            change.healthcheck_retries = Set(Some(*retries));
+        }
+        change.admin_only = Set(admin_only);
+        change.update(&txn).await?;
+        container_import_item::ActiveModel {
+            import_id: Set(import_id),
+            service_id: Set(Some(created.id)),
+            container_id: Set(container_id.clone()),
+            container_name: Set(container_name),
+            compose_service: Set(compose_service),
+            level: Set(level_of(&container_id)),
+            choice: Set("bring".to_owned()),
+            was_running: Set(false),
+            state: Set("pending".to_owned()),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await?;
+        container_import_claim::ActiveModel {
+            import_id: Set(import_id),
+            container_id: Set(Some(container_id)),
+            volume: Set(None),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await
+        .map_err(claimed)?;
+        for moved in &one.moved {
+            let panel_volume = (moved.mode == "copy").then(|| {
+                crate::services::deploy_service::volume_name(
+                    &project.name,
+                    &created.name,
+                    &moved.name,
+                )
+            });
+            // One row, one claim and one copy for a volume several members mount.
+            if moved.mode == "copy" && !claimed_volumes.insert(moved.original.clone()) {
+                continue;
+            }
+            container_import_volume::ActiveModel {
+                import_id: Set(Some(import_id)),
+                original_name: Set(moved.original.clone()),
+                mode: Set(moved.mode.to_owned()),
+                panel_volume: Set(panel_volume),
+                ..Default::default()
+            }
+            .insert(&txn)
+            .await?;
+            if moved.mode == "copy" {
+                container_import_claim::ActiveModel {
+                    import_id: Set(import_id),
+                    container_id: Set(None),
+                    volume: Set(Some(moved.original.clone())),
+                    ..Default::default()
+                }
+                .insert(&txn)
+                .await
+                .map_err(claimed)?;
+            }
+        }
+    }
+    let mut queued = current.into_active_model();
+    queued.state = Set("queued".to_owned());
+    queued.project_id = Set(Some(project.id));
+    queued.updated_at = Set(chrono::Utc::now());
+    queued.update(&txn).await?;
+    let entry = AuditEntry::new("imports.start", "container_imports")
+        .key(import_id.to_string())
+        .meta(serde_json::json!({ "project": row.project_name, "services": brought.len() }));
+    audit::record(
+        &txn,
+        &AuditContext::new(AuditActor::user(principal), request),
+        entry,
+    )
+    .await?;
+    rustcms::queue::dispatch(&txn, &crate::jobs::import_step::ImportStep { import_id }).await?;
+    txn.commit().await?;
+    let _ = service_model::Entity;
+    Ok(())
 }
