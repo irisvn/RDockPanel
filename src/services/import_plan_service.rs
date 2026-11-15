@@ -220,31 +220,63 @@ pub struct DomainHint {
     pub https: bool,
 }
 
-/// The backtick arguments of every `name(...)` call of a Traefik rule.
-fn rule_args(rule: &str, name: &str) -> Vec<String> {
-    let mut out = vec![];
-    let mut rest = rule;
-    let open = format!("{name}(");
-    while let Some(at) = rest.find(&open) {
-        // `Host(` inside `HostRegexp(` or `PathPrefix(` is not this call.
-        let before = rest[..at].chars().next_back();
-        let whole = !before.is_some_and(|c| c.is_ascii_alphanumeric());
-        rest = &rest[at + open.len()..];
-        let Some(end) = rest.find(')') else { break };
-        if whole {
-            out.extend(rest[..end].split('`').skip(1).step_by(2).map(str::to_owned));
+/// A plain hostname: dotted labels of letters, digits and hyphens.
+fn plain_host(host: &str) -> bool {
+    host.contains('.')
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+}
+
+/// One `&&` branch of a rule as (hosts, paths); `None` when it holds anything
+/// but plain `Host(...)` and `PathPrefix(...)` terms.
+fn branch_of(branch: &str) -> Option<(Vec<String>, Vec<String>)> {
+    let (mut hosts, mut paths) = (vec![], vec![]);
+    for term in branch.split("&&").map(str::trim) {
+        let inner = term.strip_suffix(')')?;
+        let (name, args) = inner.split_once('(')?;
+        let args: Vec<String> = args
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect();
+        // Every argument is one backtick string, separated by commas.
+        if args.is_empty() || inner.matches('`').count() != args.len() * 2 {
+            return None;
         }
-        rest = &rest[end..];
+        match name {
+            "Host" => hosts.extend(args.iter().map(|h| h.to_ascii_lowercase())),
+            "PathPrefix" if paths.is_empty() => paths.extend(args),
+            _ => return None,
+        }
     }
-    out
+    (!hosts.is_empty()
+        && hosts.iter().all(|h| plain_host(h))
+        && paths.iter().all(|p| p.starts_with('/')))
+    .then_some((hosts, paths))
 }
 
 /// The domains a container was routed by (Traefik labels, `VIRTUAL_HOST`) and
-/// the rules that are not plain hosts (regex, SNI, unknown): those are said,
-/// not kept.
+/// the rules or entries that are not plain hosts (regex, wildcard, SNI, other
+/// matchers): those are said, not kept. A rule is read branch by branch
+/// (`||`), so one unsupported branch does not drop the others.
 pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
     let label = |key: &str| member.labels.get(key).map(String::as_str);
     let port_of = |value: Option<&str>| value.and_then(|v| v.trim().parse::<u16>().ok());
+    let service_ports: Vec<(&str, &str)> = member
+        .labels
+        .iter()
+        .filter_map(|(k, v)| {
+            let name = k
+                .strip_prefix("traefik.http.services.")?
+                .strip_suffix(".loadbalancer.server.port")?;
+            Some((name, v.as_str()))
+        })
+        .collect();
     let mut hints: Vec<DomainHint> = vec![];
     let mut notes: Vec<String> = vec![];
     let push = |hints: &mut Vec<DomainHint>, hint: DomainHint| {
@@ -262,20 +294,25 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
         else {
             continue;
         };
-        let hosts = rule_args(rule, "Host");
-        let mut paths = rule_args(rule, "PathPrefix");
-        if paths.is_empty() {
-            paths.push("/".to_owned());
-        }
-        let plain = rule.replace("Host(", "").replace("PathPrefix(", "");
-        if hosts.is_empty() || plain.contains("HostRegexp(") || plain.contains("HostSNI") {
-            notes.push(rule.clone());
-            continue;
-        }
-        let service = label(&format!("traefik.http.routers.{router}.service")).unwrap_or(router);
-        let port = port_of(label(&format!(
-            "traefik.http.services.{service}.loadbalancer.server.port"
-        )));
+        // Traefik links a router to the only service when it names none.
+        let port = match label(&format!("traefik.http.routers.{router}.service")) {
+            Some(service) => {
+                let service = service.split('@').next().unwrap_or(service);
+                port_of(
+                    service_ports
+                        .iter()
+                        .find(|(n, _)| *n == service)
+                        .map(|(_, v)| *v),
+                )
+            }
+            None if service_ports.len() == 1 => port_of(Some(service_ports[0].1)),
+            None => port_of(
+                service_ports
+                    .iter()
+                    .find(|(n, _)| *n == router)
+                    .map(|(_, v)| *v),
+            ),
+        };
         let https = label(&format!("traefik.http.routers.{router}.tls")) == Some("true")
             || member
                 .labels
@@ -285,15 +322,24 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
                 e.split(',')
                     .any(|e| matches!(e.trim(), "websecure" | "https"))
             });
-        for host in &hosts {
-            for path in &paths {
-                let hint = DomainHint {
-                    host: host.clone(),
-                    path: path.clone(),
-                    port,
-                    https,
-                };
-                push(&mut hints, hint);
+        for branch in rule.split("||").map(str::trim) {
+            let Some((hosts, mut paths)) = branch_of(branch) else {
+                notes.push(branch.to_owned());
+                continue;
+            };
+            if paths.is_empty() {
+                paths.push("/".to_owned());
+            }
+            for host in &hosts {
+                for path in &paths {
+                    let hint = DomainHint {
+                        host: host.clone(),
+                        path: path.clone(),
+                        port,
+                        https,
+                    };
+                    push(&mut hints, hint);
+                }
             }
         }
     }
@@ -305,16 +351,22 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
             .map(|(_, v)| v.as_str())
     };
     let port = port_of(env("VIRTUAL_PORT"));
-    for host in env("VIRTUAL_HOST").unwrap_or_default().split(',') {
-        let host = host.trim();
-        if !host.is_empty() {
+    for host in env("VIRTUAL_HOST")
+        .unwrap_or_default()
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|h| !h.is_empty())
+    {
+        let lower = host.to_ascii_lowercase();
+        if plain_host(&lower) {
             let hint = DomainHint {
-                host: host.to_owned(),
+                host: lower,
                 path: "/".to_owned(),
                 port,
                 https: false,
             };
             push(&mut hints, hint);
+        } else {
+            notes.push(host.to_owned());
         }
     }
     (hints, notes)
@@ -1147,7 +1199,7 @@ mod tests {
         assert_eq!(
             hints,
             vec![
-                hint("x.io", "/app", Some(3000), true),
+                hint("x.io", "/", Some(3000), true),
                 hint("y.io", "/app", Some(3000), true)
             ]
         );
@@ -1185,6 +1237,89 @@ mod tests {
                 hint("b.io", "/", Some(8080), false)
             ]
         );
+    }
+
+    fn with_labels(pairs: &[(&str, &str)]) -> Member {
+        let mut d = detail("a", "web");
+        for (k, v) in pairs {
+            d.member.labels.insert((*k).to_owned(), (*v).to_owned());
+        }
+        d.member
+    }
+
+    #[test]
+    fn or_branches_keep_their_own_paths() {
+        let m = with_labels(&[(
+            "traefik.http.routers.a.rule",
+            "Host(`a.io`) && PathPrefix(`/x`) || Host(`b.io`) && PathPrefix(`/y`)",
+        )]);
+        let (hints, notes) = domains_of(&m);
+        assert_eq!(
+            hints,
+            vec![
+                hint("a.io", "/x", None, false),
+                hint("b.io", "/y", None, false)
+            ]
+        );
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn virtual_host_entries_must_be_plain_hostnames() {
+        let mut d = detail("a", "web");
+        d.member.env = vec![(
+            "VIRTUAL_HOST".to_owned(),
+            "a.io ~^app\\..*$ *.example.com b.io,localhost".to_owned(),
+        )];
+        let (hints, notes) = domains_of(&d.member);
+        assert_eq!(
+            hints,
+            vec![
+                hint("a.io", "/", None, false),
+                hint("b.io", "/", None, false)
+            ]
+        );
+        assert_eq!(notes.len(), 3);
+    }
+
+    #[test]
+    fn the_only_service_port_is_used_and_provider_suffix_is_dropped() {
+        let m = with_labels(&[
+            ("traefik.http.routers.r.rule", "Host(`a.io`)"),
+            ("traefik.http.services.web.loadbalancer.server.port", "81"),
+        ]);
+        assert_eq!(domains_of(&m).0[0].port, Some(81));
+        let m = with_labels(&[
+            ("traefik.http.routers.r.rule", "Host(`a.io`)"),
+            ("traefik.http.routers.r.service", "web@docker"),
+            ("traefik.http.services.web.loadbalancer.server.port", "81"),
+            ("traefik.http.services.other.loadbalancer.server.port", "82"),
+        ]);
+        assert_eq!(domains_of(&m).0[0].port, Some(81));
+    }
+
+    #[test]
+    fn one_unsupported_branch_does_not_drop_the_rule() {
+        let m = with_labels(&[(
+            "traefik.http.routers.a.rule",
+            "Host(`A.io`) || HostRegexp(`x`)",
+        )]);
+        let (hints, notes) = domains_of(&m);
+        assert_eq!(hints, vec![hint("a.io", "/", None, false)]);
+        assert_eq!(notes.len(), 1);
+    }
+
+    #[test]
+    fn empty_host_path_and_negated_matchers_are_notes() {
+        for rule in [
+            "Host(``)",
+            "Host(`a.io`) && Path(`/p`)",
+            "Host(`a.io`) && !PathPrefix(`/p`)",
+        ] {
+            let (hints, notes) = domains_of(&with_labels(&[("traefik.http.routers.a.rule", rule)]));
+            assert!(hints.is_empty(), "{rule}");
+            assert_eq!(notes.len(), 1, "{rule}");
+        }
     }
 
     #[test]
