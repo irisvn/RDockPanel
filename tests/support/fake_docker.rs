@@ -307,6 +307,14 @@ impl DockerApi for FakeDocker {
         }
         Ok(bytes)
     }
+    async fn read_bind_file(
+        &self,
+        _image: &str,
+        host_path: &str,
+        max: usize,
+    ) -> DockerResult<Vec<u8>> {
+        self.read_file("host", host_path, max).await
+    }
     async fn list_services(&self) -> DockerResult<Vec<Value>> {
         Ok(self.swarm_services.lock().unwrap().clone())
     }

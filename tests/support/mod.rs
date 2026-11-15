@@ -55,6 +55,24 @@ pub async fn app_with_docker(db: TestDb, docker: fake_docker::FakeDocker) -> Tes
     app_with(db, docker, scratch_traefik()).await
 }
 
+/// [`app_with_docker`] with the image of the import's helper containers.
+pub async fn app_with_helper(db: TestDb, docker: fake_docker::FakeDocker, helper: &str) -> TestApp {
+    use rdockpanel::services::docker_service::Docker;
+    use rdockpanel::services::import_service::HelperImage;
+    let helper = HelperImage(Some(helper.to_owned()));
+    TestApp::new(
+        move |config| {
+            let mut app = bootstrap::build(config);
+            app.bind(Docker::new(docker));
+            app.bind(scratch_traefik());
+            app.bind(helper);
+            app
+        },
+        db,
+    )
+    .await
+}
+
 /// The application with `docker` and `traefik`.
 pub async fn app_with(
     db: TestDb,

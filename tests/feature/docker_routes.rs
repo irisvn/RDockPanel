@@ -23,7 +23,9 @@ db_test!(
         let nobody = support::user_with(&app, "nobody", &[]).await;
         let viewer = support::user_with(&app, "viewer", VIEWER).await;
         let operator = support::user_with(&app, "operator", OPERATOR).await;
+        let manager = support::user_with(&app, "manager", &["system.manage"]).await;
         let anonymous = app.client();
+        let manager = app.acting_as(&manager).await;
         let nobody = app.acting_as(&nobody).await;
         let viewer = app.acting_as(&viewer).await;
         let operator = app.acting_as(&operator).await;
@@ -189,6 +191,28 @@ db_test!(
                     &operator,
                     StatusCode::FORBIDDEN,
                 ),
+                // Importing existing containers: `system.manage` only. The panel's
+                // operators (docker.manage) are refused; a manager reads a list.
+                Case::new(Method::GET, "/imports/sources")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
+                Case::new(Method::POST, "/imports")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::UNPROCESSABLE_ENTITY),
+                Case::new(Method::GET, "/imports/999")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::PATCH, "/imports/999/plan")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/imports/999/rescan")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::DELETE, "/imports/999")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
                 Case::new(Method::GET, "/apps/system/cleanup").expect(
                     "operator",
                     &operator,

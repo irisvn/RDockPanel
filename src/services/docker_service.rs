@@ -537,6 +537,19 @@ pub trait DockerApi: Send + Sync {
         let _ = spec;
         Err(unsupported("running a helper"))
     }
+    /// A file of the host, as the tar archive Docker returns it: read from a
+    /// helper container of `image` that is created and never started, with
+    /// the file bind-mounted read-only (a Linux host would otherwise create a
+    /// missing path). At most `max` bytes.
+    async fn read_bind_file(
+        &self,
+        image: &str,
+        host_path: &str,
+        max: usize,
+    ) -> DockerResult<Vec<u8>> {
+        let _ = (image, host_path, max);
+        Err(unsupported("reading a host file"))
+    }
     /// Changes a container's restart policy (`no`, `always`, …).
     async fn update_container_restart(&self, id: &str, policy: &str) -> DockerResult<()> {
         let _ = (id, policy);

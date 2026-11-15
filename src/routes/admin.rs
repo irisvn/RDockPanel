@@ -9,10 +9,11 @@ use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
     branding_controller as branding, capacity_controller as capacity, deploy_controller as deploy,
     docker_controller as docker, domains_controller as domains, firewall_controller as firewall,
-    git_controller as git, home_controller as home, maintenance_controller as maintenance,
-    members_controller as members, notifications_controller as notifications,
-    server_controller as server, system_controller as system, templates_controller as templates,
-    tokens_controller as tokens, traefik_controller as traefik, tunnel_controller as tunnel,
+    git_controller as git, home_controller as home, imports_controller as imports,
+    maintenance_controller as maintenance, members_controller as members,
+    notifications_controller as notifications, server_controller as server,
+    system_controller as system, templates_controller as templates, tokens_controller as tokens,
+    traefik_controller as traefik, tunnel_controller as tunnel,
 };
 use crate::policies::permissions;
 
@@ -480,5 +481,36 @@ pub fn routes() -> AdminRoutes {
         .nest(
             "/deploy",
             AdminRoutes::scope().events("/deployments/{id}/log", member(), deploy::log),
+        )
+        // Importing existing containers: the panel's administrators.
+        .get(
+            "/imports/sources",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::sources,
+        )
+        .post(
+            "/imports",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::create,
+        )
+        .get(
+            "/imports/{id}",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::show,
+        )
+        .patch(
+            "/imports/{id}/plan",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::change_plan,
+        )
+        .post(
+            "/imports/{id}/rescan",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::rescan,
+        )
+        .delete(
+            "/imports/{id}",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::destroy,
         )
 }

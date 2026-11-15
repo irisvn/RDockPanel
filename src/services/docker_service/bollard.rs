@@ -27,9 +27,10 @@ use ::bollard::query_parameters::ResizeExecOptionsBuilder;
 
 use super::{
     BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ExecChunk, ExecSession, HelperSpec, ImageDetails, ImageItem, LogLine, LogQuery,
-    LogStream, NetworkItem, NetworkRequest, PruneKind, PruneReport, RegistryAuth, SESSION_ENV,
-    ServiceSpec, SwarmRole, SwarmService, SwarmTask, TermSize, VolumeItem,
+    DockerResult, ExecChunk, ExecSession, HelperMount, HelperSpec, ImageDetails, ImageItem,
+    LogLine, LogQuery, LogStream, NetworkItem, NetworkRequest, PruneKind, PruneReport,
+    RegistryAuth, SESSION_ENV, ServiceSpec, SwarmRole, SwarmService, SwarmTask, TermSize,
+    VolumeItem,
 };
 
 /// bash when the image has it, else sh.
@@ -1341,6 +1342,41 @@ end HUP; sleep 2; end KILL; true"#
         // Its exit code is read: it can go.
         let _ = self.remove_container(&created.id, true).await;
         code
+    }
+
+    async fn read_bind_file(
+        &self,
+        image: &str,
+        host_path: &str,
+        max: usize,
+    ) -> DockerResult<Vec<u8>> {
+        let spec = HelperSpec {
+            name: String::new(),
+            image: image.to_owned(),
+            cmd: vec!["true".to_owned()],
+            mounts: vec![HelperMount {
+                source: host_path.to_owned(),
+                target: "/file".to_owned(),
+                read_only: true,
+                kind: "bind".to_owned(),
+            }],
+            import_id: 0,
+            cap_add: vec![],
+            timeout_s: 30,
+        };
+        // Created, never started: nothing runs, the archive is read from its
+        // filesystem. No name: Docker's own, so two reads never collide.
+        let created = self
+            .client
+            .create_container(
+                None::<::bollard::query_parameters::CreateContainerOptions>,
+                helper_body(&spec),
+            )
+            .await
+            .map_err(map_err)?;
+        let read = self.read_file(&created.id, "/file", max).await;
+        let _ = self.remove_container(&created.id, true).await;
+        read
     }
 
     async fn update_container_restart(&self, id: &str, policy: &str) -> DockerResult<()> {

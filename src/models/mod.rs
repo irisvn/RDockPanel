@@ -5,6 +5,7 @@ pub mod backup_run;
 pub mod branding_image;
 pub mod cert_resolver;
 pub mod certificate;
+pub mod container_import;
 pub mod database_backup;
 pub mod deployment;
 pub mod firewall_blocked;

@@ -65,6 +65,10 @@ pub struct PanelConfig {
     /// The installer's own directory on the host (secrets, Traefik's files):
     /// never a service's bind mount, whatever the roots allow.
     pub state_dir: PathBuf,
+    /// An image with `cp` and `sh` the import's helper containers run (a
+    /// panel from source has no image of its own to borrow). Empty: the
+    /// panel's own image.
+    pub helper_image: String,
 }
 
 /// Where an installed panel runs (`[panel] host_os`): `linux` or `macos`,
@@ -131,6 +135,7 @@ impl Default for PanelConfig {
             installed: false,
             host_os: HostOs::Linux,
             state_dir: PathBuf::from("/etc/rdockpanel"),
+            helper_image: String::new(),
         }
     }
 }
@@ -355,6 +360,16 @@ impl BindRefusal {
             Self::Forbidden => "may not be mounted",
         }
     }
+}
+
+/// Whether `path` (as written) is a place no service and no import may
+/// read, write or mount: inside or above a forbidden one, the installer's
+/// directory, or `/` itself.
+pub fn forbidden_path(path: &Path, state_dir: &Path) -> bool {
+    let near = |p: &Path, f: &Path| p.starts_with(f) || f.starts_with(p);
+    path == Path::new("/")
+        || FORBIDDEN.iter().any(|f| near(path, Path::new(f)))
+        || (!state_dir.as_os_str().is_empty() && near(path, state_dir))
 }
 
 /// The host directory a bind mount may use, resolved (symlinks followed) and
