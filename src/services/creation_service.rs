@@ -18,7 +18,7 @@ use crate::models::{project, service, service_domain, service_mount, service_por
 use crate::services::build_service::{inside, valid_git_url, valid_ref};
 use crate::services::database_service::{Credentials, Engine, random_password};
 use crate::services::deploy_rules_service::{
-    MAX_COMMAND, MAX_REPLACEMENT, MAX_REPO_PATH, config, normalize_host, sealable,
+    MAX_COMMAND, MAX_REPLACEMENT, MAX_REPO_PATH, config, normalize_host, reserved_name, sealable,
     valid_container_path, valid_image_reference, valid_name, valid_port, valid_route_path,
     valid_volume_name,
 };
@@ -203,6 +203,8 @@ pub async fn create(
             "name",
             "must be 1-40 lowercase letters, digits and dashes, starting with a letter",
         );
+    } else if reserved_name(&new.name) {
+        errors.add("name", "is reserved for the panel's own services");
     } else if service::Entity::find()
         .filter(service::Column::ProjectId.eq(project.id))
         .filter(service::Column::Name.eq(&new.name))

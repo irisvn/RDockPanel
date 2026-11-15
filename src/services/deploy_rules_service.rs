@@ -228,6 +228,13 @@ pub fn valid_name(name: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
 }
 
+/// Names of the panel's own Swarm services: Traefik reaches the panel as
+/// `rdockpanel`, and `rdp-*` are the services the installer makes. A service
+/// of a project must not take one: it would answer in their place.
+pub fn reserved_name(name: &str) -> bool {
+    name == "rdockpanel" || name.starts_with("rdp-")
+}
+
 /// A volume's own name (the Docker volume is `rdp_<project>_<service>_<name>`).
 pub fn valid_volume_name(name: &str) -> bool {
     let bytes = name.as_bytes();
@@ -409,6 +416,16 @@ mod tests {
             .with(path, value)
             .unwrap();
         PanelConfig::from_config(&config).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn reserved_names_are_the_panels() {
+        for name in ["rdockpanel", "rdp-traefik", "rdp-mysql", "rdp-x"] {
+            assert!(reserved_name(name), "{name}");
+        }
+        for name in ["web", "rdp", "rdpanel", "my-rdp-x", "rdockpanel2"] {
+            assert!(!reserved_name(name), "{name}");
+        }
     }
 
     #[test]

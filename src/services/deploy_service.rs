@@ -117,6 +117,10 @@ pub struct Snapshot {
     /// Its rate limit on its domains (`None`: off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<crate::services::rate_limit_service::RateLimit>,
+    /// Only administrators change or deploy it (`services.admin_only`): kept
+    /// here so that rolling back to this deployment sees it too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub admin_only: bool,
     /// In maintenance: the addresses (canonical networks) that still reach
     /// the service.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -427,6 +431,7 @@ impl Snapshot {
             env_digest: None,
             primary_domain,
             maintenance: service.maintenance,
+            admin_only: service.admin_only,
             cap_add: capabilities(service.cap_add.as_deref()),
             cap_drop: capabilities(service.cap_drop.as_deref()),
             sysctls: sysctls(service.sysctls.as_deref()).unwrap_or_default(),
@@ -572,9 +577,13 @@ impl Snapshot {
 
     /// Whether a deployment is rolled without downtime: start-first needs
     /// a health check to know the new task is ready, and a port published
-    /// on the host cannot be held by two tasks at once.
+    /// on the host cannot be held by two tasks at once, and neither can
+    /// writable data (two tasks would write it together). A file is a
+    /// read-only Swarm config.
     pub fn zero_downtime_possible(&self) -> bool {
-        self.healthcheck.is_some() && !self.ports.iter().any(|p| p.mode == "host")
+        self.healthcheck.is_some()
+            && !self.ports.iter().any(|p| p.mode == "host")
+            && !self.mounts.iter().any(|m| m.kind != "file" && !m.read_only)
     }
 }
 
@@ -1731,6 +1740,7 @@ mod tests {
             basic_auth: vec![],
             rate_limit: None,
             maintenance_bypass: vec![],
+            admin_only: false,
         }
     }
 
@@ -1746,6 +1756,49 @@ mod tests {
             internal_url: String::new(),
             tunnel: false,
         }
+    }
+
+    #[test]
+    fn a_writable_mount_rules_out_a_rolling_start_first() {
+        let mut snapshot = snapshot();
+        snapshot.healthcheck = Some(Healthcheck {
+            command: "true".to_owned(),
+            interval_s: 5,
+            retries: 3,
+        });
+        let mount = |kind: &str, read_only: bool| Mount {
+            target: "/data".to_owned(),
+            kind: kind.to_owned(),
+            source: "d".to_owned(),
+            read_only,
+            content_digest: None,
+        };
+        snapshot.mounts = vec![mount("volume", true), mount("file", false)];
+        assert!(snapshot.zero_downtime_possible());
+        // Two tasks would write the same data at once.
+        for kind in ["volume", "bind"] {
+            snapshot.mounts = vec![mount(kind, false)];
+            assert!(!snapshot.zero_downtime_possible(), "{kind}");
+        }
+    }
+
+    #[test]
+    fn admin_only_is_in_the_snapshot_only_when_set() {
+        // A snapshot taken before the field existed hashes the same.
+        let mut snapshot = snapshot();
+        let before = snapshot.hash();
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("admin_only")
+        );
+        snapshot.admin_only = true;
+        assert!(
+            serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("\"admin_only\":true")
+        );
+        assert_ne!(snapshot.hash(), before);
     }
 
     #[test]

@@ -1450,6 +1450,10 @@ async fn apply(
     Ok((outcome, Some(image.reference().to_owned())))
 }
 
+/// The registry of the images an import tags (`rdp.invalid/<project>/<service>:<12 hex>`):
+/// `.invalid` never resolves, so an older panel that tries to pull one fails.
+pub const LOCAL_REGISTRY: &str = "rdp.invalid/";
+
 /// The image a run uses: a rollback's recorded one, the running one for a
 /// start or stop, else a fresh pull of the configured image, pinned.
 async fn image_for(
@@ -1474,6 +1478,15 @@ async fn image_for(
         .and_then(|c| c.image.clone());
     if let (Some(running), Trigger::Start | Trigger::Stop) = (running, trigger) {
         return Ok(pinned_as(&running));
+    }
+    if snapshot.image.starts_with(LOCAL_REGISTRY) {
+        // Tagged by an import: only this machine has it, nothing to pull.
+        let details = docker
+            .engine()
+            .inspect_image(&snapshot.image)
+            .await
+            .map_err(|e| Outcome::Failed(format!("the imported image is gone: {e}")))?;
+        return Ok(pin_image(&snapshot.image, None, &details));
     }
     log.line(format!("pulling {}", snapshot.image)).await;
     let mut progress = docker.pull_image_with(&snapshot.image, auth);

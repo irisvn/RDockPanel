@@ -132,8 +132,10 @@ db_test!(
             .await
             .assert_status(StatusCode::OK);
         let calls_now = calls.lock().unwrap().clone();
+        // Images go one by one (never `prune -a`: it would take an imported
+        // service's local image).
         assert!(
-            calls_now.contains(&format!("prune Images {SYSTEM_LABEL}")),
+            !calls_now.contains(&format!("prune Images {SYSTEM_LABEL}")),
             "{calls_now:?}"
         );
         assert!(calls_now.contains(&format!("prune BuildCache {SYSTEM_LABEL}")));

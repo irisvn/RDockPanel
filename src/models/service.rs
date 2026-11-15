@@ -125,6 +125,10 @@ pub struct Model {
     pub desired_state: String,
     /// `new`, `deploying`, `running`, `stopped`, `failed`.
     pub status: String,
+    /// Only administrators (`system.manage`) change or run commands in it: an
+    /// imported service that mounts a host folder, copies host files or runs a
+    /// local image.
+    pub admin_only: bool,
     pub deployed_at: Option<DateTimeUtc>,
     pub deployed_spec_hash: Option<String>,
     /// The deployment holding the service (with `lock_expires_at`).
@@ -143,6 +147,7 @@ impl ActiveModelBehavior for ActiveModel {}
 /// a Compose service: its administrators' only (`system.manage`).
 pub fn privileged(service: &Model) -> bool {
     service.kind == "compose"
+        || service.admin_only
         || service
             .cap_add
             .as_deref()

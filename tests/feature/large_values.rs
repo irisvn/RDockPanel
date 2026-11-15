@@ -209,13 +209,16 @@ db_test!(
         // (MySQL's; other databases have no 64 KiB TEXT to go back to).
         if app.state().db().get_database_backend() == sea_orm::DatabaseBackend::MySql {
             use sea_orm_migration::MigratorTrait;
-            let undone = Migrator::down(app.state().db(), Some(1)).await;
+            // The import tables' migration (empty here) goes first, then the widening.
+            let undone = Migrator::down(app.state().db(), Some(2)).await;
             assert!(
                 undone
                     .as_ref()
                     .is_err_and(|e| e.to_string().contains("over 64 KiB")),
                 "{undone:?}"
             );
+            // Up again: the import tables' migration was undone on the way.
+            Migrator::up(app.state().db(), None).await.unwrap();
             let kept = service::Entity::find_by_id(stack.id)
                 .one(app.state().db())
                 .await

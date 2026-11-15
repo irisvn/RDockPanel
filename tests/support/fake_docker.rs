@@ -8,10 +8,10 @@ use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream};
 use rdockpanel::services::docker_service::{
     BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ExecChunk, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream,
-    NetworkItem, NetworkRequest, PruneKind, PruneReport, RegistryAuth, SYSTEM_LABEL, ServiceSpec,
-    ServiceUpdateStatus, ServiceUpdateStatusStateEnum, SwarmRole, SwarmService, SwarmTask,
-    TaskState, TermSize, VolumeItem,
+    DockerResult, ExecChunk, ExecSession, HelperSpec, ImageDetails, ImageItem, LogLine, LogQuery,
+    LogStream, NetworkItem, NetworkRequest, PruneKind, PruneReport, RegistryAuth, SYSTEM_LABEL,
+    ServiceSpec, ServiceUpdateStatus, ServiceUpdateStatusStateEnum, SwarmRole, SwarmService,
+    SwarmTask, TaskState, TermSize, VolumeItem,
 };
 use rustcms::async_trait;
 use serde_json::{Value, json};
@@ -61,6 +61,18 @@ pub struct FakeDocker {
     pub registry: Arc<Mutex<HashMap<String, String>>>,
     /// Inspect documents by container name, instead of the minimal one.
     pub inspected: Arc<Mutex<HashMap<String, Value>>>,
+    /// Every image reference asked to be pulled.
+    pub pulled: Arc<Mutex<Vec<String>>>,
+    /// What the import's readers return (`containers_detailed`, `list_services`, `list_nodes`).
+    pub detailed: Arc<Mutex<Vec<Value>>>,
+    pub swarm_services: Arc<Mutex<Vec<Value>>>,
+    pub nodes: Arc<Mutex<Vec<Value>>>,
+    /// Volume sizes by name; a file's archive by `container:path`.
+    pub volume_sizes: Arc<Mutex<HashMap<String, i64>>>,
+    pub files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    /// The helpers run, and the exit code the next ones return.
+    pub helpers: Arc<Mutex<Vec<HelperSpec>>>,
+    pub helper_exit: Arc<Mutex<i64>>,
 }
 
 pub fn labels(system: bool) -> HashMap<String, String> {
@@ -242,6 +254,7 @@ impl DockerApi for FakeDocker {
         image: &str,
         auth: Option<RegistryAuth>,
     ) -> BoxStream<'static, DockerResult<String>> {
+        self.pulled.lock().unwrap().push(image.to_owned());
         if let Some(auth) = auth {
             self.record(format!("pull {image} as {}@{}", auth.username, auth.server));
         }
@@ -267,6 +280,61 @@ impl DockerApi for FakeDocker {
         };
         self.volumes.lock().unwrap().push(volume.clone());
         Ok(volume)
+    }
+    async fn containers_detailed(&self) -> DockerResult<Vec<Value>> {
+        Ok(self.detailed.lock().unwrap().clone())
+    }
+    async fn inspect_container_raw(&self, id: &str, _size: bool) -> DockerResult<Value> {
+        let c = self.container(id)?;
+        match self.inspected.lock().unwrap().get(&c.name) {
+            Some(doc) => Ok(doc.clone()),
+            None => Err(DockerError::NotFound),
+        }
+    }
+    async fn volume_sizes(&self) -> DockerResult<HashMap<String, i64>> {
+        Ok(self.volume_sizes.lock().unwrap().clone())
+    }
+    async fn read_file(&self, container: &str, path: &str, max: usize) -> DockerResult<Vec<u8>> {
+        let bytes = self
+            .files
+            .lock()
+            .unwrap()
+            .get(&format!("{container}:{path}"))
+            .cloned()
+            .ok_or(DockerError::NotFound)?;
+        if bytes.len() > max {
+            return Err(DockerError::Other("the file is too big".to_owned()));
+        }
+        Ok(bytes)
+    }
+    async fn list_services(&self) -> DockerResult<Vec<Value>> {
+        Ok(self.swarm_services.lock().unwrap().clone())
+    }
+    async fn list_nodes(&self) -> DockerResult<Vec<Value>> {
+        Ok(self.nodes.lock().unwrap().clone())
+    }
+    async fn create_volume_labelled(
+        &self,
+        name: &str,
+        labels: HashMap<String, String>,
+    ) -> DockerResult<VolumeItem> {
+        let volume = VolumeItem {
+            name: name.to_owned(),
+            driver: "local".to_owned(),
+            mountpoint: String::new(),
+            labels,
+        };
+        self.volumes.lock().unwrap().push(volume.clone());
+        Ok(volume)
+    }
+    async fn run_helper(&self, spec: HelperSpec) -> DockerResult<i64> {
+        self.record(format!("helper {}", spec.name));
+        self.helpers.lock().unwrap().push(spec);
+        Ok(*self.helper_exit.lock().unwrap())
+    }
+    async fn update_container_restart(&self, id: &str, policy: &str) -> DockerResult<()> {
+        self.record(format!("restart-policy {id} {policy}"));
+        Ok(())
     }
     async fn remove_volume(&self, name: &str) -> DockerResult<()> {
         self.record(format!("remove-volume {name}"));

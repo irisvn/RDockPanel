@@ -5,7 +5,8 @@
 
 use futures_util::StreamExt;
 use rdockpanel::services::docker_service::{
-    BollardDocker, ContainerAction, Docker, DockerError, LogQuery, SYSTEM_LABEL, Scope, TermSize,
+    BollardDocker, ContainerAction, Docker, DockerError, ImageItem, LogQuery, PruneKind,
+    SYSTEM_LABEL, Scope, TermSize,
 };
 
 use crate::support::fake_docker::FakeDocker;
@@ -283,6 +284,36 @@ async fn images_of_the_panel_are_protected() {
             "remove-image panel:old force=false"
         ]
     );
+}
+
+/// An image an import tagged `rdp.invalid/…` is the only copy of what a
+/// service runs: nobody removes it, and a prune leaves it.
+#[tokio::test]
+async fn an_imported_local_image_survives_removal_and_prune() {
+    let (docker, fake) = docker();
+    let image = |id: &str, tag: &str, containers: i64| ImageItem {
+        id: id.to_owned(),
+        tags: vec![tag.to_owned()],
+        size: 1,
+        created: 0,
+        containers,
+        labels: Default::default(),
+    };
+    *fake.images.lock().unwrap() = vec![
+        image("sha256:unused", "old:1", 0),
+        image("sha256:local", "rdp.invalid/shop/web:0123456789ab", 0),
+        image("sha256:inuse", "busy:1", 1),
+        image("sha256:unknown", "maybe:1", -1),
+    ];
+    for scope in [Scope::User, Scope::System] {
+        let refused = docker
+            .remove_image("rdp.invalid/shop/web:0123456789ab", false, scope)
+            .await;
+        assert!(matches!(refused, Err(DockerError::Protected)), "{scope:?}");
+    }
+    let report = docker.prune_kind(PruneKind::Images).await.unwrap();
+    assert_eq!(report.images_deleted, 1);
+    assert_eq!(fake.calls(), ["remove-image sha256:unused force=false"]);
 }
 
 #[tokio::test]
@@ -757,6 +788,7 @@ async fn desired_specs_run_on_a_real_swarm() {
         basic_auth: vec![],
         rate_limit: None,
         maintenance_bypass: vec![],
+        admin_only: false,
     };
     // An environment, as a deployment opens it.
     let env = std::collections::BTreeMap::from([("GREETING".to_owned(), "hello".to_owned())]);

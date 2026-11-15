@@ -11,11 +11,12 @@ use ::bollard::models::{
     VolumeCreateRequest,
 };
 use ::bollard::query_parameters::{
-    CreateImageOptionsBuilder, InspectContainerOptions, KillContainerOptions,
-    ListContainersOptionsBuilder, ListImagesOptions, ListNetworksOptions, ListVolumesOptions,
-    LogsOptionsBuilder, PruneContainersOptionsBuilder, PruneImagesOptionsBuilder,
-    RemoveContainerOptionsBuilder, RemoveImageOptionsBuilder, RemoveVolumeOptions,
-    RestartContainerOptions, StartContainerOptions, StatsOptionsBuilder, StopContainerOptions,
+    CreateImageOptionsBuilder, InspectContainerOptions, InspectContainerOptionsBuilder,
+    KillContainerOptions, ListContainersOptionsBuilder, ListImagesOptions, ListNetworksOptions,
+    ListVolumesOptions, LogsOptionsBuilder, PruneContainersOptionsBuilder,
+    PruneImagesOptionsBuilder, RemoveContainerOptionsBuilder, RemoveImageOptionsBuilder,
+    RemoveVolumeOptions, RestartContainerOptions, StartContainerOptions, StatsOptionsBuilder,
+    StopContainerOptions,
 };
 use futures_util::stream::{BoxStream, StreamExt};
 use rustcms::async_trait;
@@ -26,9 +27,9 @@ use ::bollard::query_parameters::ResizeExecOptionsBuilder;
 
 use super::{
     BuildLine, ContainerAction, ContainerItem, ContainerStats, DockerApi, DockerError, DockerInfo,
-    DockerResult, ExecChunk, ExecSession, ImageDetails, ImageItem, LogLine, LogQuery, LogStream,
-    NetworkItem, NetworkRequest, PruneKind, PruneReport, RegistryAuth, SESSION_ENV, ServiceSpec,
-    SwarmRole, SwarmService, SwarmTask, TermSize, VolumeItem,
+    DockerResult, ExecChunk, ExecSession, HelperSpec, ImageDetails, ImageItem, LogLine, LogQuery,
+    LogStream, NetworkItem, NetworkRequest, PruneKind, PruneReport, RegistryAuth, SESSION_ENV,
+    ServiceSpec, SwarmRole, SwarmService, SwarmTask, TermSize, VolumeItem,
 };
 
 /// bash when the image has it, else sh.
@@ -1164,6 +1165,211 @@ end HUP; sleep 2; end KILL; true"#
         Ok(created.id)
     }
 
+    async fn containers_detailed(&self) -> DockerResult<Vec<Value>> {
+        let list = self
+            .client
+            .list_containers(Some(ListContainersOptionsBuilder::new().all(true).build()))
+            .await
+            .map_err(map_err)?;
+        list.into_iter()
+            .map(|c| serde_json::to_value(c).map_err(|e| DockerError::Other(e.to_string())))
+            .collect()
+    }
+
+    async fn inspect_container_raw(&self, id: &str, size: bool) -> DockerResult<Value> {
+        let options = InspectContainerOptionsBuilder::new().size(size).build();
+        let doc = self
+            .client
+            .inspect_container(id, Some(options))
+            .await
+            .map_err(map_err)?;
+        serde_json::to_value(doc).map_err(|e| DockerError::Other(e.to_string()))
+    }
+
+    async fn container_changes_summary(
+        &self,
+        id: &str,
+        cap: usize,
+    ) -> DockerResult<Vec<(String, usize)>> {
+        let changes = self
+            .client
+            .container_changes(id)
+            .await
+            .map_err(map_err)?
+            .unwrap_or_default();
+        Ok(super::summarize_changes(
+            changes.iter().map(|c| c.path.as_str()),
+            cap,
+        ))
+    }
+
+    async fn image_config(&self, reference: &str) -> DockerResult<Value> {
+        let doc = self
+            .client
+            .inspect_image(reference)
+            .await
+            .map_err(map_err)?;
+        serde_json::to_value(doc).map_err(|e| DockerError::Other(e.to_string()))
+    }
+
+    async fn volume_sizes(&self) -> DockerResult<HashMap<String, i64>> {
+        let usage = self
+            .client
+            .df(None::<::bollard::query_parameters::DataUsageOptions>)
+            .await
+            .map_err(map_err)?;
+        Ok(usage
+            .volume_usage
+            .and_then(|v| v.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| {
+                let name = v["Name"].as_str()?.to_owned();
+                Some((name, v["UsageData"]["Size"].as_i64().unwrap_or(-1)))
+            })
+            .collect())
+    }
+
+    async fn inspect_volume(&self, name: &str) -> DockerResult<Value> {
+        let doc = self.client.inspect_volume(name).await.map_err(map_err)?;
+        serde_json::to_value(doc).map_err(|e| DockerError::Other(e.to_string()))
+    }
+
+    async fn inspect_network(&self, id: &str) -> DockerResult<Value> {
+        let doc = self
+            .client
+            .inspect_network(
+                id,
+                None::<::bollard::query_parameters::InspectNetworkOptions>,
+            )
+            .await
+            .map_err(map_err)?;
+        serde_json::to_value(doc).map_err(|e| DockerError::Other(e.to_string()))
+    }
+
+    async fn read_file(&self, container: &str, path: &str, max: usize) -> DockerResult<Vec<u8>> {
+        let options = ::bollard::query_parameters::DownloadFromContainerOptionsBuilder::new()
+            .path(path)
+            .build();
+        let mut stream = self
+            .client
+            .download_from_container(container, Some(options));
+        let mut out = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            out.extend_from_slice(&chunk.map_err(map_err)?);
+            if out.len() > max {
+                return Err(DockerError::Other(format!("the file is over {max} bytes")));
+            }
+        }
+        Ok(out)
+    }
+
+    async fn list_services(&self) -> DockerResult<Vec<Value>> {
+        let list = self
+            .client
+            .list_services(None::<::bollard::query_parameters::ListServicesOptions>)
+            .await
+            .map_err(map_err)?;
+        list.into_iter()
+            .map(|s| serde_json::to_value(s).map_err(|e| DockerError::Other(e.to_string())))
+            .collect()
+    }
+
+    async fn list_nodes(&self) -> DockerResult<Vec<Value>> {
+        let list = self
+            .client
+            .list_nodes(None::<::bollard::query_parameters::ListNodesOptions>)
+            .await
+            .map_err(map_err)?;
+        list.into_iter()
+            .map(|n| serde_json::to_value(n).map_err(|e| DockerError::Other(e.to_string())))
+            .collect()
+    }
+
+    async fn create_volume_labelled(
+        &self,
+        name: &str,
+        labels: HashMap<String, String>,
+    ) -> DockerResult<VolumeItem> {
+        let request = VolumeCreateRequest {
+            name: Some(name.to_owned()),
+            labels: Some(labels),
+            ..Default::default()
+        };
+        self.client
+            .create_volume(request)
+            .await
+            .map(volume_item)
+            .map_err(map_err)
+    }
+
+    async fn run_helper(&self, spec: HelperSpec) -> DockerResult<i64> {
+        let body = helper_body(&spec);
+        let name = spec.name.clone();
+        let created = self
+            .client
+            .create_container(
+                Some(
+                    ::bollard::query_parameters::CreateContainerOptionsBuilder::new()
+                        .name(&name)
+                        .build(),
+                ),
+                body,
+            )
+            .await
+            .map_err(map_err)?;
+        let run = async {
+            self.client
+                .start_container(&created.id, None::<StartContainerOptions>)
+                .await
+                .map_err(map_err)?;
+            let mut waiting = self.client.wait_container(
+                &created.id,
+                None::<::bollard::query_parameters::WaitContainerOptions>,
+            );
+            match waiting.next().await {
+                Some(Ok(done)) => Ok(done.status_code),
+                // Docker reports a non-zero exit as an error carrying the code.
+                Some(Err(Error::DockerContainerWaitError { code, .. })) => Ok(code),
+                Some(Err(e)) => Err(map_err(e)),
+                None => Err(DockerError::Other("the helper's wait ended".to_owned())),
+            }
+        };
+        let code = tokio::time::timeout(std::time::Duration::from_secs(spec.timeout_s), run)
+            .await
+            .unwrap_or_else(|_| Err(DockerError::Other("the helper timed out".to_owned())));
+        // Its exit code is read: it can go.
+        let _ = self.remove_container(&created.id, true).await;
+        code
+    }
+
+    async fn update_container_restart(&self, id: &str, policy: &str) -> DockerResult<()> {
+        use ::bollard::models::{ContainerUpdateBody, RestartPolicy, RestartPolicyNameEnum};
+        let name = match policy {
+            "no" => RestartPolicyNameEnum::NO,
+            "always" => RestartPolicyNameEnum::ALWAYS,
+            "unless-stopped" => RestartPolicyNameEnum::UNLESS_STOPPED,
+            "on-failure" => RestartPolicyNameEnum::ON_FAILURE,
+            other => {
+                return Err(DockerError::Other(format!("no restart policy `{other}`")));
+            }
+        };
+        self.client
+            .update_container(
+                id,
+                ContainerUpdateBody {
+                    restart_policy: Some(RestartPolicy {
+                        name: Some(name),
+                        maximum_retry_count: None,
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(map_err)?;
+        Ok(())
+    }
+
     async fn run_on_host(&self, image: &str, cmd: Vec<String>) -> DockerResult<()> {
         // `cmd` as the entrypoint: the image's own (the panel's) never runs.
         let body = ::bollard::models::ContainerCreateBody {
@@ -1194,6 +1400,49 @@ end HUP; sleep 2; end KILL; true"#
             .start_container(&created.id, None::<StartContainerOptions>)
             .await
             .map_err(map_err)
+    }
+}
+
+/// The container a [`HelperSpec`] creates: no network, `CapDrop ALL` (and
+/// only `cap_add` back), a read-only root, `no-new-privileges`, not
+/// privileged, not auto-removed. The image's own entrypoint never runs.
+fn helper_body(spec: &HelperSpec) -> ::bollard::models::ContainerCreateBody {
+    use ::bollard::models::{Mount, MountType};
+    let mounts = spec
+        .mounts
+        .iter()
+        .map(|m| Mount {
+            target: Some(m.target.clone()),
+            source: Some(m.source.clone()),
+            typ: Some(if m.kind == "bind" {
+                MountType::BIND
+            } else {
+                MountType::VOLUME
+            }),
+            read_only: Some(m.read_only),
+            ..Default::default()
+        })
+        .collect();
+    ::bollard::models::ContainerCreateBody {
+        image: Some(spec.image.clone()),
+        entrypoint: Some(spec.cmd.clone()),
+        cmd: Some(vec![]),
+        labels: Some(HashMap::from([
+            (super::SYSTEM_LABEL.to_owned(), "true".to_owned()),
+            ("rdockpanel.import".to_owned(), spec.import_id.to_string()),
+        ])),
+        network_disabled: Some(true),
+        host_config: Some(::bollard::models::HostConfig {
+            network_mode: Some("none".to_owned()),
+            cap_drop: Some(vec!["ALL".to_owned()]),
+            cap_add: (!spec.cap_add.is_empty()).then(|| spec.cap_add.clone()),
+            readonly_rootfs: Some(true),
+            security_opt: Some(vec!["no-new-privileges".to_owned()]),
+            auto_remove: Some(false),
+            mounts: Some(mounts),
+            ..Default::default()
+        }),
+        ..Default::default()
     }
 }
 
@@ -1374,6 +1623,59 @@ fn build_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::docker_service::{HelperMount, HelperSpec};
+
+    #[test]
+    fn a_helper_is_hardened_and_never_auto_removed() {
+        let spec = HelperSpec {
+            name: "rdp-import-7-data".to_owned(),
+            image: "panel:1@sha256:abc".to_owned(),
+            cmd: vec![
+                "cp".to_owned(),
+                "-a".to_owned(),
+                "/from/.".to_owned(),
+                "/to/".to_owned(),
+            ],
+            mounts: vec![
+                HelperMount {
+                    source: "old".to_owned(),
+                    target: "/from".to_owned(),
+                    read_only: true,
+                    kind: "volume".to_owned(),
+                },
+                HelperMount {
+                    source: "/Users/me/data".to_owned(),
+                    target: "/to".to_owned(),
+                    read_only: false,
+                    kind: "bind".to_owned(),
+                },
+            ],
+            import_id: 7,
+            cap_add: vec!["CHOWN".to_owned()],
+            timeout_s: 60,
+        };
+        let body = helper_body(&spec);
+        let host = body.host_config.unwrap();
+        assert_eq!(host.privileged, None);
+        assert_ne!(host.auto_remove, Some(true));
+        assert_eq!(host.network_mode.as_deref(), Some("none"));
+        assert_eq!(host.cap_drop.unwrap(), ["ALL"]);
+        assert_eq!(host.cap_add.unwrap(), ["CHOWN"]);
+        assert_eq!(host.readonly_rootfs, Some(true));
+        assert_eq!(host.security_opt.unwrap(), ["no-new-privileges"]);
+        let mounts = host.mounts.unwrap();
+        assert_eq!(mounts.len(), 2);
+        assert_eq!(mounts[0].read_only, Some(true));
+        assert_eq!(mounts[1].typ, Some(::bollard::models::MountType::BIND));
+        let labels = body.labels.unwrap();
+        assert_eq!(labels["rdockpanel.import"], "7");
+        assert_eq!(
+            labels[crate::services::docker_service::SYSTEM_LABEL],
+            "true"
+        );
+        // The image's own entrypoint never runs.
+        assert_eq!(body.entrypoint.unwrap()[0], "cp");
+    }
 
     #[test]
     fn splits_image_references() {

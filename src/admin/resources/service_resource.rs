@@ -16,7 +16,7 @@ use crate::models::service::{self, NEW, privileged};
 use crate::policies::permissions;
 use crate::policies::service_policy::ServicePolicy;
 use crate::services::build_service::{inside, valid_git_url, valid_ref};
-use crate::services::deploy_rules_service::{valid_image_reference, valid_name};
+use crate::services::deploy_rules_service::{reserved_name, valid_image_reference, valid_name};
 use crate::services::deploy_service::{command_args, valid_env_name};
 use crate::services::deployment_service::{self, Trigger};
 use crate::services::rate_limit_service;
@@ -124,6 +124,10 @@ impl Resource for ServiceResource {
                 .readable(|_| true)
                 .filterable()
                 .sortable(),
+            // Set by an import, never by the form.
+            Field::column(service::Column::AdminOnly)
+                .guarded()
+                .readable(|_| true),
             Field::column(service::Column::DeployedAt)
                 .guarded()
                 .readable(|_| true)
@@ -449,6 +453,10 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
             "name",
             ctx.t("must be 1-40 lowercase letters, digits and dashes, starting with a letter"),
         );
+    } else if let Some(name) = text(data, "name")
+        && reserved_name(name)
+    {
+        errors.add("name", ctx.t("is reserved for the panel's own services"));
     }
     if let Some(command) = text(data, "command")
         .map(str::trim)

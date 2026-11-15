@@ -3,6 +3,12 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## Unreleased
+
+- A service with a writable volume or folder no longer rolls with "zero downtime" (two tasks would
+  write the same data at once): it stops the old task first.
+- A service cannot be named `rdockpanel` or `rdp-…`: those are the panel's own.
+
 ## 0.11.1 — 2026-11-15
 
 - A container's details (Docker → Containers → Inspect) no longer show passwords written in its
