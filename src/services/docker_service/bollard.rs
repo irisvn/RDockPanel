@@ -1477,6 +1477,12 @@ fn helper_body(spec: &HelperSpec) -> ::bollard::models::ContainerCreateBody {
                 MountType::VOLUME
             }),
             read_only: Some(m.read_only),
+            bind_options: (m.kind == "bind" && !m.read_only).then(|| {
+                ::bollard::models::MountBindOptions {
+                    create_mountpoint: Some(true),
+                    ..Default::default()
+                }
+            }),
             ..Default::default()
         })
         .collect();
@@ -1724,6 +1730,16 @@ mod tests {
         assert_eq!(mounts.len(), 2);
         assert_eq!(mounts[0].read_only, Some(true));
         assert_eq!(mounts[1].typ, Some(::bollard::models::MountType::BIND));
+        // A folder the helper writes to may not exist yet (the links folder on a
+        // fresh host): Docker makes it, as it does not for a `Mounts` bind.
+        assert_eq!(
+            mounts[1]
+                .bind_options
+                .as_ref()
+                .and_then(|o| o.create_mountpoint),
+            Some(true)
+        );
+        assert!(mounts[0].bind_options.is_none());
         let labels = body.labels.unwrap();
         assert_eq!(labels["rdockpanel.import"], "7");
         assert_eq!(
