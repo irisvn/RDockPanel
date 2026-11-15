@@ -306,6 +306,22 @@ async fn run(app: &AppState, import_id: i64, token: &str) -> AppResult<()> {
     }
 }
 
+/// Whether the plan makes this item the panel's Cloudflare Tunnel.
+fn as_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> bool {
+    cx.import
+        .plan
+        .as_deref()
+        .and_then(|p| serde_json::from_str::<Value>(p).ok())
+        .and_then(|plan| {
+            plan["items"]
+                .as_array()?
+                .iter()
+                .find(|i| i["container_id"] == item.container_id)
+                .map(|i| i["as_tunnel"] == true)
+        })
+        .unwrap_or(false)
+}
+
 fn resume_of(state: &str) -> &'static str {
     match state {
         "queued" | "preparing" => "preparing",
@@ -835,7 +851,7 @@ async fn deploying(cx: &Cx<'_>) -> Result<Next, Failure> {
     let pending: Vec<&container_import_item::Model> = cx
         .items
         .iter()
-        .filter(|i| i.state != "deployed" && i.service_id.is_some())
+        .filter(|i| i.state != "deployed" && (i.service_id.is_some() || as_tunnel(cx, i)))
         .collect();
     let Some(level) = pending.iter().map(|i| i.level).min() else {
         return Ok(Next::Go("observing"));
@@ -843,6 +859,10 @@ async fn deploying(cx: &Cx<'_>) -> Result<Next, Failure> {
     let group: Vec<_> = pending.into_iter().filter(|i| i.level == level).collect();
     for item in group {
         cx.alive().await?;
+        if item.service_id.is_none() && as_tunnel(cx, item) {
+            deploy_tunnel(cx, item).await?;
+            continue;
+        }
         let Some(service) = cx.service_of(item).await else {
             return Err(format!("the service of {} is gone", item.container_name));
         };
@@ -870,16 +890,51 @@ async fn deploying(cx: &Cx<'_>) -> Result<Next, Failure> {
         let _ = &project;
     }
     Ok(Next::Go(
-        if cx
-            .items
-            .iter()
-            .any(|i| i.state != "deployed" && i.level > level && i.service_id.is_some())
-        {
+        if cx.items.iter().any(|i| {
+            i.state != "deployed" && i.level > level && (i.service_id.is_some() || as_tunnel(cx, i))
+        }) {
             "deploying"
         } else {
             "observing"
         },
     ))
+}
+
+/// The original cloudflared becomes the panel's own Cloudflare Tunnel: it runs
+/// with the token of the original, which is read from Docker again (the plan
+/// holds none). Traffic can reach the services from here on.
+async fn deploy_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> Result<(), Failure> {
+    let token =
+        crate::services::import_service::tunnel_token_of_container(&cx.docker, &item.container_id)
+            .await?;
+    let was_on = crate::services::tunnel_service::running_token(cx.app)
+        .await
+        .map_err(|e| e.to_string())?
+        .is_some();
+    // Marked before: a failure from here waits for the admin, and an undo turns it off.
+    let current = container_import::Entity::find_by_id(cx.import.id)
+        .one(cx.db())
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("the import is gone")?;
+    let mut flags = container_import::with_flag(current.flags.as_deref(), "ingress");
+    if !was_on {
+        flags = container_import::with_flag(Some(&flags), "tunnel");
+    }
+    let mut mark = current.into_active_model();
+    mark.flags = Set(Some(flags));
+    mark.update(cx.db()).await.map_err(|e| e.to_string())?;
+    {
+        let _changing = crate::services::tunnel_service::exclusive().await;
+        cx.keeping(crate::services::tunnel_service::enable(
+            cx.app,
+            &cx.docker,
+            Some(&token),
+        ))
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    set_item(cx, item, |a| a.state = Set("deployed".to_owned())).await
 }
 
 async fn ports_or_domains(cx: &Cx<'_>, service: &service::Model) -> bool {
@@ -973,6 +1028,13 @@ async fn observing(cx: &Cx<'_>) -> Result<Next, Failure> {
 }
 
 async fn undoing_step(cx: &Cx<'_>) -> Result<Next, Failure> {
+    // The panel's tunnel this import turned on goes off before the originals run again.
+    if cx.import.has_flag("tunnel") {
+        let _changing = crate::services::tunnel_service::exclusive().await;
+        cx.keeping(crate::services::tunnel_service::disable(cx.app, &cx.docker))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     let mut items: Vec<_> = cx.items.iter().collect();
     items.sort_by_key(|i| std::cmp::Reverse((i.level, i.id)));
     for item in items {
@@ -1415,7 +1477,8 @@ pub async fn accept(
                 .one(&txn)
                 .await?
                 .is_some_and(|s| s.status == "running"),
-            None => false,
+            // The panel's tunnel: running when it was turned on.
+            None => item.state == "deployed",
         };
         if !running {
             return Err(AppError::Conflict {

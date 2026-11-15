@@ -17,7 +17,8 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
   is docs/import.md.
 - An imported container keeps the user it ran as (a tunnel as root), and a password on its command line
   moves to an environment variable that the command reads, so they no longer block the import. The plan's
-  findings are translated. A container killed after the 10 s of Docker's stop (exit 137) only stops the
+  findings are translated. A cloudflared container can become the panel's own Cloudflare Tunnel (chosen in
+  its details) instead of a service. A container killed after the 10 s of Docker's stop (exit 137) only stops the
   import when it writes data (it gets 2 minutes to stop first), and the start dialog lists what the admin
   confirms.
 - Removing an image or pruning no longer takes an image that an imported service runs.

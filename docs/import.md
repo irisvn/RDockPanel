@@ -60,6 +60,7 @@ hold what was written since).
 | host folder | used in place through a symlink the panel makes (`link` mount); the service is `admin_only` until the folder is moved |
 | command | as it was; a secret in it (`--requirepass x`, `--password=x`) moves to an environment variable `RDP_SECRET_<n>` and the command becomes `sh -c 'exec <entrypoint> <command> "$RDP_SECRET_<n>"'` (confirmed: the image needs a `/bin/sh`) |
 | user | a container that ran as another user than its image's (a tunnel as root) keeps it: `services.user`, shown on the service, and the service is `admin_only` |
+| Cloudflare tunnel (`cloudflared` with a token in `TUNNEL_TOKEN` or `--token`) | a service, or, chosen in its details, **the panel's own Cloudflare Tunnel** (Settings → Cloudflare Tunnel): no service is made, the panel runs `rdp-cloudflared` with that token when it comes to this container's level, and an undo turns it off. The panel has one tunnel: it is refused while it runs another one. Every public hostname must then point to Traefik (Settings shows where) and each service needs a domain: said in the confirmation |
 | ports | published as they were; loopback ones and the panel's reserved ones are left out |
 
 Blocked: paused or dead containers, `--rm`, privileged, host network, `network_mode: container:`, an entrypoint

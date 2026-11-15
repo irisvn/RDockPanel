@@ -191,6 +191,32 @@ fn finding(
     }
 }
 
+/// The token of a Cloudflare tunnel, from the environment (`TUNNEL_TOKEN`) or
+/// the command line (`--token x`, `--token=x`): only one that looks like one.
+/// A credentials file is not a token.
+pub fn tunnel_token(env: &[(String, String)], args: &[String]) -> Option<String> {
+    let from_env = env
+        .iter()
+        .find(|(name, _)| name == "TUNNEL_TOKEN")
+        .map(|(_, value)| value.clone());
+    let from_args = args.iter().enumerate().find_map(|(i, arg)| {
+        arg.strip_prefix("--token=").map(str::to_owned).or_else(|| {
+            (arg == "--token")
+                .then(|| args.get(i + 1).cloned())
+                .flatten()
+        })
+    });
+    from_env
+        .or(from_args)
+        .filter(|token| crate::services::tunnel_service::valid_token(token))
+}
+
+/// Whether the container is a Cloudflare tunnel whose token is readable.
+pub fn tunnel_option(detail: &Detail) -> bool {
+    detail.image.to_ascii_lowercase().contains("cloudflared")
+        && tunnel_token(&detail.member.env, &detail.cmd).is_some()
+}
+
 /// How many secrets of the command line move to the environment (their
 /// variables are `RDP_SECRET_<n>`, made when the services are).
 pub fn command_secrets(detail: &Detail) -> usize {
@@ -450,6 +476,11 @@ pub struct Item {
     /// Secrets of its command line that become environment variables
     /// (`RDP_SECRET_1`…): names the plan shows, values never.
     pub command_secrets: usize,
+    /// A Cloudflare tunnel whose token can be read: it may run as the panel's
+    /// own tunnel (Settings → Cloudflare Tunnel) instead of a service.
+    pub tunnel_token: bool,
+    /// Chosen to run as the panel's tunnel: no service is made.
+    pub as_tunnel: bool,
     pub ports: Vec<Port>,
     pub findings: Vec<Finding>,
 }
@@ -526,6 +557,8 @@ pub fn plan_of(
                     hard_group: root(&group, i),
                     env_names: vec![],
                     command_secrets: 0,
+                    tunnel_token: false,
+                    as_tunnel: false,
                     ports: vec![],
                     findings: vec![finding(
                         "unreadable",
@@ -584,6 +617,8 @@ pub fn plan_of(
                 hard_group: root(&group, i),
                 env_names,
                 command_secrets: command_secrets(detail),
+                tunnel_token: tunnel_option(detail),
+                as_tunnel: false,
                 ports: detail.ports.clone(),
                 findings: found,
             }
@@ -927,6 +962,36 @@ mod tests {
         assert_eq!(command_secrets(&d), 1);
         d.cmd = vec!["valkey-server".to_owned()];
         assert_eq!(command_secrets(&d), 0);
+    }
+
+    #[test]
+    fn a_cloudflared_with_a_token_can_become_the_panels_tunnel() {
+        let token = "eyJhIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJ0IjoiMDEyMzQ1NjctODlhYi1jZGVmLTAxMjMtNDU2Nzg5YWJjZGVmIiwicyI6ImMyVmpjbVYwTFhObFkzSmxkQzF6WldOeVpYUT0ifQ==";
+        // In the environment.
+        let env = vec![("TUNNEL_TOKEN".to_owned(), token.to_owned())];
+        assert_eq!(tunnel_token(&env, &[]).as_deref(), Some(token));
+        // On the command line, both forms.
+        let args = ["tunnel", "--no-autoupdate", "run", "--token", token].map(str::to_owned);
+        assert_eq!(tunnel_token(&[], &args).as_deref(), Some(token));
+        let joined = ["tunnel", "run", &format!("--token={token}")].map(str::to_owned);
+        assert_eq!(tunnel_token(&[], &joined).as_deref(), Some(token));
+        // A credentials file or a token that is not one: none.
+        let file = ["tunnel", "run", "--credentials-file", "/etc/c.json"].map(str::to_owned);
+        assert_eq!(tunnel_token(&[], &file), None);
+        let bad = vec![("TUNNEL_TOKEN".to_owned(), "nope".to_owned())];
+        assert_eq!(tunnel_token(&bad, &[]), None);
+        // The plan says so, only for a cloudflared, and never shows the token.
+        let mut d = detail("a", "tunnel");
+        d.image = "cloudflare/cloudflared:2026.10.2".to_owned();
+        d.member.env = env;
+        let c = closure(&[d.member.clone()], &["a".to_owned()]);
+        let plan = plan_of(&[d.clone()], &c, "a", "p", &PanelFacts::default(), "fp");
+        assert!(plan.items[0].tunnel_token);
+        assert!(!plan.items[0].as_tunnel);
+        assert!(!serde_json::to_string(&plan).unwrap().contains(token));
+        d.image = "nginx:1".to_owned();
+        let plan = plan_of(&[d.clone()], &c, "a", "p", &PanelFacts::default(), "fp");
+        assert!(!plan.items[0].tunnel_token);
     }
 
     #[test]

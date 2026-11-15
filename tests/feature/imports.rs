@@ -650,6 +650,17 @@ db_test!(
     }
 );
 
+/// The Swarm services of the fake that are not the panel's own (`rdp-*`).
+fn imported_services(fake: &FakeDocker) -> Vec<String> {
+    fake.services
+        .lock()
+        .unwrap()
+        .keys()
+        .filter(|name| !name.starts_with("rdp-"))
+        .cloned()
+        .collect()
+}
+
 async fn import_state(app: &TestApp, id: i64) -> String {
     use rdockpanel::models::container_import;
     use sea_orm::EntityTrait;
@@ -737,7 +748,11 @@ db_test!(
             "{:?}",
             fake.calls()
         );
-        assert!(fake.services.lock().unwrap().is_empty());
+        assert!(
+            imported_services(&fake).is_empty(),
+            "{:?}",
+            imported_services(&fake)
+        );
         let calls = fake.calls();
         for call in [
             "start id-web",
@@ -808,7 +823,11 @@ db_test!(
         let row_state = import_state(&app, id).await;
         assert_eq!(row_state, "reverted", "{:?}", fake.calls());
         // Nothing was deployed, the originals run as before, nothing is left.
-        assert!(fake.services.lock().unwrap().is_empty());
+        assert!(
+            imported_services(&fake).is_empty(),
+            "{:?}",
+            imported_services(&fake)
+        );
         let calls = fake.calls();
         assert!(calls.contains(&"start id-web".to_owned()), "{calls:?}");
         assert!(calls.contains(&"start id-db".to_owned()), "{calls:?}");
@@ -997,7 +1016,11 @@ db_test!(
             "{:?}",
             fake.calls()
         );
-        assert!(fake.services.lock().unwrap().is_empty());
+        assert!(
+            imported_services(&fake).is_empty(),
+            "{:?}",
+            imported_services(&fake)
+        );
         let admin = ops(&app).await;
         let got = admin
             .get(&app.admin_api(&format!("x/imports/{id}")))
@@ -2032,7 +2055,11 @@ db_test!(
             "{:?}",
             fake.calls()
         );
-        assert!(fake.services.lock().unwrap().is_empty());
+        assert!(
+            imported_services(&fake).is_empty(),
+            "{:?}",
+            imported_services(&fake)
+        );
         assert!(fake.calls().contains(&"start id-web".to_owned()));
     }
 );
@@ -2501,5 +2528,189 @@ db_test!(
         let timeouts = fake.stop_timeouts.lock().unwrap().clone();
         assert!(!timeouts.is_empty());
         assert!(timeouts.iter().all(|t| *t >= 60), "{timeouts:?}");
+    }
+);
+
+const TUNNEL_A: &str = "eyJhIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJ0IjoiMDEyMzQ1NjctODlhYi1jZGVmLTAxMjMtNDU2Nzg5YWJjZGVmIiwicyI6ImMyVmpjbVYwTFhObFkzSmxkQT09In0=";
+const TUNNEL_B: &str = "eyJhIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJ0IjoiMDEyMzQ1NjctODlhYi1jZGVmLTAxMjMtNDU2Nzg5YWJjZGVlIiwicyI6ImMyVmpjbVYwTFhObFkzSmxkQT09In0=";
+
+/// `shop` plus `shop-tunnel-1`, a cloudflared of the same Compose project whose token is `token`.
+fn shop_with_tunnel(fake: &FakeDocker, token: &str) {
+    shop(fake);
+    let mut doc = fake
+        .inspected
+        .lock()
+        .unwrap()
+        .get("shop-db-1")
+        .unwrap()
+        .clone();
+    doc["Id"] = json!("id-tunnel");
+    doc["Name"] = json!("/shop-tunnel-1");
+    doc["Image"] = json!("sha256:tunnel");
+    doc["Config"]["Image"] = json!("cloudflare/cloudflared:2026.10.2");
+    doc["Config"]["Labels"]["com.docker.compose.service"] = json!("tunnel");
+    doc["Config"]["Env"] = json!([format!("TUNNEL_TOKEN={token}")]);
+    doc["Config"]["Cmd"] = json!(["tunnel", "--no-autoupdate", "run"]);
+    doc["Mounts"] = json!([]);
+    doc["NetworkSettings"]["Networks"]["shop_default"]["Aliases"] = json!(["tunnel"]);
+    doc["NetworkSettings"]["Networks"]["shop_default"]["IPAddress"] = json!("172.20.0.55");
+    fake.inspected
+        .lock()
+        .unwrap()
+        .insert("shop-tunnel-1".to_owned(), doc.clone());
+    fake.containers.lock().unwrap().push(ContainerItem {
+        id: "id-tunnel".to_owned(),
+        name: "shop-tunnel-1".to_owned(),
+        image: "cloudflare/cloudflared:2026.10.2".to_owned(),
+        image_id: "sha256:tunnel".to_owned(),
+        state: "running".to_owned(),
+        status: "Up".to_owned(),
+        created: 0,
+        ports: vec![],
+        labels: Default::default(),
+    });
+    fake.detailed.lock().unwrap().push(json!({"Id": "id-tunnel", "Names": ["/shop-tunnel-1"],
+        "Image": "cloudflare/cloudflared:2026.10.2", "State": "running", "Labels": doc["Config"]["Labels"]}));
+}
+
+async fn plan_item(app: &TestApp, admin: &TestClient<'_>, id: i64, container: &str) -> Value {
+    let got = admin
+        .get(&app.admin_api(&format!("x/imports/{id}")))
+        .await
+        .json();
+    got["plan"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["container_id"] == container)
+        .cloned()
+        .unwrap()
+}
+
+db_test!(
+    a_cloudflared_container_can_become_the_panels_cloudflare_tunnel,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::service;
+        use sea_orm::EntityTrait;
+        let fake = FakeDocker::default();
+        shop_with_tunnel(&fake, TUNNEL_A);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let item = plan_item(&app, &admin, id, "id-tunnel").await;
+        assert_eq!(item["tunnel_token"], true);
+        assert_eq!(item["as_tunnel"], false);
+        // Only a cloudflared offers it.
+        assert_eq!(
+            plan_item(&app, &admin, id, "id-web").await["tunnel_token"],
+            false
+        );
+        let patch = |body: Value| {
+            let url = app.admin_api(&format!("x/imports/{id}/plan"));
+            let admin = &admin;
+            async move { admin.send(Method::PATCH, &url, Some(&body)).await }
+        };
+        patch(json!({"tunnel": {"id-web": true}}))
+            .await
+            .assert_validation_error("tunnel");
+        patch(json!({"tunnel": {"id-tunnel": true}}))
+            .await
+            .assert_status(StatusCode::OK);
+        let item = plan_item(&app, &admin, id, "id-tunnel").await;
+        assert_eq!(item["as_tunnel"], true);
+        // Said: the hostnames must point at Traefik; and no token anywhere.
+        let said: Vec<&str> = item["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["code"].as_str().unwrap())
+            .collect();
+        assert!(said.contains(&"tunnel_panel"), "{said:?}");
+        assert!(
+            !admin
+                .get(&app.admin_api(&format!("x/imports/{id}")))
+                .await
+                .text()
+                .contains(TUNNEL_A)
+        );
+
+        run_import(&app, &admin, id).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        // No service for it; the panel's tunnel runs with its token.
+        let names: Vec<String> = service::Entity::find()
+            .all(app.state().db())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(!names.contains(&"tunnel".to_owned()), "{names:?}");
+        let status = admin.get(&app.admin_api("x/apps/tunnel")).await.json();
+        assert_eq!(status["enabled"], true, "{status}");
+        assert!(
+            fake.services
+                .lock()
+                .unwrap()
+                .contains_key("rdp-cloudflared")
+        );
+        assert!(fake.calls().contains(&"stop id-tunnel".to_owned()));
+
+        // Undone: the panel's tunnel is off and the container runs again.
+        post(&app, &admin, &format!("imports/{id}/undo"), json!({})).await;
+        run_all(&app).await;
+        assert_eq!(
+            import_state(&app, id).await,
+            "reverted",
+            "{:?}",
+            fake.calls()
+        );
+        assert_eq!(
+            admin.get(&app.admin_api("x/apps/tunnel")).await.json()["enabled"],
+            false
+        );
+        assert!(
+            !fake
+                .services
+                .lock()
+                .unwrap()
+                .contains_key("rdp-cloudflared")
+        );
+        assert!(fake.calls().contains(&"start id-tunnel".to_owned()));
+    }
+);
+
+db_test!(
+    the_panels_tunnel_is_not_taken_over_by_another_tunnel,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop_with_tunnel(&fake, TUNNEL_B);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        // The panel already runs a tunnel (another one).
+        post(
+            &app,
+            &admin,
+            "apps/tunnel/enable",
+            json!({"token": TUNNEL_A}),
+        )
+        .await
+        .assert_status(StatusCode::OK);
+        let id = planned_shop(&app, &admin).await;
+        let url = app.admin_api(&format!("x/imports/{id}/plan"));
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"tunnel": {"id-tunnel": true}})),
+            )
+            .await
+            .assert_validation_error("tunnel");
+        // As a service it is still possible: nothing changes the panel's tunnel.
+        assert_eq!(
+            plan_item(&app, &admin, id, "id-tunnel").await["as_tunnel"],
+            false
+        );
     }
 );

@@ -531,6 +531,32 @@ fn image_of(doc: &Value) -> String {
         .to_owned()
 }
 
+/// The tunnel token of an original cloudflared (its environment or command line),
+/// read again from Docker when it is needed: the plan never holds it.
+pub async fn tunnel_token_of_container(docker: &Docker, id: &str) -> Result<String, String> {
+    let doc = docker
+        .engine()
+        .inspect_container_raw(id, false)
+        .await
+        .map_err(|e| e.to_string())?;
+    let member = Member::from_inspect(&doc);
+    let strings = |pointer: &str| -> Vec<String> {
+        doc.pointer(pointer)
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut args = strings("/Config/Cmd");
+    args.extend(strings("/Args"));
+    import_plan_service::tunnel_token(&member.env, &args)
+        .ok_or_else(|| "its tunnel token cannot be read".to_owned())
+}
+
 /// A name the panel takes for a service or a volume, from a Docker one.
 fn sanitized(name: &str) -> String {
     let mut out: String = name
@@ -822,7 +848,31 @@ pub async fn start(
     }
     let brought: Vec<&Value> = items.iter().filter(|i| i["choice"] == "bring").collect();
     let mut made = Vec::new();
-    for item in &brought {
+    // Containers that become the panel's own Cloudflare Tunnel: no service.
+    let mut tunnels = Vec::new();
+    for item in brought.iter().filter(|i| i["as_tunnel"] == true) {
+        let id = item["container_id"].as_str().unwrap_or_default().to_owned();
+        let docker = docker(app)?;
+        let token = tunnel_token_of_container(&docker, &id)
+            .await
+            .map_err(|why| ValidationErrors::field("tunnel", &why))?;
+        // The panel has one tunnel: not taken from another.
+        if let Some(running) = crate::services::tunnel_service::running_token(app).await?
+            && running != token
+        {
+            return Err(ValidationErrors::field(
+                "tunnel",
+                "the panel's Cloudflare Tunnel already runs another tunnel",
+            )
+            .into());
+        }
+        tunnels.push((
+            id,
+            item["name"].as_str().unwrap_or_default().to_owned(),
+            item["compose_service"].as_str().map(str::to_owned),
+        ));
+    }
+    for item in brought.iter().filter(|i| i["as_tunnel"] != true) {
         let id = item["container_id"].as_str().unwrap_or_default();
         let detail = gathered
             .details
@@ -982,6 +1032,31 @@ pub async fn start(
                 .map_err(claimed)?;
             }
         }
+    }
+    for (container_id, container_name, compose_service) in tunnels {
+        container_import_item::ActiveModel {
+            import_id: Set(import_id),
+            service_id: Set(None),
+            container_id: Set(container_id.clone()),
+            container_name: Set(container_name),
+            compose_service: Set(compose_service),
+            level: Set(level_of(&container_id)),
+            choice: Set("bring".to_owned()),
+            was_running: Set(false),
+            state: Set("pending".to_owned()),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await?;
+        container_import_claim::ActiveModel {
+            import_id: Set(import_id),
+            container_id: Set(Some(container_id)),
+            volume: Set(None),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await
+        .map_err(claimed)?;
     }
     let mut queued = current.into_active_model();
     queued.state = Set("queued".to_owned());

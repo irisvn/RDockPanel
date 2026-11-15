@@ -82,6 +82,20 @@ pub async fn load(app: &AppState) -> AppResult<()> {
     Ok(())
 }
 
+/// The token of the tunnel the panel runs now (`None`: it is off, or its token
+/// cannot be read).
+pub async fn running_token(app: &AppState) -> AppResult<Option<String>> {
+    let on = panel_setting::get(app.db(), ENABLED_KEY).await?.as_deref() == Some("true");
+    if !on {
+        return Ok(None);
+    }
+    let Some(kept) = panel_setting::get(app.db(), TOKEN_KEY).await? else {
+        return Ok(None);
+    };
+    let sealed: Encrypted<String> = Encrypted::from_envelope(kept);
+    Ok(sealed.open(app.keyring(), &token_context()).ok())
+}
+
 /// A tunnel token as Cloudflare gives it: base64 of a JSON object with its
 /// account (`a`), tunnel (`t`) and secret (`s`).
 pub fn valid_token(token: &str) -> bool {

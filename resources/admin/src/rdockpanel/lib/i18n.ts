@@ -1353,6 +1353,15 @@ window.rustcms?.registerTranslations?.("vi", {
   "Confirm: add a domain or another port to the service after the import.": "Hãy xác nhận: thêm domain hoặc cổng khác cho service sau khi nhập.",
   "{n} more from the command line (RDP_SECRET_1…): a password written there moves to the environment.": "Thêm {n} từ dòng lệnh (RDP_SECRET_1…): mật khẩu viết ở đó được chuyển sang biến môi trường.",
   "By starting you confirm:": "Bắt đầu nghĩa là bạn xác nhận:",
+  "Panel's Cloudflare Tunnel": "Cloudflare Tunnel của panel",
+  "The panel's Cloudflare Tunnel": "Cloudflare Tunnel của panel",
+  "A service": "Một service",
+  "How it runs": "Cách chạy",
+  "A Cloudflare tunnel can become the panel's own (Settings → Cloudflare Tunnel) instead of a service. Every public hostname then points to Traefik, and each service needs a domain.": "Một Cloudflare tunnel có thể thành tunnel của chính panel (Settings → Cloudflare Tunnel) thay vì một service. Khi đó mọi hostname công khai trỏ về Traefik và mỗi service cần một domain.",
+  "Run it as a service": "Chạy như một service",
+  "Use the panel's Cloudflare Tunnel": "Dùng Cloudflare Tunnel của panel",
+  "it becomes the panel's own Cloudflare Tunnel (Settings → Cloudflare Tunnel): every public hostname must point to Traefik and each service needs a domain": "thành Cloudflare Tunnel của chính panel (Settings → Cloudflare Tunnel): mọi hostname công khai phải trỏ về Traefik và mỗi service cần một domain",
+  "Confirm; then set the hostnames in Cloudflare as Settings → Cloudflare Tunnel shows.": "Hãy xác nhận; rồi đặt các hostname trong Cloudflare như Settings → Cloudflare Tunnel hướng dẫn.",
 });
 
 export {};

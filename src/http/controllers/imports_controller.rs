@@ -222,6 +222,9 @@ pub struct PlanChange {
     /// Container id → `bring` or `leave`.
     choices: Option<BTreeMap<String, String>>,
     project_name: Option<String>,
+    /// Container id → `true`: it becomes the panel's Cloudflare Tunnel (no
+    /// service); `false`: a service again.
+    tunnel: Option<BTreeMap<String, bool>>,
     /// Leaving a container behind breaks calls to it: said, and confirmed.
     confirm: Option<bool>,
 }
@@ -257,6 +260,64 @@ pub async fn change_plan(
         .as_deref()
         .and_then(|p| serde_json::from_str(p).ok())
         .ok_or(AppError::NotFound)?;
+    if let Some(tunnel) = &change.tunnel {
+        let docker = docker(&app)?;
+        for (container, on) in tunnel {
+            let items = plan["items"].as_array().ok_or(AppError::NotFound)?;
+            let item = items
+                .iter()
+                .find(|i| i["container_id"] == *container)
+                .ok_or_else(|| invalid("tunnel", "names a container that is not in the plan"))?;
+            if *on {
+                if item["tunnel_token"] != true {
+                    return Err(invalid(
+                        "tunnel",
+                        "is not a Cloudflare tunnel whose token can be read",
+                    ));
+                }
+                // One tunnel in the panel: not two, and not over another one.
+                if items
+                    .iter()
+                    .any(|i| i["as_tunnel"] == true && i["container_id"] != *container)
+                {
+                    return Err(invalid(
+                        "tunnel",
+                        "only one container can be the panel's tunnel",
+                    ));
+                }
+                let token =
+                    crate::services::import_service::tunnel_token_of_container(&docker, container)
+                        .await
+                        .map_err(|why| invalid("tunnel", &why))?;
+                if crate::services::tunnel_service::running_token(&app)
+                    .await?
+                    .is_some_and(|running| running != token)
+                {
+                    return Err(invalid(
+                        "tunnel",
+                        "the panel's Cloudflare Tunnel already runs another tunnel",
+                    ));
+                }
+            }
+        }
+        let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
+        for (container, on) in tunnel {
+            if let Some(item) = items.iter_mut().find(|i| i["container_id"] == *container) {
+                item["as_tunnel"] = json!(on);
+                let findings = item["findings"].as_array_mut().ok_or(AppError::NotFound)?;
+                findings.retain(|f| f["code"] != "tunnel_panel");
+                if *on {
+                    findings.push(json!({
+                        "code": "tunnel_panel",
+                        "level": "CONFIRM",
+                        "field": "tunnel",
+                        "text": "it becomes the panel's own Cloudflare Tunnel (Settings → Cloudflare Tunnel): every public hostname must point to Traefik and each service needs a domain",
+                        "how_to_unblock": "Confirm; then set the hostnames in Cloudflare as Settings → Cloudflare Tunnel shows."
+                    }));
+                }
+            }
+        }
+    }
     let mut cut_soft = false;
     if let Some(choices) = &change.choices {
         let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;

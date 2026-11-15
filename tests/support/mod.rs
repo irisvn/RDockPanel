@@ -36,7 +36,8 @@ pub fn scratch_traefik() -> rdockpanel::services::traefik_service::Traefik {
 /// routes in a directory of its own ([`traefik_dir`]).
 /// The engine runs Traefik (`rdp-traefik`, labelled, on one network), as
 /// `scripts/dev-swarm.sh` does.
-pub async fn app_with_docker(db: TestDb, docker: fake_docker::FakeDocker) -> TestApp {
+/// The development Traefik as a Swarm service of the fake (the tunnel and the routes need it).
+pub fn seed_traefik(docker: &fake_docker::FakeDocker) {
     let spec = serde_json::json!({
         "Name": "rdp-traefik",
         "Labels": {"rdockpanel.system": "true"},
@@ -52,6 +53,10 @@ pub async fn app_with_docker(db: TestDb, docker: fake_docker::FakeDocker) -> Tes
             ..Default::default()
         },
     );
+}
+
+pub async fn app_with_docker(db: TestDb, docker: fake_docker::FakeDocker) -> TestApp {
+    seed_traefik(&docker);
     app_with(db, docker, scratch_traefik()).await
 }
 
@@ -82,6 +87,7 @@ pub async fn app_with_settings(
     settings: rdockpanel::services::import_service::ImportSettings,
 ) -> TestApp {
     use rdockpanel::services::docker_service::Docker;
+    seed_traefik(&docker);
     TestApp::new(
         move |config| {
             let mut app = bootstrap::build(config);
@@ -99,6 +105,7 @@ pub async fn app_with_settings(
 pub async fn app_with_helper(db: TestDb, docker: fake_docker::FakeDocker, helper: &str) -> TestApp {
     use rdockpanel::services::docker_service::Docker;
     use rdockpanel::services::import_service::ImportSettings;
+    seed_traefik(&docker);
     let helper = ImportSettings {
         helper_image: Some(helper.to_owned()),
         observe: std::time::Duration::ZERO,

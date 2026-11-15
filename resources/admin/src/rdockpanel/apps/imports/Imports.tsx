@@ -20,6 +20,8 @@ type PlanItem = {
   choice: "bring" | "leave" | "blocked";
   env_names: string[];
   command_secrets: number;
+  tunnel_token: boolean;
+  as_tunnel: boolean;
   ports: Array<{ host_ip: string; host_port: number; container_port: number; protocol: string }>;
   findings: Finding[];
 };
@@ -440,7 +442,7 @@ function PlanTable(props: PageProps<unknown> & { imp: ImportView; plan: Plan; on
                   <div className="rdp2-muted rdp2-small">{i.name}</div>
                 </td>
                 <td className="rdp2-small">
-                  {i.env_names.length + i.command_secrets > 0 ? `${i.env_names.length + i.command_secrets} ${t("environment variables")}` : "–"}
+                  {i.as_tunnel ? <StatusBadge tone="ok" label={t("Panel's Cloudflare Tunnel")} /> : i.env_names.length + i.command_secrets > 0 ? `${i.env_names.length + i.command_secrets} ${t("environment variables")}` : "–"}
                 </td>
                 <td>
                   <ChoiceBadge t={t} item={i} />
@@ -577,6 +579,20 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
   const [error, setError] = useState<unknown>(null);
   if (!item) return null;
   const editable = props.imp.state === "planned" && item.choice !== "blocked";
+  // The container becomes the panel's own tunnel, or a service again.
+  const setTunnel = async (on: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await props.api.patch(`/imports/${props.imp.id}/plan`, { tunnel: { [item.container_id]: on } });
+      props.toast.success(t("Saved"));
+      props.onSaved();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
   const choose = async (choice: "bring" | "leave") => {
     setBusy(true);
     setError(null);
@@ -619,6 +635,28 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
             </span>
           )}
         </Field>
+        {item.tunnel_token && (
+          <Field
+            label={t("How it runs")}
+            help={t("A Cloudflare tunnel can become the panel's own (Settings → Cloudflare Tunnel) instead of a service. Every public hostname then points to Traefik, and each service needs a domain.")}
+          >
+            {editable ? (
+              <div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setTunnel(!item.as_tunnel)}
+                >
+                  {item.as_tunnel ? t("Run it as a service") : t("Use the panel's Cloudflare Tunnel")}
+                </Button>
+              </div>
+            ) : (
+              <span>{item.as_tunnel ? t("The panel's Cloudflare Tunnel") : t("A service")}</span>
+            )}
+          </Field>
+        )}
         <Field label={t("Ports")}>
           <span className="rdp2-mono rdp2-small">
             {item.ports.length === 0 ? "–" : item.ports.map((p) => `${p.host_ip || "*"}:${p.host_port} → ${p.container_port}/${p.protocol}`).join(", ")}
