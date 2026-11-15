@@ -1338,6 +1338,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "the panel always restarts a service": "panel luôn khởi động lại service",
   "its writable layer is large and does not move with it": "lớp ghi của container lớn và không đi theo",
   "extra aliases and networks are not kept": "alias và network phụ không được giữ",
+  "a routing rule that is not a plain host is not kept": "quy tắc định tuyến không phải tên miền thường nên không được giữ",
   "Docker did not give its details": "Docker không trả chi tiết của nó",
   "it is tied to another container by its network mode or an address in its settings": "container gắn với container khác qua chế độ mạng hoặc một địa chỉ trong cấu hình",
   "it shares a volume with another container: in the panel a volume belongs to one service": "container dùng chung volume với container khác: trong panel một volume thuộc về một service",

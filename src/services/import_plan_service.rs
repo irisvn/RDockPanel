@@ -211,6 +211,115 @@ pub fn tunnel_token(env: &[(String, String)], args: &[String]) -> Option<String>
         .filter(|token| crate::services::tunnel_service::valid_token(token))
 }
 
+/// A domain the source container was routed by (names only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DomainHint {
+    pub host: String,
+    pub path: String,
+    pub port: Option<u16>,
+    pub https: bool,
+}
+
+/// The backtick arguments of every `name(...)` call of a Traefik rule.
+fn rule_args(rule: &str, name: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut rest = rule;
+    let open = format!("{name}(");
+    while let Some(at) = rest.find(&open) {
+        // `Host(` inside `HostRegexp(` or `PathPrefix(` is not this call.
+        let before = rest[..at].chars().next_back();
+        let whole = !before.is_some_and(|c| c.is_ascii_alphanumeric());
+        rest = &rest[at + open.len()..];
+        let Some(end) = rest.find(')') else { break };
+        if whole {
+            out.extend(rest[..end].split('`').skip(1).step_by(2).map(str::to_owned));
+        }
+        rest = &rest[end..];
+    }
+    out
+}
+
+/// The domains a container was routed by (Traefik labels, `VIRTUAL_HOST`) and
+/// the rules that are not plain hosts (regex, SNI, unknown): those are said,
+/// not kept.
+pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
+    let label = |key: &str| member.labels.get(key).map(String::as_str);
+    let port_of = |value: Option<&str>| value.and_then(|v| v.trim().parse::<u16>().ok());
+    let mut hints: Vec<DomainHint> = vec![];
+    let mut notes: Vec<String> = vec![];
+    let push = |hints: &mut Vec<DomainHint>, hint: DomainHint| {
+        if !hints
+            .iter()
+            .any(|h| h.host == hint.host && h.path == hint.path)
+        {
+            hints.push(hint);
+        }
+    };
+    for (key, rule) in &member.labels {
+        let Some(router) = key
+            .strip_prefix("traefik.http.routers.")
+            .and_then(|k| k.strip_suffix(".rule"))
+        else {
+            continue;
+        };
+        let hosts = rule_args(rule, "Host");
+        let mut paths = rule_args(rule, "PathPrefix");
+        if paths.is_empty() {
+            paths.push("/".to_owned());
+        }
+        let plain = rule.replace("Host(", "").replace("PathPrefix(", "");
+        if hosts.is_empty() || plain.contains("HostRegexp(") || plain.contains("HostSNI") {
+            notes.push(rule.clone());
+            continue;
+        }
+        let service = label(&format!("traefik.http.routers.{router}.service")).unwrap_or(router);
+        let port = port_of(label(&format!(
+            "traefik.http.services.{service}.loadbalancer.server.port"
+        )));
+        let https = label(&format!("traefik.http.routers.{router}.tls")) == Some("true")
+            || member
+                .labels
+                .keys()
+                .any(|k| k.starts_with(&format!("traefik.http.routers.{router}.tls.")))
+            || label(&format!("traefik.http.routers.{router}.entrypoints")).is_some_and(|e| {
+                e.split(',')
+                    .any(|e| matches!(e.trim(), "websecure" | "https"))
+            });
+        for host in &hosts {
+            for path in &paths {
+                let hint = DomainHint {
+                    host: host.clone(),
+                    path: path.clone(),
+                    port,
+                    https,
+                };
+                push(&mut hints, hint);
+            }
+        }
+    }
+    let env = |name: &str| {
+        member
+            .env
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    };
+    let port = port_of(env("VIRTUAL_PORT"));
+    for host in env("VIRTUAL_HOST").unwrap_or_default().split(',') {
+        let host = host.trim();
+        if !host.is_empty() {
+            let hint = DomainHint {
+                host: host.to_owned(),
+                path: "/".to_owned(),
+                port,
+                https: false,
+            };
+            push(&mut hints, hint);
+        }
+    }
+    (hints, notes)
+}
+
 /// Whether the container is a Cloudflare tunnel whose token is readable.
 pub fn tunnel_option(detail: &Detail) -> bool {
     detail.image.to_ascii_lowercase().contains("cloudflared")
@@ -481,6 +590,10 @@ pub struct Item {
     pub tunnel_token: bool,
     /// Chosen to run as the panel's tunnel: no service is made.
     pub as_tunnel: bool,
+    /// Domains it was routed by: names only, added to the service when ticked.
+    pub domains: Vec<DomainHint>,
+    /// Rules that are not plain hosts: said, not kept.
+    pub skip_domains: Vec<String>,
     pub ports: Vec<Port>,
     pub findings: Vec<Finding>,
 }
@@ -559,6 +672,8 @@ pub fn plan_of(
                     command_secrets: 0,
                     tunnel_token: false,
                     as_tunnel: false,
+                    domains: vec![],
+                    skip_domains: vec![],
                     ports: vec![],
                     findings: vec![finding(
                         "unreadable",
@@ -571,6 +686,16 @@ pub fn plan_of(
             };
             let m = &detail.member;
             let mut found = findings(detail, panel);
+            let (domains, skip_domains) = domains_of(m);
+            for rule in &skip_domains {
+                found.push(finding(
+                    "domain_rule",
+                    Level::Warn,
+                    rule,
+                    "a routing rule that is not a plain host is not kept",
+                    None,
+                ));
+            }
             for edge in closure
                 .edges
                 .iter()
@@ -619,6 +744,8 @@ pub fn plan_of(
                 command_secrets: command_secrets(detail),
                 tunnel_token: tunnel_option(detail),
                 as_tunnel: false,
+                domains,
+                skip_domains,
                 ports: detail.ports.clone(),
                 findings: found,
             }
@@ -992,6 +1119,72 @@ mod tests {
         d.image = "nginx:1".to_owned();
         let plan = plan_of(&[d.clone()], &c, "a", "p", &PanelFacts::default(), "fp");
         assert!(!plan.items[0].tunnel_token);
+    }
+
+    fn hint(host: &str, path: &str, port: Option<u16>, https: bool) -> DomainHint {
+        DomainHint {
+            host: host.to_owned(),
+            path: path.to_owned(),
+            port,
+            https,
+        }
+    }
+
+    #[test]
+    fn reads_hosts_paths_and_port_from_traefik_labels() {
+        let mut d = detail("a", "web");
+        for (k, v) in [
+            (
+                "traefik.http.routers.a.rule",
+                "Host(`x.io`) || Host(`y.io`) && PathPrefix(`/app`)",
+            ),
+            ("traefik.http.routers.a.tls", "true"),
+            ("traefik.http.services.a.loadbalancer.server.port", "3000"),
+        ] {
+            d.member.labels.insert(k.to_owned(), v.to_owned());
+        }
+        let (hints, notes) = domains_of(&d.member);
+        assert_eq!(
+            hints,
+            vec![
+                hint("x.io", "/app", Some(3000), true),
+                hint("y.io", "/app", Some(3000), true)
+            ]
+        );
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn a_regex_host_is_not_a_domain() {
+        let mut d = detail("a", "web");
+        d.member.labels.insert(
+            "traefik.http.routers.a.rule".to_owned(),
+            "HostRegexp(`{s:.+}.io`)".to_owned(),
+        );
+        let (hints, notes) = domains_of(&d.member);
+        assert!(hints.is_empty());
+        assert_eq!(notes.len(), 1);
+        let c = closure(&[d.member.clone()], &["a".to_owned()]);
+        let plan = plan_of(&[d], &c, "a", "p", &PanelFacts::default(), "fp");
+        assert!(codes(&plan.items[0].findings).contains(&"domain_rule"));
+        assert_eq!(plan.items[0].skip_domains, notes);
+    }
+
+    #[test]
+    fn virtual_host_env_gives_domains() {
+        let mut d = detail("a", "web");
+        d.member.env = vec![
+            ("VIRTUAL_HOST".to_owned(), "a.io,b.io".to_owned()),
+            ("VIRTUAL_PORT".to_owned(), "8080".to_owned()),
+        ];
+        let (hints, _) = domains_of(&d.member);
+        assert_eq!(
+            hints,
+            vec![
+                hint("a.io", "/", Some(8080), false),
+                hint("b.io", "/", Some(8080), false)
+            ]
+        );
     }
 
     #[test]
