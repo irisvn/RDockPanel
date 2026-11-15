@@ -40,6 +40,7 @@ mod m20261026_000000_create_import_tables;
 mod m20261026_000100_add_import_flags;
 mod m20261026_000200_add_service_user;
 mod m20261115_000000_create_tunnels;
+mod m20261115_000100_add_tunnel_to_import_items;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -86,6 +87,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261026_000100_add_import_flags::Migration),
             Box::new(m20261026_000200_add_service_user::Migration),
             Box::new(m20261115_000000_create_tunnels::Migration),
+            Box::new(m20261115_000100_add_tunnel_to_import_items::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

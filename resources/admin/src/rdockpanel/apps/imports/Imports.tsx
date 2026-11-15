@@ -477,7 +477,7 @@ function PlanTable(props: PageProps<unknown> & { imp: ImportView; plan: Plan; on
                   <div className="rdp2-muted rdp2-small">{i.name}</div>
                 </td>
                 <td className="rdp2-small">
-                  {i.as_tunnel ? <StatusBadge tone="ok" label={t("Panel's Cloudflare Tunnel")} /> : i.env_names.length + i.command_secrets > 0 ? `${i.env_names.length + i.command_secrets} ${t("environment variables")}` : "–"}
+                  {i.as_tunnel ? <StatusBadge tone="ok" label={t("Tunnel of the panel")} /> : i.env_names.length + i.command_secrets > 0 ? `${i.env_names.length + i.command_secrets} ${t("environment variables")}` : "–"}
                 </td>
                 <td>
                   <ChoiceBadge t={t} item={i} />
@@ -690,7 +690,7 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
         {item.tunnel_token && (
           <Field
             label={t("How it runs")}
-            help={t("A Cloudflare tunnel can become the panel's own (Settings → Cloudflare Tunnel) instead of a service. Every public hostname then points to Traefik, and each service needs a domain.")}
+            help={t("A Cloudflare tunnel can become a tunnel of the panel (Settings → Cloudflare Tunnel), named after the container, instead of a service. Every public hostname then points to Traefik, and each service needs a domain.")}
           >
             {editable ? (
               <div>
@@ -701,11 +701,11 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
                   disabled={busy}
                   onClick={() => setTunnel(!item.as_tunnel)}
                 >
-                  {item.as_tunnel ? t("Run it as a service") : t("Use the panel's Cloudflare Tunnel")}
+                  {item.as_tunnel ? t("Run it as a service") : t("Make it a tunnel of the panel")}
                 </Button>
               </div>
             ) : (
-              <span>{item.as_tunnel ? t("The panel's Cloudflare Tunnel") : t("A service")}</span>
+              <span>{item.as_tunnel ? t("A tunnel of the panel") : t("A service")}</span>
             )}
           </Field>
         )}

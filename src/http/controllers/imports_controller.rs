@@ -222,8 +222,8 @@ pub struct PlanChange {
     /// Container id → `bring` or `leave`.
     choices: Option<BTreeMap<String, String>>,
     project_name: Option<String>,
-    /// Container id → `true`: it becomes the panel's Cloudflare Tunnel (no
-    /// service); `false`: a service again.
+    /// Container id → `true`: it becomes a tunnel of the panel (no service);
+    /// `false`: a service again.
     tunnel: Option<BTreeMap<String, bool>>,
     /// Container id → the hosts of its domains left out (the others are added).
     domains: Option<BTreeMap<String, Vec<String>>>,
@@ -277,31 +277,11 @@ pub async fn change_plan(
                         "is not a Cloudflare tunnel whose token can be read",
                     ));
                 }
-                // One tunnel in the panel: not two, and not over another one.
-                if items
-                    .iter()
-                    .any(|i| i["as_tunnel"] == true && i["container_id"] != *container)
-                {
-                    return Err(invalid(
-                        "tunnel",
-                        "only one container can be the panel's tunnel",
-                    ));
-                }
                 let token =
                     crate::services::import_service::tunnel_token_of_container(&docker, container)
                         .await
                         .map_err(|why| invalid("tunnel", &why))?;
-                // shortcut: only `default` counts, until imports make tunnels of their own.
-                if crate::services::tunnel_service::running_tokens(&app)
-                    .await?
-                    .iter()
-                    .any(|(name, running)| name == "default" && *running != token)
-                {
-                    return Err(invalid(
-                        "tunnel",
-                        "the panel's Cloudflare Tunnel already runs another tunnel",
-                    ));
-                }
+                crate::services::import_service::new_tunnel_token(&app, &token).await?;
             }
         }
         let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
@@ -315,7 +295,7 @@ pub async fn change_plan(
                         "code": "tunnel_panel",
                         "level": "CONFIRM",
                         "field": "tunnel",
-                        "text": "it becomes the panel's own Cloudflare Tunnel (Settings → Cloudflare Tunnel): every public hostname must point to Traefik and each service needs a domain",
+                        "text": "it becomes a Cloudflare tunnel of the panel (Settings → Cloudflare Tunnel): every public hostname must point to Traefik and each service needs a domain",
                         "how_to_unblock": "Confirm; then set the hostnames in Cloudflare as Settings → Cloudflare Tunnel shows."
                     }));
                 }

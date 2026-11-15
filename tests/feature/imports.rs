@@ -2537,6 +2537,12 @@ const TUNNEL_B: &str = "eyJhIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJ0
 /// `shop` plus `shop-tunnel-1`, a cloudflared of the same Compose project whose token is `token`.
 fn shop_with_tunnel(fake: &FakeDocker, token: &str) {
     shop(fake);
+    cloudflared(fake, "tunnel", "172.20.0.55", token);
+}
+
+/// `shop-<service>-1` (id `id-<service>`), a cloudflared of `shop` whose token is `token`.
+fn cloudflared(fake: &FakeDocker, compose: &str, ip: &str, token: &str) {
+    let (id, name) = (format!("id-{compose}"), format!("shop-{compose}-1"));
     let mut doc = fake
         .inspected
         .lock()
@@ -2544,23 +2550,23 @@ fn shop_with_tunnel(fake: &FakeDocker, token: &str) {
         .get("shop-db-1")
         .unwrap()
         .clone();
-    doc["Id"] = json!("id-tunnel");
-    doc["Name"] = json!("/shop-tunnel-1");
+    doc["Id"] = json!(id);
+    doc["Name"] = json!(format!("/{name}"));
     doc["Image"] = json!("sha256:tunnel");
     doc["Config"]["Image"] = json!("cloudflare/cloudflared:2026.10.2");
-    doc["Config"]["Labels"]["com.docker.compose.service"] = json!("tunnel");
+    doc["Config"]["Labels"]["com.docker.compose.service"] = json!(compose);
     doc["Config"]["Env"] = json!([format!("TUNNEL_TOKEN={token}")]);
     doc["Config"]["Cmd"] = json!(["tunnel", "--no-autoupdate", "run"]);
     doc["Mounts"] = json!([]);
-    doc["NetworkSettings"]["Networks"]["shop_default"]["Aliases"] = json!(["tunnel"]);
-    doc["NetworkSettings"]["Networks"]["shop_default"]["IPAddress"] = json!("172.20.0.55");
+    doc["NetworkSettings"]["Networks"]["shop_default"]["Aliases"] = json!([compose]);
+    doc["NetworkSettings"]["Networks"]["shop_default"]["IPAddress"] = json!(ip);
     fake.inspected
         .lock()
         .unwrap()
-        .insert("shop-tunnel-1".to_owned(), doc.clone());
+        .insert(name.clone(), doc.clone());
     fake.containers.lock().unwrap().push(ContainerItem {
-        id: "id-tunnel".to_owned(),
-        name: "shop-tunnel-1".to_owned(),
+        id: id.clone(),
+        name: name.clone(),
         image: "cloudflare/cloudflared:2026.10.2".to_owned(),
         image_id: "sha256:tunnel".to_owned(),
         state: "running".to_owned(),
@@ -2569,7 +2575,7 @@ fn shop_with_tunnel(fake: &FakeDocker, token: &str) {
         ports: vec![],
         labels: Default::default(),
     });
-    fake.detailed.lock().unwrap().push(json!({"Id": "id-tunnel", "Names": ["/shop-tunnel-1"],
+    fake.detailed.lock().unwrap().push(json!({"Id": id, "Names": [format!("/{name}")],
         "Image": "cloudflare/cloudflared:2026.10.2", "State": "running", "Labels": doc["Config"]["Labels"]}));
 }
 
@@ -2646,14 +2652,9 @@ db_test!(
             .map(|s| s.name)
             .collect();
         assert!(!names.contains(&"tunnel".to_owned()), "{names:?}");
-        let status = admin.get(&app.admin_api("x/apps/tunnel")).await.json();
-        assert_eq!(status["enabled"], true, "{status}");
-        assert!(
-            fake.services
-                .lock()
-                .unwrap()
-                .contains_key("rdp-cloudflared")
-        );
+        // A tunnel of its own, named after the container.
+        assert_eq!(tunnels(&app, &admin).await, [("tunnel".to_owned(), true)]);
+        assert!(has_service(&fake, "rdp-cloudflared-tunnel"));
         assert!(fake.calls().contains(&"stop id-tunnel".to_owned()));
 
         // Undone: the panel's tunnel is off and the container runs again.
@@ -2665,30 +2666,51 @@ db_test!(
             "{:?}",
             fake.calls()
         );
-        assert_eq!(
-            admin.get(&app.admin_api("x/apps/tunnel")).await.json()["enabled"],
-            false
-        );
-        assert!(
-            !fake
-                .services
-                .lock()
-                .unwrap()
-                .contains_key("rdp-cloudflared")
-        );
+        assert_eq!(tunnels(&app, &admin).await, []);
+        assert!(!has_service(&fake, "rdp-cloudflared-tunnel"));
         assert!(fake.calls().contains(&"start id-tunnel".to_owned()));
     }
 );
 
+/// The panel's tunnels: (name, on), by name.
+async fn tunnels(app: &TestApp, admin: &TestClient<'_>) -> Vec<(String, bool)> {
+    let got = admin.get(&app.admin_api("x/apps/tunnels")).await.json();
+    let mut all: Vec<(String, bool)> = got["tunnels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| (t["name"].as_str().unwrap().to_owned(), t["enabled"] == true))
+        .collect();
+    all.sort();
+    all
+}
+
+fn has_service(fake: &FakeDocker, name: &str) -> bool {
+    fake.services.lock().unwrap().contains_key(name)
+}
+
+/// The plan's `tunnel` choice of each container.
+async fn patch_tunnel(
+    app: &TestApp,
+    admin: &TestClient<'_>,
+    id: i64,
+    choice: Value,
+) -> TestResponse {
+    let url = app.admin_api(&format!("x/imports/{id}/plan"));
+    admin
+        .send(Method::PATCH, &url, Some(&json!({ "tunnel": choice })))
+        .await
+}
+
 db_test!(
-    the_panels_tunnel_is_not_taken_over_by_another_tunnel,
+    a_cloudflared_with_another_token_becomes_a_second_tunnel,
     migrate = Migrator,
     |db: TestDb| async move {
         let fake = FakeDocker::default();
         shop_with_tunnel(&fake, TUNNEL_B);
         let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
         let admin = ops(&app).await;
-        // The panel already runs a tunnel (another one).
+        // The panel already runs a tunnel (another account's).
         post(
             &app,
             &admin,
@@ -2698,20 +2720,151 @@ db_test!(
         .await
         .assert_status(StatusCode::OK);
         let id = planned_shop(&app, &admin).await;
-        let url = app.admin_api(&format!("x/imports/{id}/plan"));
-        admin
-            .send(
-                Method::PATCH,
-                &url,
-                Some(&json!({"tunnel": {"id-tunnel": true}})),
+        patch_tunnel(&app, &admin, id, json!({"id-tunnel": true}))
+            .await
+            .assert_status(StatusCode::OK);
+        run_import(&app, &admin, id).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        assert_eq!(
+            tunnels(&app, &admin).await,
+            [("default".to_owned(), true), ("tunnel".to_owned(), true)]
+        );
+        assert!(has_service(&fake, "rdp-cloudflared"));
+        assert!(has_service(&fake, "rdp-cloudflared-tunnel"));
+    }
+);
+
+db_test!(
+    two_cloudflared_containers_become_two_tunnels,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop_with_tunnel(&fake, TUNNEL_A);
+        cloudflared(&fake, "edge", "172.20.0.56", TUNNEL_B);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        patch_tunnel(
+            &app,
+            &admin,
+            id,
+            json!({"id-tunnel": true, "id-edge": true}),
+        )
+        .await
+        .assert_status(StatusCode::OK);
+        run_import(&app, &admin, id).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        assert_eq!(
+            tunnels(&app, &admin).await,
+            [("edge".to_owned(), true), ("tunnel".to_owned(), true)]
+        );
+        assert!(has_service(&fake, "rdp-cloudflared-edge"));
+        assert!(has_service(&fake, "rdp-cloudflared-tunnel"));
+    }
+);
+
+db_test!(
+    a_cloudflared_with_a_known_token_is_refused_as_a_new_tunnel,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::service;
+        use sea_orm::EntityTrait;
+        let fake = FakeDocker::default();
+        shop_with_tunnel(&fake, TUNNEL_A);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let add_first = || {
+            post(
+                &app,
+                &admin,
+                "apps/tunnels",
+                json!({"name": "first", "token": TUNNEL_A}),
             )
+        };
+        add_first().await.assert_status(StatusCode::OK);
+        let id = planned_shop(&app, &admin).await;
+        // One cloudflared per token: refused, and nothing chosen.
+        patch_tunnel(&app, &admin, id, json!({"id-tunnel": true}))
             .await
             .assert_validation_error("tunnel");
-        // As a service it is still possible: nothing changes the panel's tunnel.
         assert_eq!(
             plan_item(&app, &admin, id, "id-tunnel").await["as_tunnel"],
             false
         );
+        // Chosen before the token was a tunnel: the start refuses it.
+        admin
+            .send(Method::DELETE, &app.admin_api("x/apps/tunnels/first"), None)
+            .await
+            .assert_status(StatusCode::OK);
+        patch_tunnel(&app, &admin, id, json!({"id-tunnel": true}))
+            .await
+            .assert_status(StatusCode::OK);
+        add_first().await.assert_status(StatusCode::OK);
+        post(
+            &app,
+            &admin,
+            &format!("imports/{id}/start"),
+            json!({"confirm": "shop"}),
+        )
+        .await
+        .assert_validation_error("tunnel");
+        // As a service it still comes.
+        patch_tunnel(&app, &admin, id, json!({"id-tunnel": false}))
+            .await
+            .assert_status(StatusCode::OK);
+        run_import(&app, &admin, id).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        let names: Vec<String> = service::Entity::find()
+            .all(app.state().db())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(names.contains(&"tunnel".to_owned()), "{names:?}");
+        assert_eq!(tunnels(&app, &admin).await, [("first".to_owned(), true)]);
+    }
+);
+
+db_test!(
+    undoing_the_import_removes_only_the_tunnels_it_made,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop_with_tunnel(&fake, TUNNEL_B);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        // A tunnel named as the container would be: the import's gets another name.
+        post(
+            &app,
+            &admin,
+            "apps/tunnels",
+            json!({"name": "tunnel", "token": TUNNEL_A}),
+        )
+        .await
+        .assert_status(StatusCode::OK);
+        let id = planned_shop(&app, &admin).await;
+        patch_tunnel(&app, &admin, id, json!({"id-tunnel": true}))
+            .await
+            .assert_status(StatusCode::OK);
+        run_import(&app, &admin, id).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        assert_eq!(
+            tunnels(&app, &admin).await,
+            [("tunnel".to_owned(), true), ("tunnel-2".to_owned(), true)]
+        );
+        post(&app, &admin, &format!("imports/{id}/undo"), json!({})).await;
+        run_all(&app).await;
+        assert_eq!(
+            import_state(&app, id).await,
+            "reverted",
+            "{:?}",
+            fake.calls()
+        );
+        assert_eq!(tunnels(&app, &admin).await, [("tunnel".to_owned(), true)]);
+        assert!(has_service(&fake, "rdp-cloudflared-tunnel"));
+        assert!(!has_service(&fake, "rdp-cloudflared-tunnel-2"));
+        assert!(fake.calls().contains(&"start id-tunnel".to_owned()));
     }
 );
 

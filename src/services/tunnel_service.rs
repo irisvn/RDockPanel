@@ -21,7 +21,9 @@ use rustcms::{AppError, AppResult, AppState, ValidationErrors};
 use serde_json::{Value, json};
 
 use rustcms::db::begin_write;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+};
 
 use crate::models::{panel_setting, tunnel};
 use crate::services::docker_service::{Docker, DockerError, NetworkRequest, SYSTEM_LABEL};
@@ -213,6 +215,89 @@ pub async fn running_tokens(app: &AppState) -> AppResult<Vec<(String, String)>> 
         .collect())
 }
 
+/// The tunnel that has `token`. One cloudflared per token: two would share
+/// its connections.
+pub async fn holder<C: ConnectionTrait>(
+    app: &AppState,
+    db: &C,
+    token: &str,
+) -> AppResult<Option<String>> {
+    Ok(tunnel::all(db)
+        .await?
+        .into_iter()
+        .find(|row| {
+            row.token
+                .open(app.keyring(), &tunnel::token_context())
+                .is_ok_and(|t| t == token.trim())
+        })
+        .map(|row| row.name))
+}
+
+/// Keeps the new tunnel `name` with `token`, off ([`enable`] runs it), in
+/// `db`'s transaction: an import makes the row with its item. Another
+/// tunnel's token is refused.
+pub async fn reserve<C: ConnectionTrait>(
+    app: &AppState,
+    db: &C,
+    name: &str,
+    token: &str,
+) -> AppResult<()> {
+    let token = token.trim();
+    if !valid_name(name) || !valid_token(token) {
+        return Err(AppError::BadRequest(
+            "not a tunnel name and token".to_owned(),
+        ));
+    }
+    if holder(app, db, token).await?.is_some() {
+        return Err(ValidationErrors::field("token", "is already used by another tunnel").into());
+    }
+    let now = chrono::Utc::now();
+    tunnel::ActiveModel {
+        name: Set(name.to_owned()),
+        token: Set(Encrypted::seal(
+            app.keyring(),
+            &tunnel::token_context(),
+            &token.to_owned(),
+        )?),
+        enabled: Set(false),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    }
+    .insert(db)
+    .await?;
+    Ok(())
+}
+
+/// A tunnel name made of `base` (a container's name), none of `taken`:
+/// `default` is the old panel's tunnel, never made this way.
+pub fn name_for(base: &str, taken: &[String]) -> String {
+    let mut slug = String::new();
+    for c in base.to_ascii_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            slug.push(c);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_start_matches(|c: char| !c.is_ascii_lowercase());
+    let mut slug: String = slug.chars().take(34).collect();
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        slug = "tunnel".to_owned();
+    }
+    let free = |n: &str| n != DEFAULT && !taken.iter().any(|t| t == n);
+    if free(&slug) {
+        return slug;
+    }
+    (2..)
+        .map(|i| format!("{slug}-{i}"))
+        .find(|n| free(n))
+        .unwrap_or(slug)
+}
+
 /// A tunnel token as Cloudflare gives it: base64 of a JSON object with its
 /// account (`a`), tunnel (`t`) and secret (`s`).
 pub fn valid_token(token: &str) -> bool {
@@ -382,13 +467,7 @@ pub async fn enable(
                 )
                 .into());
             }
-            // One cloudflared per token (two would share its connections).
-            let others = tunnel::all(db).await?;
-            if others.iter().filter(|o| o.name != name).any(|o| {
-                o.token
-                    .open(app.keyring(), &tunnel::token_context())
-                    .is_ok_and(|t| t == token)
-            }) {
+            if holder(app, db, token).await?.is_some_and(|h| h != name) {
                 return Err(
                     ValidationErrors::field("token", "is already used by another tunnel").into(),
                 );
@@ -835,6 +914,19 @@ pub const HTTPS_VISITOR: &str = "rdp-tunnel-proto";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_container_name_becomes_a_free_tunnel_name() {
+        let taken = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        assert_eq!(name_for("tunnel", &[]), "tunnel");
+        assert_eq!(name_for("Shop_Tunnel.1", &[]), "shop-tunnel-1");
+        assert_eq!(name_for("1-cf", &[]), "cf");
+        assert_eq!(name_for("--", &[]), "tunnel");
+        assert_eq!(name_for("default", &[]), "default-2");
+        assert_eq!(name_for("cf", &taken(&["cf", "cf-2"])), "cf-3");
+        let long = name_for(&"a".repeat(60), &taken(&[&"a".repeat(34)]));
+        assert!(valid_name(&long) && long.ends_with("-2"), "{long}");
+    }
 
     #[test]
     fn connection_from_health() {

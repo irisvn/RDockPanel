@@ -651,10 +651,10 @@ pub struct Item {
     /// Secrets of its command line that become environment variables
     /// (`RDP_SECRET_1`…): names the plan shows, values never.
     pub command_secrets: usize,
-    /// A Cloudflare tunnel whose token can be read: it may run as the panel's
-    /// own tunnel (Settings → Cloudflare Tunnel) instead of a service.
+    /// A Cloudflare tunnel whose token can be read: it may run as a tunnel of
+    /// the panel (Settings → Cloudflare Tunnel) instead of a service.
     pub tunnel_token: bool,
-    /// Chosen to run as the panel's tunnel: no service is made.
+    /// Chosen to run as a tunnel of the panel: no service is made.
     pub as_tunnel: bool,
     /// Domains it was routed by: names only, added to the service when ticked.
     pub domains: Vec<DomainHint>,

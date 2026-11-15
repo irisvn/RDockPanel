@@ -23,6 +23,8 @@ pub struct Model {
     pub deployment_id: Option<i64>,
     /// `pending`, `stopped`, `copied`, `deployed`, `restored`.
     pub state: String,
+    /// The tunnel made of this cloudflared (`tunnels.name`): removed by an undo.
+    pub tunnel: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

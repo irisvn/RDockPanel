@@ -306,7 +306,7 @@ async fn run(app: &AppState, import_id: i64, token: &str) -> AppResult<()> {
     }
 }
 
-/// Whether the plan makes this item the panel's Cloudflare Tunnel.
+/// Whether the plan makes this item a tunnel of the panel.
 fn as_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> bool {
     cx.import
         .plan
@@ -900,42 +900,79 @@ async fn deploying(cx: &Cx<'_>) -> Result<Next, Failure> {
     ))
 }
 
-/// The original cloudflared becomes the panel's own Cloudflare Tunnel: it runs
-/// with the token of the original, which is read from Docker again (the plan
-/// holds none). Traffic can reach the services from here on.
+/// The original cloudflared becomes a tunnel of the panel's, named after it:
+/// it runs with the token of the original, which is read from Docker again
+/// (the plan holds none). Traffic can reach the services from here on.
 async fn deploy_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> Result<(), Failure> {
+    use crate::services::tunnel_service;
     let token =
         crate::services::import_service::tunnel_token_of_container(&cx.docker, &item.container_id)
             .await?;
-    let was_on = crate::services::tunnel_service::running_tokens(cx.app)
-        .await
-        .map_err(|e| e.to_string())?
-        .iter()
-        .any(|(name, _)| name == crate::services::tunnel_service::DEFAULT);
-    // Marked before: a failure from here waits for the admin, and an undo turns it off.
     let current = container_import::Entity::find_by_id(cx.import.id)
         .one(cx.db())
         .await
         .map_err(|e| e.to_string())?
         .ok_or("the import is gone")?;
-    let mut flags = container_import::with_flag(current.flags.as_deref(), "ingress");
-    if !was_on {
-        flags = container_import::with_flag(Some(&flags), "tunnel");
-    }
+    let flags = container_import::with_flag(current.flags.as_deref(), "ingress");
     let mut mark = current.into_active_model();
     mark.flags = Set(Some(flags));
     mark.update(cx.db()).await.map_err(|e| e.to_string())?;
-    {
-        let _changing = crate::services::tunnel_service::exclusive().await;
-        cx.keeping(crate::services::tunnel_service::enable(
-            cx.app,
-            &cx.docker,
-            crate::services::tunnel_service::DEFAULT,
-            Some(&token),
-        ))
-        .await
-        .map_err(|e| e.to_string())?;
-    }
+    let _changing = tunnel_service::exclusive().await;
+    // A retry keeps the tunnel made before.
+    let made = match &item.tunnel {
+        Some(name) => crate::models::tunnel::named(cx.db(), name)
+            .await
+            .map_err(|e| e.to_string())?
+            .map(|t| t.name),
+        None => None,
+    };
+    let name = match made {
+        Some(name) => name,
+        None => {
+            let taken: Vec<String> = crate::models::tunnel::all(cx.db())
+                .await
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|t| t.name)
+                .collect();
+            let base = item
+                .compose_service
+                .as_deref()
+                .unwrap_or(&item.container_name);
+            let name = tunnel_service::name_for(base, &taken);
+            // The row with the item: an undo removes it, and only it.
+            let txn = rustcms::db::begin_write(cx.db())
+                .await
+                .map_err(|e| e.to_string())?;
+            tunnel_service::reserve(cx.app, &txn, &name, &token)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut kept = item.clone().into_active_model();
+            kept.tunnel = Set(Some(name.clone()));
+            kept.update(&txn).await.map_err(|e| e.to_string())?;
+            audit::record(
+                &txn,
+                &AuditContext::new(
+                    AuditActor::job("import_step", cx.import.created_by),
+                    RequestMeta::default(),
+                ),
+                AuditEntry::new("tunnel.create", "tunnels").key(name.clone()),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            txn.commit().await.map_err(|e| e.to_string())?;
+            name
+        }
+    };
+    // Another tunnel's token is refused (one cloudflared per token).
+    cx.keeping(tunnel_service::enable(
+        cx.app,
+        &cx.docker,
+        &name,
+        Some(&token),
+    ))
+    .await
+    .map_err(|e| e.to_string())?;
     set_item(cx, item, |a| a.state = Set("deployed".to_owned())).await
 }
 
@@ -1030,7 +1067,21 @@ async fn observing(cx: &Cx<'_>) -> Result<Next, Failure> {
 }
 
 async fn undoing_step(cx: &Cx<'_>) -> Result<Next, Failure> {
-    // The panel's tunnel this import turned on goes off before the originals run again.
+    // The tunnels this import made go before the originals run again.
+    for name in cx.items.iter().filter_map(|i| i.tunnel.as_deref()) {
+        let _changing = crate::services::tunnel_service::exclusive().await;
+        match cx
+            .keeping(crate::services::tunnel_service::remove(
+                cx.app, &cx.docker, name,
+            ))
+            .await
+        {
+            // Never made (a failure before), or removed already (a retry).
+            Ok(()) | Err(AppError::NotFound) => {}
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+    // An import of an older release turned `default` on.
     if cx.import.has_flag("tunnel") {
         let _changing = crate::services::tunnel_service::exclusive().await;
         cx.keeping(crate::services::tunnel_service::disable(
@@ -1483,7 +1534,7 @@ pub async fn accept(
                 .one(&txn)
                 .await?
                 .is_some_and(|s| s.status == "running"),
-            // The panel's tunnel: running when it was turned on.
+            // A tunnel of the panel: running when it was turned on.
             None => item.state == "deployed",
         };
         if !running {

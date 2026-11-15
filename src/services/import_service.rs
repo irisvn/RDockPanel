@@ -689,6 +689,22 @@ fn image_of(doc: &Value) -> String {
         .to_owned()
 }
 
+/// Refuses `token` as a new tunnel's when a tunnel has it already (one
+/// cloudflared per token): the container can still come as a service.
+pub async fn new_tunnel_token(app: &AppState, token: &str) -> AppResult<()> {
+    if crate::services::tunnel_service::holder(app, app.db(), token)
+        .await?
+        .is_some()
+    {
+        return Err(rustcms::ValidationErrors::field(
+            "tunnel",
+            "that tunnel token is already used by another tunnel",
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// The tunnel token of an original cloudflared (its environment or command line),
 /// read again from Docker when it is needed: the plan never holds it.
 pub async fn tunnel_token_of_container(docker: &Docker, id: &str) -> Result<String, String> {
@@ -1026,7 +1042,7 @@ pub async fn start(
         });
     }
     let mut made = Vec::new();
-    // Containers that become the panel's own Cloudflare Tunnel: no service.
+    // Containers that become tunnels of the panel: no service.
     let mut tunnels = Vec::new();
     for item in brought.iter().filter(|i| i["as_tunnel"] == true) {
         let id = item["container_id"].as_str().unwrap_or_default().to_owned();
@@ -1034,19 +1050,7 @@ pub async fn start(
         let token = tunnel_token_of_container(&docker, &id)
             .await
             .map_err(|why| ValidationErrors::field("tunnel", &why))?;
-        // The panel has one tunnel: not taken from another.
-        // shortcut: only `default` counts, until imports make tunnels of their own.
-        if crate::services::tunnel_service::running_tokens(app)
-            .await?
-            .iter()
-            .any(|(name, running)| name == "default" && *running != token)
-        {
-            return Err(ValidationErrors::field(
-                "tunnel",
-                "the panel's Cloudflare Tunnel already runs another tunnel",
-            )
-            .into());
-        }
+        new_tunnel_token(app, &token).await?;
         tunnels.push((
             id,
             item["name"].as_str().unwrap_or_default().to_owned(),
