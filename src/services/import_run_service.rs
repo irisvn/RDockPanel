@@ -466,6 +466,17 @@ async fn stopping(cx: &Cx<'_>) -> Result<Next, Failure> {
         }
         let engine = cx.docker.engine();
         let id = item.container_id.clone();
+        // Whether it holds data it writes (a volume or a folder, not read only).
+        let writes = match item.service_id {
+            Some(service_id) => service_mount::Entity::find()
+                .filter(service_mount::Column::ServiceId.eq(service_id))
+                .all(cx.db())
+                .await
+                .map_err(|e| e.to_string())?
+                .iter()
+                .any(|m| matches!(m.kind.as_str(), "volume" | "link") && !m.read_only),
+            None => false,
+        };
         if item.was_running {
             // Docker restarts what only stopped: the policy first.
             if item
@@ -478,8 +489,9 @@ async fn stopping(cx: &Cx<'_>) -> Result<Next, Failure> {
                     .await
                     .map_err(|e| e.to_string())?;
             }
+            // What it writes needs time to be written: a long wait before the kill.
             engine
-                .container_action(&id, ContainerAction::Stop)
+                .stop_container(&id, if writes { 120 } else { 30 })
                 .await
                 .map_err(|e| format!("{}: {e}", item.container_name))?;
             let stopped = wait_until(cx, || async {
@@ -503,7 +515,8 @@ async fn stopping(cx: &Cx<'_>) -> Result<Next, Failure> {
             a.state = Set("stopped".to_owned());
         })
         .await?;
-        if code == 137 {
+        // Killed with data it was writing: the admin decides. Without, nothing is lost.
+        if code == 137 && writes {
             // On: the stops that remain, then the rest.
             return Ok(Next::Attention(
                 "stopping",

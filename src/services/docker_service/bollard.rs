@@ -1379,6 +1379,16 @@ end HUP; sleep 2; end KILL; true"#
         read
     }
 
+    async fn stop_container(&self, id: &str, timeout_s: u64) -> DockerResult<()> {
+        let options = ::bollard::query_parameters::StopContainerOptionsBuilder::new()
+            .t(i32::try_from(timeout_s).unwrap_or(i32::MAX))
+            .build();
+        self.client
+            .stop_container(id, Some(options))
+            .await
+            .map_err(map_err)
+    }
+
     async fn tag_image(&self, id: &str, repo: &str, tag: &str) -> DockerResult<()> {
         let options = ::bollard::query_parameters::TagImageOptionsBuilder::new()
             .repo(repo)

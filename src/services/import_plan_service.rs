@@ -191,6 +191,27 @@ fn finding(
     }
 }
 
+/// How many secrets of the command line move to the environment (their
+/// variables are `RDP_SECRET_<n>`, made when the services are).
+pub fn command_secrets(detail: &Detail) -> usize {
+    use crate::services::secret_scan_service::{ArgPart, secret_name, split_secret_args};
+    let known: Vec<String> = detail
+        .member
+        .env
+        .iter()
+        .filter(|(name, value)| secret_name(name) && !value.is_empty())
+        .map(|(_, value)| value.clone())
+        .collect();
+    split_secret_args(&detail.cmd, &known)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter(|p| matches!(p, ArgPart::Secret { .. }))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
 /// What the panel cannot or will not carry over, container by container.
 pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
     use crate::services::import_graph_service::excluded;
@@ -343,7 +364,12 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
             ));
         }
     }
+    // Docker lists a port for IPv4 and again for IPv6: said once.
+    let mut said_ports = BTreeSet::new();
     for port in &detail.ports {
+        if !said_ports.insert((port.host_port, port.protocol.clone())) {
+            continue;
+        }
         if matches!(port.host_ip.as_str(), "127.0.0.1" | "::1") {
             out.push(finding(
                 "port_loopback",
@@ -365,8 +391,8 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
                 "port_reserved",
                 Level::Confirm,
                 &format!("port {}", port.host_port),
-                "the panel keeps this port: use a domain or another port, or leave it out",
-                Some("Choose a domain, another port, or no host port."),
+                "the panel keeps this port: it is not published; reach the service by a domain, or give it another port afterwards",
+                Some("Confirm: add a domain or another port to the service after the import."),
             ));
         }
     }
@@ -421,6 +447,9 @@ pub struct Item {
     /// The names of the environment variables kept (a pair equal to the
     /// image's own is left out). Values are never in the plan.
     pub env_names: Vec<String>,
+    /// Secrets of its command line that become environment variables
+    /// (`RDP_SECRET_1`…): names the plan shows, values never.
+    pub command_secrets: usize,
     pub ports: Vec<Port>,
     pub findings: Vec<Finding>,
 }
@@ -496,6 +525,7 @@ pub fn plan_of(
                     choice: Choice::Blocked,
                     hard_group: root(&group, i),
                     env_names: vec![],
+                    command_secrets: 0,
                     ports: vec![],
                     findings: vec![finding(
                         "unreadable",
@@ -553,6 +583,7 @@ pub fn plan_of(
                 choice: if blocked { Choice::Blocked } else { Choice::Bring },
                 hard_group: root(&group, i),
                 env_names,
+                command_secrets: command_secrets(detail),
                 ports: detail.ports.clone(),
                 findings: found,
             }
@@ -867,6 +898,35 @@ mod tests {
         // The same user as the image's: nothing to say.
         d.user = "nonroot".to_owned();
         assert!(!codes(&findings(&d, &panel)).contains(&"user_kept"));
+    }
+
+    #[test]
+    fn a_port_on_both_address_families_is_said_once_and_the_secrets_of_a_command_are_counted() {
+        let panel = PanelFacts::default();
+        let mut d = detail("a", "web");
+        let port = |ip: &str| Port {
+            host_ip: ip.to_owned(),
+            host_port: 3000,
+            container_port: 3000,
+            protocol: "tcp".to_owned(),
+        };
+        d.ports = vec![port("0.0.0.0"), port("::")];
+        let found = findings(&d, &panel);
+        assert_eq!(
+            found.iter().filter(|f| f.code == "port_reserved").count(),
+            1
+        );
+        // The text says what happens: it is not published.
+        let said = found.iter().find(|f| f.code == "port_reserved").unwrap();
+        assert!(said.text.contains("not published"), "{}", said.text);
+        d.cmd = vec![
+            "valkey-server".to_owned(),
+            "--requirepass".to_owned(),
+            "s3cr3t-value".to_owned(),
+        ];
+        assert_eq!(command_secrets(&d), 1);
+        d.cmd = vec!["valkey-server".to_owned()];
+        assert_eq!(command_secrets(&d), 0);
     }
 
     #[test]

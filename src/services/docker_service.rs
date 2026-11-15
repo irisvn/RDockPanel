@@ -550,6 +550,12 @@ pub trait DockerApi: Send + Sync {
         let _ = (image, host_path, max);
         Err(unsupported("reading a host file"))
     }
+    /// Stops a container, waiting `timeout_s` seconds for it to end before it is
+    /// killed (a database needs time to write what it holds).
+    async fn stop_container(&self, id: &str, timeout_s: u64) -> DockerResult<()> {
+        let _ = timeout_s;
+        self.container_action(id, ContainerAction::Stop).await
+    }
     /// Gives the image `id` the name `repo:tag` (a second name: nothing is
     /// copied).
     async fn tag_image(&self, id: &str, repo: &str, tag: &str) -> DockerResult<()> {

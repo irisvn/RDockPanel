@@ -88,6 +88,8 @@ pub struct FakeDocker {
     pub helper_delay_ms: Arc<Mutex<u64>>,
     /// A failed task from long ago in every service's task list.
     pub old_failed: Arc<Mutex<bool>>,
+    /// The seconds each `stop_container` was given.
+    pub stop_timeouts: Arc<Mutex<Vec<u64>>>,
 }
 
 pub fn labels(system: bool) -> HashMap<String, String> {
@@ -276,6 +278,10 @@ impl DockerApi for FakeDocker {
             }
         }
         Ok(())
+    }
+    async fn stop_container(&self, id: &str, timeout_s: u64) -> DockerResult<()> {
+        self.stop_timeouts.lock().unwrap().push(timeout_s);
+        self.container_action(id, ContainerAction::Stop).await
     }
     async fn remove_container(&self, id: &str, _force: bool) -> DockerResult<()> {
         self.by_id(id)?;

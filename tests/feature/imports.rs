@@ -2469,3 +2469,37 @@ db_test!(
         assert_eq!(user.as_deref(), Some("0:0"));
     }
 );
+
+db_test!(
+    a_forced_stop_of_a_container_without_data_does_not_stop_the_import,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        // Nothing to write to: no mount on either (a stateless API and its cache).
+        for name in ["shop-web-1", "shop-db-1"] {
+            fake.inspected.lock().unwrap().get_mut(name).unwrap()["Mounts"] = json!([]);
+        }
+        *fake.stop_exit.lock().unwrap() = 137;
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        run_import(&app, &admin, id).await;
+        // 137 means no consistent data to lose here: the import goes on.
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+    }
+);
+
+db_test!(
+    a_container_with_data_gets_time_to_stop_before_it_is_killed,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let (app, fake, id) = started_shop(db).await;
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active");
+        // Their volumes are written: a long wait; a stop with no data would take a short one.
+        let timeouts = fake.stop_timeouts.lock().unwrap().clone();
+        assert!(!timeouts.is_empty());
+        assert!(timeouts.iter().all(|t| *t >= 60), "{timeouts:?}");
+    }
+);

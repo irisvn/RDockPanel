@@ -1349,6 +1349,10 @@ window.rustcms?.registerTranslations?.("vi", {
   "it looks like the panel's own database": "có vẻ là database của chính panel",
   "it runs the panel's own files": "chạy file của chính panel",
   "Read again.": "Đọc lại.",
+  "the panel keeps this port: it is not published; reach the service by a domain, or give it another port afterwards": "panel giữ cổng này: cổng không được mở; hãy truy cập service qua domain, hoặc cho nó cổng khác sau khi nhập",
+  "Confirm: add a domain or another port to the service after the import.": "Hãy xác nhận: thêm domain hoặc cổng khác cho service sau khi nhập.",
+  "{n} more from the command line (RDP_SECRET_1…): a password written there moves to the environment.": "Thêm {n} từ dòng lệnh (RDP_SECRET_1…): mật khẩu viết ở đó được chuyển sang biến môi trường.",
+  "By starting you confirm:": "Bắt đầu nghĩa là bạn xác nhận:",
 });
 
 export {};

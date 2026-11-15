@@ -19,6 +19,7 @@ type PlanItem = {
   compose_service: string | null;
   choice: "bring" | "leave" | "blocked";
   env_names: string[];
+  command_secrets: number;
   ports: Array<{ host_ip: string; host_port: number; container_port: number; protocol: string }>;
   findings: Finding[];
 };
@@ -192,9 +193,30 @@ export function ImportPage(props: PageProps<unknown> & { id: number }) {
     }
   };
   const start = async () => {
+    const confirmations = items
+      .filter((i) => i.choice === "bring")
+      .flatMap((i) => i.findings.filter((f) => f.level === "CONFIRM").map((f) => ({ name: i.compose_service ?? i.name, text: f.text })));
     const ok = await ask({
       title: t("Start importing {project}?").replace("{project}", imp.project_name),
-      body: t("The panel stops the originals, copies their data, changes their Compose file and deploys the services. They are kept to undo to."),
+      body: (
+        <>
+          <p>{t("The panel stops the originals, copies their data, changes their Compose file and deploys the services. They are kept to undo to.")}</p>
+          {confirmations.length > 0 && (
+            <>
+              <p>{t("By starting you confirm:")}</p>
+              <ul className="rdp2-findings">
+                {confirmations.map((c, n) => (
+                  <li key={n}>
+                    <span>
+                      <strong>{c.name}</strong>: {t(c.text)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      ),
       action: t("Start importing"),
       destructive: true,
       typed: imp.project_name,
@@ -417,7 +439,9 @@ function PlanTable(props: PageProps<unknown> & { imp: ImportView; plan: Plan; on
                   <span className="rdp2-strong-cell">{i.compose_service ?? i.name}</span>
                   <div className="rdp2-muted rdp2-small">{i.name}</div>
                 </td>
-                <td className="rdp2-small">{i.env_names.length > 0 ? `${i.env_names.length} ${t("environment variables")}` : "–"}</td>
+                <td className="rdp2-small">
+                  {i.env_names.length + i.command_secrets > 0 ? `${i.env_names.length + i.command_secrets} ${t("environment variables")}` : "–"}
+                </td>
                 <td>
                   <ChoiceBadge t={t} item={i} />
                 </td>
@@ -588,7 +612,12 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
           <span className="rdp2-mono">{item.name}</span>
         </Field>
         <Field label={t("Environment variables (names only)")}>
-          <span className="rdp2-mono rdp2-small">{item.env_names.join(" · ") || "–"}</span>
+          <span className="rdp2-mono rdp2-small">{item.env_names.join(" · ") || (item.command_secrets > 0 ? "" : "–")}</span>
+          {item.command_secrets > 0 && (
+            <span className="rdp2-small rdp2-muted">
+              {t("{n} more from the command line (RDP_SECRET_1…): a password written there moves to the environment.").replace("{n}", String(item.command_secrets))}
+            </span>
+          )}
         </Field>
         <Field label={t("Ports")}>
           <span className="rdp2-mono rdp2-small">
