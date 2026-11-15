@@ -143,6 +143,64 @@ async fn prune_skips_system_objects_and_inspect_hides_secrets() {
     );
 }
 
+/// Inspect and the container list hide secrets in command lines, health
+/// checks and labels too, not only in env values (0.11.1).
+#[tokio::test]
+async fn inspect_hides_secrets_in_commands_health_checks_and_labels() {
+    let (docker, fake) = docker();
+    fake.containers
+        .lock()
+        .unwrap()
+        .iter_mut()
+        .find(|c| c.name == "web")
+        .unwrap()
+        .labels
+        .insert(
+            "traefik.http.middlewares.a.basicauth.users".to_owned(),
+            "admin:$apr1$LabelHash".to_owned(),
+        );
+    fake.inspected.lock().unwrap().insert(
+        "web".to_owned(),
+        serde_json::json!({
+            "Id": "id-web",
+            "Path": "docker-entrypoint.sh",
+            "Args": ["valkey-server", "--requirepass", "ArgSecret123"],
+            "Config": {
+                "Env": ["REDIS_PASSWORD=EnvSecret456", "PATH=/bin"],
+                "Cmd": ["valkey-server", "--requirepass", "ArgSecret123"],
+                "Entrypoint": ["docker-entrypoint.sh"],
+                "Healthcheck": {"Test": [
+                    "CMD-SHELL",
+                    "mysqladmin ping -uroot -pHealthSecret789 && redis-cli -a EnvSecret456 ping"
+                ]},
+                "Labels": {"traefik.http.middlewares.a.basicauth.users": "admin:$apr1$LabelHash"},
+            },
+        }),
+    );
+
+    let doc = docker.inspect_container("web", Scope::User).await.unwrap();
+    let text = doc.to_string();
+    for secret in [
+        "ArgSecret123",
+        "EnvSecret456",
+        "HealthSecret789",
+        "LabelHash",
+    ] {
+        assert!(!text.contains(secret), "{secret} leaks: {text}");
+    }
+    assert_eq!(
+        doc["Args"],
+        serde_json::json!(["valkey-server", "--requirepass", "******"])
+    );
+    assert_eq!(
+        doc["Config"]["Entrypoint"],
+        serde_json::json!(["docker-entrypoint.sh"])
+    );
+
+    let list = serde_json::to_string(&docker.containers(Scope::User).await.unwrap()).unwrap();
+    assert!(!list.contains("LabelHash"), "{list}");
+}
+
 #[tokio::test]
 async fn identifiers_never_carry_paths_into_docker() {
     let (docker, fake) = docker();

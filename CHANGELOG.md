@@ -3,6 +3,12 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.11.1 — 2026-11-15
+
+- A container's details (Docker → Containers → Inspect) no longer show passwords written in its
+  command line (such as `--requirepass`), its health check or its labels (such as Traefik's
+  basic-auth users). The container list hides secret labels too.
+
 ## 0.11.0 — 2026-11-12
 
 - The panel installs on a **Mac with Apple silicon** (OrbStack or Docker Desktop): the same

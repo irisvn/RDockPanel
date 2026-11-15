@@ -18,7 +18,10 @@ digits, `_`, `.`, `-`, starting with a letter or digit: no `/` or `%`), resolved
 inspect, and every action then uses the full id, so a crafted name or a rename cannot redirect it to a
 protected object. Images are removed only by an id or a tag exactly as Docker lists it. `inspect` hides env values whose name looks secret
 (`PASSWORD`, `TOKEN`, `KEY`, `SECRET`, `AUTH`, …) and the password in URLs
-(`DATABASE_URL=mysql://user:******@host`).
+(`DATABASE_URL=mysql://user:******@host`). It also hides secrets in a container's command line
+(`Path`, `Args`, `Cmd`, `Entrypoint`: `--requirepass x`, `-p<x>`, `-u user:x`, `NAME=x` inside `sh -c`),
+in its health check, and in labels (Traefik's `basicauth.users`); the container list hides secret labels.
+`services/secret_scan_service.rs` does this, and scans every string of the inspect document for URL passwords and secret values. It matches known forms, so a secret in an unusual form can still show: keep secrets in environment variables.
 
 ## Bind mounts
 
@@ -45,7 +48,7 @@ who can replace a directory there with a symlink could point a later start elsew
   `RUST_LOG` asks.
 - Docker holds the values in clear: in the Swarm service's spec and in the containers' environment.
   Anyone who controls Docker on the host (or with `docker.view`, a container's inspect, which hides
-  only secret-looking names) can read them.
+  secret-looking names, command-line values and secret labels, but not every possible secret) can read them.
 - File mounts' contents are sealed the same way (`service_mounts.sealed_content`,
   `deployments.files`), written and replaced, never shown back.
 - A secret written into a service's command or health check is stored as typed: use environment

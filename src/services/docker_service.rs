@@ -18,25 +18,13 @@ use rustcms::{AppError, async_trait};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::services::secret_scan_service;
+
 pub use self::bollard::BollardDocker;
 
 /// Label the installer puts on the panel's own services, volumes, networks
 /// and secrets.
 pub const SYSTEM_LABEL: &str = "rdockpanel.system";
-
-/// Env names containing one of these have their value replaced in `inspect`.
-const SECRET_MARKERS: [&str; 9] = [
-    "PASSWORD",
-    "PASSWD",
-    "PASS",
-    "PWD",
-    "SECRET",
-    "TOKEN",
-    "KEY",
-    "CREDENTIAL",
-    "AUTH",
-];
-const REDACTED: &str = "******";
 
 #[derive(Debug, thiserror::Error)]
 pub enum DockerError {
@@ -511,14 +499,20 @@ impl Docker {
         self.0.info().await
     }
 
+    /// The containers `scope` sees, secret label values replaced.
     pub async fn containers(&self, scope: Scope) -> DockerResult<Vec<ContainerItem>> {
-        Ok(visible(self.0.containers().await?, scope, |c| &c.labels))
+        let mut items = visible(self.0.containers().await?, scope, |c| &c.labels);
+        for item in &mut items {
+            secret_scan_service::redact_labels(&mut item.labels);
+        }
+        Ok(items)
     }
 
-    /// The inspect document with secrets in env values replaced.
+    /// The inspect document with its secrets replaced: env values, command
+    /// lines, health checks and labels ([`secret_scan_service`]).
     pub async fn inspect_container(&self, id: &str, scope: Scope) -> DockerResult<Value> {
         let (_, mut doc) = self.resolve_container(id, scope).await?;
-        redact_env(&mut doc);
+        secret_scan_service::redact_container(&mut doc);
         Ok(doc)
     }
 
@@ -1285,69 +1279,11 @@ fn labels_of(doc: &Value) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-/// Replaces secrets in `Config.Env`: the whole value when the name looks
-/// secret, else the password of a URL's userinfo
-/// (`DATABASE_URL=mysql://user:******@host/db`).
-fn redact_env(doc: &mut Value) {
-    let Some(Value::Array(env)) = doc.pointer_mut("/Config/Env") else {
-        return;
-    };
-    for entry in env {
-        let Some(text) = entry.as_str() else { continue };
-        let Some((name, value)) = text.split_once('=') else {
-            continue;
-        };
-        let upper = name.to_ascii_uppercase();
-        let redacted = if SECRET_MARKERS.iter().any(|marker| upper.contains(marker)) {
-            Some(REDACTED.to_owned())
-        } else {
-            redact_userinfo(value)
-        };
-        if let Some(value) = redacted {
-            *entry = Value::String(format!("{name}={value}"));
-        }
-    }
-}
-
-/// `scheme://user:pass@rest` → `scheme://user:******@rest`; `None` when the
-/// value carries no password.
-fn redact_userinfo(value: &str) -> Option<String> {
-    let (scheme, rest) = value.split_once("://")?;
-    let (userinfo, host) = rest.split_once('@')?;
-    if userinfo.contains('/') {
-        return None;
-    }
-    let user = userinfo.split_once(':').map_or(userinfo, |(user, _)| user);
-    Some(format!("{scheme}://{user}:{REDACTED}@{host}"))
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
-
-    #[test]
-    fn redacts_secret_looking_env() {
-        let mut doc = json!({"Config": {"Env": [
-            "PATH=/bin", "DB_PASSWORD=hunter2", "api_key=x", "NOEQUALS",
-            "DATABASE_URL=mysql://panel:hunter2@db:3306/panel", "REDIS_URL=redis://:pw@cache",
-            "HOME_URL=https://x.io/a@b"
-        ]}});
-        redact_env(&mut doc);
-        assert_eq!(
-            doc["Config"]["Env"],
-            json!([
-                "PATH=/bin",
-                "DB_PASSWORD=******",
-                "api_key=******",
-                "NOEQUALS",
-                "DATABASE_URL=mysql://panel:******@db:3306/panel",
-                "REDIS_URL=redis://:******@cache",
-                "HOME_URL=https://x.io/a@b"
-            ])
-        );
-    }
 
     #[test]
     fn only_docker_identifiers_pass() {

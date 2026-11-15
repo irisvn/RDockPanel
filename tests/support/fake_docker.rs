@@ -59,6 +59,8 @@ pub struct FakeDocker {
     pub mounted: Arc<Mutex<Vec<String>>>,
     /// What the registry serves an image reference as (`registry_digest`).
     pub registry: Arc<Mutex<HashMap<String, String>>>,
+    /// Inspect documents by container name, instead of the minimal one.
+    pub inspected: Arc<Mutex<HashMap<String, Value>>>,
 }
 
 pub fn labels(system: bool) -> HashMap<String, String> {
@@ -192,6 +194,9 @@ impl DockerApi for FakeDocker {
             return Ok(json!({"Id": id, "Mounts": mounts}));
         }
         let c = self.container(id)?;
+        if let Some(doc) = self.inspected.lock().unwrap().get(&c.name) {
+            return Ok(doc.clone());
+        }
         Ok(
             json!({"Id": c.id, "Config": {"Labels": c.labels, "Env": ["PATH=/bin", "DB_PASSWORD=hunter2"]}}),
         )
