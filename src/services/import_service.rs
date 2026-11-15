@@ -582,6 +582,66 @@ pub struct Made {
     pub healthcheck: Option<(String, i32, i32)>,
 }
 
+/// A word of a shell script: as it is when it is plain, else quoted.
+fn script_word(word: &str) -> String {
+    if !word.is_empty()
+        && word.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '_' | '-' | '.' | '/' | ':' | '=' | '+' | '@' | ',')
+        })
+    {
+        word.to_owned()
+    } else {
+        shell_words::quote(word).into_owned()
+    }
+}
+
+/// The command the service runs. A secret in the original's command line
+/// moves to an environment variable (`RDP_SECRET_<n>`, added to `env`) and the
+/// command becomes `sh -c 'exec <entrypoint> <command> "$RDP_SECRET_<n>"'`: the
+/// image's entrypoint runs it, which runs the original entrypoint and command.
+fn command_of(detail: &Detail, env: &mut std::collections::BTreeMap<String, String>) -> String {
+    use crate::services::secret_scan_service::{ArgPart, secret_name, split_secret_args};
+    let known: Vec<String> = detail
+        .member
+        .env
+        .iter()
+        .filter(|(name, value)| secret_name(name) && !value.is_empty())
+        .map(|(_, value)| value.clone())
+        .collect();
+    let Some(parts) = split_secret_args(&detail.cmd, &known)
+        .filter(|parts| parts.iter().any(|p| matches!(p, ArgPart::Secret { .. })))
+    else {
+        return shell_words::join(&detail.cmd);
+    };
+    let mut script = String::from("exec");
+    for word in &detail.image_entrypoint {
+        script.push(' ');
+        script.push_str(&script_word(word));
+    }
+    let mut n = 0;
+    for part in parts {
+        script.push(' ');
+        match part {
+            ArgPart::Plain(arg) => script.push_str(&script_word(&arg)),
+            ArgPart::Secret { prefix, value } => {
+                n += 1;
+                let name = format!("RDP_SECRET_{n}");
+                script.push_str(&format!(
+                    "{}\"${name}\"",
+                    if prefix.is_empty() {
+                        String::new()
+                    } else {
+                        script_word(&prefix)
+                    }
+                ));
+                env.insert(name, value);
+            }
+        }
+    }
+    shell_words::join(["sh", "-c", script.as_str()])
+}
+
 /// The service a container becomes (an app: databases map to apps for now).
 pub fn new_service_of(
     detail: &Detail,
@@ -620,7 +680,11 @@ pub fn new_service_of(
         .cloned()
         .collect();
     if !detail.cmd.is_empty() && detail.cmd != detail.image_cmd {
-        new.command = Some(shell_words::join(&detail.cmd));
+        new.command = Some(command_of(detail, &mut new.env));
+    }
+    // Another user than the image's: kept (root too), the service's administrators' only.
+    if detail.user != detail.image_user && !detail.user.is_empty() {
+        new.user = Some(detail.user.clone());
     }
     if detail.memory > 0 {
         new.mem_limit_mb = u32::try_from(detail.memory / (1024 * 1024)).ok();
@@ -851,7 +915,9 @@ pub async fn start(
             one.service.clone(),
         )
         .await?;
-        let admin_only = one.local_image.is_some() || one.moved.iter().any(|m| m.mode == "link");
+        let admin_only = one.local_image.is_some()
+            || one.service.user.is_some()
+            || one.moved.iter().any(|m| m.mode == "link");
         let mut change = created.clone().into_active_model();
         if let Some((command, interval, retries)) = &one.healthcheck {
             change.healthcheck_cmd = Set(Some(command.clone()));
@@ -941,6 +1007,46 @@ pub async fn start(
 mod tests {
     use super::*;
     use crate::services::import_plan_service::Port;
+
+    #[test]
+    fn a_secret_in_the_command_goes_to_the_environment_and_the_command_reads_it() {
+        let mut detail = Detail::default();
+        detail.member.name = "cache".to_owned();
+        detail.repo_digests = vec!["valkey@sha256:abc".to_owned()];
+        detail.image_entrypoint = vec!["docker-entrypoint.sh".to_owned()];
+        detail.entrypoint = detail.image_entrypoint.clone();
+        detail.cmd = vec![
+            "valkey-server".to_owned(),
+            "--requirepass".to_owned(),
+            "s3cr3t value".to_owned(),
+            "--auth=tok3n".to_owned(),
+        ];
+        let made = new_service_of(&detail, "p", std::path::Path::new("/links")).unwrap();
+        let command = made.service.command.clone().unwrap();
+        // The panel's command is `sh -c '…'`: the image's entrypoint runs it, which runs the
+        // original entrypoint and command, with the secrets read from the environment.
+        assert!(command.starts_with("sh -c "), "{command}");
+        assert!(
+            command.contains(
+                "exec docker-entrypoint.sh valkey-server --requirepass \"$RDP_SECRET_1\""
+            ),
+            "{command}"
+        );
+        assert!(command.contains("--auth=\"$RDP_SECRET_2\""), "{command}");
+        assert!(
+            !command.contains("s3cr3t") && !command.contains("tok3n"),
+            "{command}"
+        );
+        assert_eq!(made.service.env["RDP_SECRET_1"], "s3cr3t value");
+        assert_eq!(made.service.env["RDP_SECRET_2"], "tok3n");
+        // The command splits back into `sh`, `-c`, the script.
+        assert_eq!(
+            crate::services::deploy_service::command_args(&command)
+                .unwrap()
+                .len(),
+            3
+        );
+    }
 
     #[test]
     fn a_port_published_on_both_address_families_is_one_port() {

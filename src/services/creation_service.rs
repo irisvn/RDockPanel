@@ -101,6 +101,15 @@ pub struct NewBuild {
     pub dockerfile: Option<String>,
 }
 
+/// The user of a container: a name or a number, optionally `:group`.
+pub fn valid_run_user(user: &str) -> bool {
+    !user.is_empty()
+        && user.len() <= 64
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | ':'))
+}
+
 /// A service to create.
 #[derive(Debug, Clone)]
 pub struct NewService {
@@ -131,6 +140,8 @@ pub struct NewService {
     pub cap_drop: Vec<String>,
     pub sysctls: BTreeMap<String, String>,
     pub groups: Vec<String>,
+    /// The user its container runs as when it is not its image's (an import's).
+    pub user: Option<String>,
     /// Its basic authentication: (user, password); hashed when made.
     pub basic_auth: Vec<(String, String)>,
     /// Their hashes, in that order, when made before the write
@@ -166,6 +177,7 @@ impl NewService {
             cap_drop: vec![],
             sysctls: BTreeMap::new(),
             groups: vec![],
+            user: None,
         }
     }
 
@@ -226,6 +238,11 @@ pub async fn create(
         > 0
     {
         errors.add("name", "is already taken in this project");
+    }
+    if let Some(user) = &new.user
+        && !valid_run_user(user)
+    {
+        errors.add("user", "is a name or an id, optionally `:group`");
     }
     let engine = match new.kind.as_str() {
         "app" | "compose" => None,
@@ -568,6 +585,7 @@ pub async fn create(
         dockerfile_path: Set(new.build.as_ref().and_then(|b| b.dockerfile_path.clone())),
         dockerfile: Set(new.build.as_ref().and_then(|b| b.dockerfile.clone())),
         compose: Set(new.compose.clone().filter(|t| !t.trim().is_empty())),
+        user: Set(new.user.clone()),
         cap_add: Set((!new.cap_add.is_empty()).then(|| new.cap_add.join(", "))),
         cap_drop: Set((!new.cap_drop.is_empty()).then(|| new.cap_drop.join(", "))),
         groups: Set((!new.groups.is_empty()).then(|| new.groups.join(", "))),

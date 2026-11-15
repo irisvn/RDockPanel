@@ -30,7 +30,9 @@ Helpers (the copy of a volume, a symlink, the rename of a Compose file) run with
 privileged, never auto-removed; they mount exactly what they need, and a Compose file is read from a
 container that is created and never started, with the file mounted read only. The plan, the answers, the
 audit entries and the logs hold names, never values; a secret written in a container's command line
-blocks the import until it is moved into the environment. A folder used in place is reached by a
+moves into an environment variable (the command reads it from there); one that cannot be cut out of its
+argument blocks the import. A container that ran as another user than its image's keeps that user, and its
+service is the administrators'. A folder used in place is reached by a
 symlink in the panel's links folder, and the service is `admin_only`; the panel's database, its
 files and the installer's folder are never imported. While an import runs, nothing else touches its
 services, the originals, their volumes or `prune`.

@@ -121,6 +121,9 @@ pub struct Snapshot {
     /// here so that rolling back to this deployment sees it too.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub admin_only: bool,
+    /// The user the container runs as, when it is not its image's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
     /// In maintenance: the addresses (canonical networks) that still reach
     /// the service.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -432,6 +435,7 @@ impl Snapshot {
             primary_domain,
             maintenance: service.maintenance,
             admin_only: service.admin_only,
+            user: service.user.clone().filter(|u| !u.is_empty()),
             cap_add: capabilities(service.cap_add.as_deref()),
             cap_drop: capabilities(service.cap_drop.as_deref()),
             sysctls: sysctls(service.sysctls.as_deref()).unwrap_or_default(),
@@ -802,6 +806,9 @@ pub fn desired(
         .collect();
     if !configs.is_empty() {
         container["Configs"] = json!(configs);
+    }
+    if let Some(user) = &snapshot.user {
+        container["User"] = json!(user);
     }
     if !snapshot.cap_add.is_empty() {
         container["CapabilityAdd"] = json!(snapshot.cap_add);
@@ -1742,6 +1749,7 @@ mod tests {
             rate_limit: None,
             maintenance_bypass: vec![],
             admin_only: false,
+            user: None,
         }
     }
 
@@ -1804,6 +1812,25 @@ mod tests {
             snapshot.mounts = vec![mount(kind, false)];
             assert!(!snapshot.zero_downtime_possible(), "{kind}");
         }
+    }
+
+    #[test]
+    fn a_users_reaches_the_container_and_an_old_snapshot_is_unchanged() {
+        let mut snapshot = snapshot();
+        let before = snapshot.hash();
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("\"user\"")
+        );
+        snapshot.user = Some("0:0".to_owned());
+        assert_ne!(snapshot.hash(), before);
+        let out = desired(&snapshot, &pinned(), &Runtime::default(), &production());
+        assert!(
+            canonical(&out.spec).contains("\"User\": \"0:0\""),
+            "{}",
+            canonical(&out.spec)
+        );
     }
 
     #[test]

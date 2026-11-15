@@ -210,7 +210,11 @@ db_test!(
         if app.state().db().get_database_backend() == sea_orm::DatabaseBackend::MySql {
             use sea_orm_migration::MigratorTrait;
             // The import migrations (their tables are empty here) go first, then the widening.
-            let undone = Migrator::down(app.state().db(), Some(3)).await;
+            let after_widening = Migrator::migrations()
+                .iter()
+                .filter(|m| m.name() > "m20261025_000000_widen_long_text_columns")
+                .count();
+            let undone = Migrator::down(app.state().db(), Some(after_widening as u32 + 1)).await;
             assert!(
                 undone
                     .as_ref()

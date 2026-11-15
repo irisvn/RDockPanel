@@ -2383,3 +2383,89 @@ db_test!(
         assert!(restore.cap_add.iter().any(|c| c == "DAC_OVERRIDE"));
     }
 );
+
+db_test!(
+    a_secret_in_a_command_and_another_user_are_carried_over_not_blocked,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::service;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let fake = FakeDocker::default();
+        shop(&fake);
+        {
+            let mut inspected = fake.inspected.lock().unwrap();
+            // A valkey: its password is on the command line.
+            inspected.get_mut("shop-web-1").unwrap()["Config"]["Cmd"] =
+                json!(["valkey-server", "--requirepass", SECRET]);
+            // A tunnel: it runs as root, its image does not.
+            inspected.get_mut("shop-db-1").unwrap()["Config"]["User"] = json!("0:0");
+        }
+        fake.images.lock().unwrap().clear();
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let plan = admin
+            .get(&app.admin_api(&format!("x/imports/{id}")))
+            .await
+            .json();
+        // Confirmed, never blocked; and no value in the plan.
+        let findings: Vec<String> = plan["plan"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|i| {
+                i["findings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|f| f["code"].as_str().unwrap().to_owned())
+            })
+            .collect();
+        assert!(
+            findings.contains(&"argv_secret_moved".to_owned()),
+            "{findings:?}"
+        );
+        assert!(findings.contains(&"user_kept".to_owned()), "{findings:?}");
+        assert!(
+            plan["plan"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|i| i["choice"] == "bring"),
+            "{plan}"
+        );
+        assert!(!plan.to_string().contains(SECRET));
+        run_import(&app, &admin, id).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        // The user is the service's, and the service is its administrators'.
+        let db_service = service::Entity::find()
+            .filter(service::Column::Name.eq("db"))
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(db_service.user.as_deref(), Some("0:0"));
+        assert!(db_service.admin_only);
+        // The command reads the password from the environment: it is not in Swarm's spec.
+        let spec = fake.services.lock().unwrap()["shop_web"]
+            .spec
+            .clone()
+            .unwrap();
+        let text = serde_json::to_string(&spec).unwrap();
+        assert!(
+            !text.contains(SECRET.to_string().as_str()) || text.contains("RDP_SECRET_1"),
+            "{text}"
+        );
+        assert!(text.contains("exec valkey-server"), "{text}");
+        let user = fake.services.lock().unwrap()["shop_db"]
+            .spec
+            .clone()
+            .unwrap()
+            .task_template
+            .unwrap()
+            .container_spec
+            .unwrap()
+            .user;
+        assert_eq!(user.as_deref(), Some("0:0"));
+    }
+);

@@ -58,12 +58,14 @@ hold what was written since).
 | environment | names and values sealed like any service's; pairs equal to the image's own are left out |
 | named volume | a volume of the panel's, `rdp_<project>_<service>_<name>`, copied |
 | host folder | used in place through a symlink the panel makes (`link` mount); the service is `admin_only` until the folder is moved |
+| command | as it was; a secret in it (`--requirepass x`, `--password=x`) moves to an environment variable `RDP_SECRET_<n>` and the command becomes `sh -c 'exec <entrypoint> <command> "$RDP_SECRET_<n>"'` (confirmed: the image needs a `/bin/sh`) |
+| user | a container that ran as another user than its image's (a tunnel as root) keeps it: `services.user`, shown on the service, and the service is `admin_only` |
 | ports | published as they were; loopback ones and the panel's reserved ones are left out |
 
-Blocked: paused or dead containers, `--rm`, privileged, host network, `network_mode: container:`, a user or
-entrypoint different from the image's, a volume with a driver or options, an environment variable that
+Blocked: paused or dead containers, `--rm`, privileged, host network, `network_mode: container:`, an entrypoint
+different from the image's, a volume with a driver or options, an environment variable that
 is not a valid name or holds `$(…)`, more than 100 variables or a value over 16 KiB, a secret in the
-command line (`--requirepass x`: make the container read it from the environment first), two containers
+command line that cannot be cut out of its argument (a URL's password), two containers
 sharing a Docker volume (in the panel a volume belongs to one service), and the panel's own objects.
 a secret in a container's health check, and two containers sharing a Docker volume (in the panel a
 volume belongs to one service; two that only read the same one each get a copy).

@@ -294,21 +294,33 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
         ));
     }
     if crate::services::secret_scan_service::redact_args(&detail.cmd, &known) != detail.cmd {
-        out.push(finding(
-            "argv_secret",
-            Level::Block,
-            "command",
-            "its command line holds a secret",
-            Some("Make it read the secret from an environment variable, then read again."),
-        ));
+        if crate::services::secret_scan_service::split_secret_args(&detail.cmd, &known).is_some() {
+            // The panel moves it: into an environment variable the command reads.
+            out.push(finding(
+                "argv_secret_moved",
+                Level::Confirm,
+                "command",
+                "its command line holds a secret: it moves to an environment variable and the command runs through `sh -c`",
+                Some("Confirm; the image needs a `/bin/sh`."),
+            ));
+        } else {
+            out.push(finding(
+                "argv_secret",
+                Level::Block,
+                "command",
+                "its command line holds a secret",
+                Some("Make it read the secret from an environment variable, then read again."),
+            ));
+        }
     }
     if detail.user != detail.image_user {
+        // Kept: the service runs as that user (root is said as such).
         out.push(finding(
+            "user_kept",
+            Level::Confirm,
             "user",
-            Level::Block,
-            "user",
-            "it runs as another user than its image's",
-            None,
+            "it runs as another user than its image's: the service keeps that user",
+            Some("Confirm, or change the image's user and read again."),
         ));
     }
     if !detail.entrypoint.is_empty() && detail.entrypoint != detail.image_entrypoint {
@@ -745,7 +757,6 @@ mod tests {
             "auto_remove",
             "privileged",
             "network_mode",
-            "user",
             "entrypoint",
             "env_name",
             "env_placeholder",
@@ -763,26 +774,38 @@ mod tests {
     }
 
     #[test]
-    fn a_secret_in_the_command_line_blocks_until_it_is_in_the_environment() {
+    fn a_secret_in_the_command_line_moves_to_the_environment_when_it_can() {
         let panel = PanelFacts::default();
         let mut d = detail("a", "cache");
-        d.member.command = vec!["valkey-server --requirepass s3cr3t-value".to_owned()];
         d.cmd = vec![
             "valkey-server".to_owned(),
             "--requirepass".to_owned(),
             "s3cr3t-value".to_owned(),
         ];
         let found = findings(&d, &panel);
-        let f = found.iter().find(|f| f.code == "argv_secret").unwrap();
-        assert_eq!(f.level, Level::Block);
+        // Confirmed, not blocked: the panel moves it (and the command runs through `sh -c`).
+        let f = found
+            .iter()
+            .find(|f| f.code == "argv_secret_moved")
+            .unwrap();
+        assert_eq!(f.level, Level::Confirm);
+        assert!(!codes(&found).contains(&"argv_secret"));
         assert!(!format!("{found:?}").contains("s3cr3t-value"));
+        // One that cannot be cut out of its argument still blocks.
+        d.cmd = vec!["app".to_owned(), "redis://:hunter22@cache".to_owned()];
+        let blocked = findings(&d, &panel);
+        let f = blocked.iter().find(|f| f.code == "argv_secret").unwrap();
+        assert_eq!(f.level, Level::Block);
         // A command without one is left alone.
         d.cmd = vec![
             "valkey-server".to_owned(),
             "--port".to_owned(),
             "6379".to_owned(),
         ];
-        assert!(!codes(&findings(&d, &panel)).contains(&"argv_secret"));
+        let none = findings(&d, &panel);
+        assert!(
+            !codes(&none).contains(&"argv_secret") && !codes(&none).contains(&"argv_secret_moved")
+        );
     }
 
     #[test]
@@ -829,6 +852,21 @@ mod tests {
             },
         ];
         assert!(!codes(&findings(&d, &panel)).contains(&"port_one_address"));
+    }
+
+    #[test]
+    fn another_user_than_the_images_is_kept_and_confirmed_not_blocked() {
+        let panel = PanelFacts::default();
+        let mut d = detail("a", "tunnel");
+        d.user = "0:0".to_owned();
+        d.image_user = "nonroot".to_owned();
+        let found = findings(&d, &panel);
+        let f = found.iter().find(|f| f.code == "user_kept").unwrap();
+        assert_eq!(f.level, Level::Confirm);
+        assert!(!codes(&found).contains(&"user"));
+        // The same user as the image's: nothing to say.
+        d.user = "nonroot".to_owned();
+        assert!(!codes(&findings(&d, &panel)).contains(&"user_kept"));
     }
 
     #[test]

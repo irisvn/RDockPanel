@@ -129,6 +129,10 @@ pub struct Model {
     /// imported service that mounts a host folder, copies host files or runs a
     /// local image.
     pub admin_only: bool,
+    /// The user its container runs as, when it is not its image's (`0:0`, `1000`):
+    /// set by an import only.
+    #[sea_orm(column_name = "run_user")]
+    pub user: Option<String>,
     pub deployed_at: Option<DateTimeUtc>,
     pub deployed_spec_hash: Option<String>,
     /// The deployment holding the service (with `lock_expires_at`).

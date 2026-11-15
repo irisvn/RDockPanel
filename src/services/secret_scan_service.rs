@@ -237,6 +237,44 @@ pub fn redact_args(args: &[String], known: &[String]) -> Vec<String> {
     out
 }
 
+/// One argument of a command, as it can be written again without its secrets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArgPart {
+    /// Kept as it is.
+    Plain(String),
+    /// `prefix` + the value of a secret (`--password=`, `-p`, or nothing).
+    Secret { prefix: String, value: String },
+}
+
+/// The arguments of a command with each secret set apart, so that the secret
+/// can move to an environment variable and the command read it from there.
+/// `None` when a secret sits inside a longer argument in a way that cannot be
+/// cut out (a URL's password, a known value in the middle of a word).
+pub fn split_secret_args(args: &[String], known: &[String]) -> Option<Vec<ArgPart>> {
+    let hidden = redact_args(args, known);
+    args.iter()
+        .zip(&hidden)
+        .map(|(arg, redacted)| {
+            if redacted == arg {
+                Some(ArgPart::Plain(arg.clone()))
+            } else if redacted == REDACTED {
+                Some(ArgPart::Secret {
+                    prefix: String::new(),
+                    value: arg.clone(),
+                })
+            } else {
+                // `--password=x` or `-px`: what comes before the mask is kept.
+                let prefix = redacted.strip_suffix(REDACTED)?;
+                let value = arg.strip_prefix(prefix)?;
+                (!value.is_empty()).then(|| ArgPart::Secret {
+                    prefix: prefix.to_owned(),
+                    value: value.to_owned(),
+                })
+            }
+        })
+        .collect()
+}
+
 /// A text (a shell command, one argument) with its secrets replaced.
 pub fn redact_text(text: &str, known: &[String]) -> String {
     let mut out = text.to_owned();
@@ -486,6 +524,45 @@ mod tests {
         ] {
             assert!(!text.contains(secret), "{secret} in {text}");
         }
+    }
+
+    #[test]
+    fn secrets_are_set_apart_when_they_can_be_cut_out() {
+        let parts = split_secret_args(
+            &strings(&[
+                "valkey-server",
+                "--requirepass",
+                "s3cr3t-value",
+                "--port=6379",
+                "--auth=tok3n",
+            ]),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            parts,
+            [
+                ArgPart::Plain("valkey-server".to_owned()),
+                ArgPart::Plain("--requirepass".to_owned()),
+                ArgPart::Secret {
+                    prefix: String::new(),
+                    value: "s3cr3t-value".to_owned()
+                },
+                ArgPart::Plain("--port=6379".to_owned()),
+                ArgPart::Secret {
+                    prefix: "--auth=".to_owned(),
+                    value: "tok3n".to_owned()
+                },
+            ]
+        );
+        // A secret inside a URL cannot be cut out of its argument.
+        assert_eq!(
+            split_secret_args(&strings(&["app", "redis://:hunter22@cache"]), &[]),
+            None
+        );
+        // Nothing to hide: every part plain.
+        let plain = split_secret_args(&strings(&["nginx", "-g", "daemon off;"]), &[]).unwrap();
+        assert!(plain.iter().all(|p| matches!(p, ArgPart::Plain(_))));
     }
 
     #[test]

@@ -128,6 +128,9 @@ impl Resource for ServiceResource {
             Field::column(service::Column::AdminOnly)
                 .guarded()
                 .readable(|_| true),
+            Field::column(service::Column::User)
+                .guarded()
+                .readable(|_| true),
             Field::column(service::Column::DeployedAt)
                 .guarded()
                 .readable(|_| true)

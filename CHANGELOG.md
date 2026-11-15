@@ -15,6 +15,9 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
   into a volume (and **Clean the old folder** deletes it). Buttons: Import containers (Dashboard and
   projects), Bring into the panel… (Docker → Containers) and Move all (a service's Storage tab); the guide
   is docs/import.md.
+- An imported container keeps the user it ran as (a tunnel as root), and a password on its command line
+  moves to an environment variable that the command reads, so they no longer block the import. The plan's
+  findings are translated.
 - Removing an image or pruning no longer takes an image that an imported service runs.
 
 ## 0.11.1 — 2026-11-15
