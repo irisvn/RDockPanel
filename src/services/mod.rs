@@ -26,6 +26,7 @@ pub mod github_service;
 pub mod home_service;
 pub mod import_compose_service;
 pub mod import_graph_service;
+pub mod import_move_service;
 pub mod import_plan_service;
 pub mod import_run_service;
 pub mod import_service;

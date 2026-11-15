@@ -40,6 +40,7 @@ other containers keep running.
 | `PANEL_TEST_TEMPLATES=1` | runs every real template's generator (network; about 15 minutes) and requires 95% to plan |
 | `PANEL_TEST_ALL_DATABASES=1` | with `PANEL_TEST_SWARM=1`, the database test runs MySQL, MariaDB and MongoDB too (large images; CI runs PostgreSQL and Redis) |
 | `PANEL_TEST_DOCKER=1` | also run against the real Docker engine: pulls `alpine:3.20`, runs a container labelled `rdockpanel.test=1`, removes it |
+| `PANEL_TEST_SWARM=1` (import) | `an_import_on_a_real_swarm` imports a real container (`ghcr.io/traefik/whoami`, a volume with a file, a folder and a Compose file under `$HOME`, outside the repository) into a real Swarm with `alpine:3` as the helper image, moves the folder into a volume, undoes both, and removes what it made (`i<pid>` objects, swept by `swarm_lock` if the run dies) |
 
 - Feature tests (`tests/feature/`) drive the app through HTTP with a `FakeDocker`
   (`tests/support/fake_docker.rs`): containers and networks whose ids differ from their names, as on a

@@ -8,6 +8,13 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
 - A service with a writable volume or folder no longer rolls with "zero downtime" (two tasks would
   write the same data at once): it stops the old task first.
 - A service cannot be named `rdockpanel` or `rdp-…`: those are the panel's own.
+- **Import existing containers** (docker run or docker compose) into a project as ordinary services:
+  the panel reads them and the ones they need, shows a plan with what blocks and what is lost, stops
+  the originals, copies their volumes, deploys services of its own and keeps the originals so the
+  whole thing can be undone. A folder on the machine is used in place, and **Move all** later copies it
+  into a volume (and **Clean the old folder** deletes it). The interface for it comes next; the routes
+  are in docs/import.md.
+- Removing an image or pruning no longer takes an image that an imported service runs.
 
 ## 0.11.1 — 2026-11-15
 

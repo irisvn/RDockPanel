@@ -130,6 +130,11 @@ passwords. `GET /services/{id}/credentials` (services.secrets) answers `{"passwo
 
 A Compose or privileged service's diagnostics, logs and terminal are its administrators' only.
 
+## Imports (`/admin/api/x`)
+
+Importing existing containers: `system.manage`; the routes, their bodies and the states are in
+[import.md](import.md#routes).
+
 ## Domains (`/apps`)
 
 | Method | Path | Permission | |

@@ -35,7 +35,7 @@ const LEASE: i64 = 90;
 
 /// The image of the helpers is missing, a wait ran out, Docker refused: the
 /// message the admin reads.
-type Failure = String;
+pub(crate) type Failure = String;
 
 /// Where a step leaves the import.
 enum Next {
@@ -112,21 +112,21 @@ async fn release<C: ConnectionTrait>(db: &C, id: i64, token: &str) {
 }
 
 /// What a step works with.
-struct Cx<'a> {
-    app: &'a AppState,
-    docker: std::sync::Arc<Docker>,
-    settings: ImportSettings,
-    import: container_import::Model,
-    items: Vec<container_import_item::Model>,
-    token: String,
+pub(crate) struct Cx<'a> {
+    pub(crate) app: &'a AppState,
+    pub(crate) docker: std::sync::Arc<Docker>,
+    pub(crate) settings: ImportSettings,
+    pub(crate) import: container_import::Model,
+    pub(crate) items: Vec<container_import_item::Model>,
+    pub(crate) token: String,
 }
 
 impl Cx<'_> {
-    fn db(&self) -> &sea_orm::DatabaseConnection {
+    pub(crate) fn db(&self) -> &sea_orm::DatabaseConnection {
         self.app.db()
     }
 
-    async fn alive(&self) -> Result<(), Failure> {
+    pub(crate) async fn alive(&self) -> Result<(), Failure> {
         match renew(self.db(), self.import.id, &self.token).await {
             Ok(true) => Ok(()),
             _ => Err("the import's lease was lost".to_owned()),
@@ -142,7 +142,10 @@ impl Cx<'_> {
             .ok_or_else(|| "the project is gone".to_owned())
     }
 
-    async fn service_of(&self, item: &container_import_item::Model) -> Option<service::Model> {
+    pub(crate) async fn service_of(
+        &self,
+        item: &container_import_item::Model,
+    ) -> Option<service::Model> {
         match item.service_id {
             Some(id) => service::Entity::find_by_id(id)
                 .one(self.db())
@@ -153,7 +156,7 @@ impl Cx<'_> {
         }
     }
 
-    fn timings(&self) -> Timings {
+    pub(crate) fn timings(&self) -> Timings {
         Timings {
             poll: self.settings.poll,
             settle: if self.settings.observe.is_zero() {
@@ -166,7 +169,7 @@ impl Cx<'_> {
     }
 
     /// Runs a helper container to its end: its exit code.
-    async fn helper(
+    pub(crate) async fn helper(
         &self,
         name: &str,
         cmd: Vec<&str>,
@@ -235,6 +238,10 @@ async fn run(app: &AppState, import_id: i64, token: &str) -> AppResult<()> {
         items,
         token: token.to_owned(),
     };
+    // Moving a folder into a volume has its own steps.
+    if cx.import.source_kind == "move" {
+        return crate::services::import_move_service::step(&cx).await;
+    }
     let undoing = matches!(state.as_str(), "undoing" | "draining_panel" | "restoring");
     // An undo asked for while a step held the import: taken here.
     if cx.import.undo_requested && !undoing {
@@ -286,7 +293,7 @@ fn resume_of(state: &str) -> &'static str {
 }
 
 /// Moves the import to `next` and queues its step, if the lease is still ours.
-async fn go(cx: &Cx<'_>, next: &str, why: Option<&str>) -> AppResult<()> {
+pub(crate) async fn go(cx: &Cx<'_>, next: &str, why: Option<&str>) -> AppResult<()> {
     let txn = rustcms::db::begin_write(cx.db()).await?;
     let row = container_import::Entity::find_by_id(cx.import.id)
         .lock_exclusive()
@@ -325,7 +332,7 @@ async fn go(cx: &Cx<'_>, next: &str, why: Option<&str>) -> AppResult<()> {
     Ok(())
 }
 
-async fn attention(cx: &Cx<'_>, resume: &str, why: &str) -> AppResult<()> {
+pub(crate) async fn attention(cx: &Cx<'_>, resume: &str, why: &str) -> AppResult<()> {
     let row = container_import::Entity::find_by_id(cx.import.id)
         .one(cx.db())
         .await?
@@ -388,7 +395,7 @@ async fn prepare(cx: &Cx<'_>) -> Result<Next, Failure> {
     Ok(Next::Go("stopping"))
 }
 
-async fn wait_until<F, Fut>(cx: &Cx<'_>, mut done: F) -> Result<bool, Failure>
+pub(crate) async fn wait_until<F, Fut>(cx: &Cx<'_>, mut done: F) -> Result<bool, Failure>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = bool>,
@@ -798,7 +805,7 @@ async fn ports_or_domains(cx: &Cx<'_>, service: &service::Model) -> bool {
 
 /// Asks a deployment of `service` as this import's step, and runs it here
 /// (a job that waits for another could hold every worker): its id.
-async fn deploy_service(
+pub(crate) async fn deploy_service(
     cx: &Cx<'_>,
     service: &service::Model,
     trigger: Trigger,

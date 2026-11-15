@@ -23,6 +23,18 @@ protected object. Images are removed only by an id or a tag exactly as Docker li
 in its health check, and in labels (Traefik's `basicauth.users`); the container list hides secret labels.
 `services/secret_scan_service.rs` does this, and scans every string of the inspect document for URL passwords and secret values. It matches known forms, so a secret in an unusual form can still show: keep secrets in environment variables.
 
+## Importing containers
+
+Helpers (the copy of a volume, a symlink, the rename of a Compose file) run with `CapDrop ALL` (only
+`CHOWN`, `DAC_OVERRIDE`, `FOWNER` for a copy), no network, a read-only root, `no-new-privileges`, never
+privileged, never auto-removed; they mount exactly what they need, and a Compose file is read from a
+container that is created and never started, with the file mounted read only. The plan, the answers, the
+audit entries and the logs hold names, never values; a secret written in a container's command line
+blocks the import until it is moved into the environment. A folder used in place is reached by a
+symlink in the panel's links folder, and the service is `admin_only`; the panel's database, its
+files and the installer's folder are never imported. While an import runs, nothing else touches its
+services, the originals, their volumes or `prune`.
+
 ## Bind mounts
 
 Off by default: `[panel] bind_roots` is empty, and the installer sets none and mounts none. To
@@ -61,7 +73,10 @@ who can replace a directory there with a symlink could point a later start elsew
   syntax), and route files are named after checked service names only. The panel owns
   `[panel] traefik_dir`: at boot it removes route files of services it does not have.
 - Docker objects of a service are labelled `rdockpanel.managed=true` with their project and service;
-  the panel refuses to touch a service of that name it did not create.
+  the panel refuses to touch a service of that name it did not create. Importing an existing container
+  never adopts it: the container is recreated as a service of the panel (see [import.md](import.md)); its
+  original is stopped and kept until the import is finished, and nothing else may touch it meanwhile.
+  The names `rdockpanel` and `rdp-*` belong to the panel's own services: a project's service cannot take one.
 
 ## Templates
 

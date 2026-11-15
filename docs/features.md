@@ -17,6 +17,13 @@ Everything RDockPanel does today. [Tiếng Việt](features.vi.md) · back to th
   same button sizes, extra row actions in a ⋯ menu, the same status words and colors, the panel's own dialogs,
   tables that work on a phone.
 
+**Importing existing containers** ([import.md](import.md))
+
+- A container (or a Compose project, with the containers it needs) started outside the panel becomes
+  a service of a project: read, planned (what blocks, what is lost), stopped, copied, deployed, and the
+  originals kept until the import is finished, so it can be undone. Folders on the machine are used in
+  place and can be moved into volumes later.
+
 **Server and Docker**
 
 - **Server metrics** on the Dashboard: live CPU, memory, disk and network in/out, with their recent

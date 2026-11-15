@@ -15,6 +15,12 @@ Những gì RDockPanel làm được hiện nay. [English](features.md) · quay 
 - **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** có các tab Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Trang bảo trì, Git, Backups, Notifications và API tokens; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
 - Mọi trang theo chung một bộ quy tắc thiết kế ([ui-guidelines.md](ui-guidelines.md)): nút cùng cỡ, thao tác phụ của từng dòng gom vào menu ⋯, trạng thái cùng chữ và màu, hộp thoại của panel thay cho của trình duyệt, bảng dùng được trên điện thoại.
 
+**Đưa container có sẵn vào panel** ([import.md](import.md), bằng tiếng Anh)
+
+- Container (hoặc dự án Compose cùng các container nó cần) chạy ngoài panel trở thành service của một
+  dự án: đọc, lập kế hoạch (cái gì chặn, cái gì mất), dừng, chép dữ liệu, deploy, và giữ bản gốc tới
+  khi kết thúc để hoàn tác được. Thư mục trên máy được dùng tại chỗ, về sau có thể chuyển vào volume.
+
 **Server và Docker**
 
 - **Số liệu server** ngay trên Dashboard: CPU, RAM, ổ đĩa, network vào/ra trực tiếp, kèm lịch sử gần đây.

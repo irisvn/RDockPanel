@@ -1105,7 +1105,19 @@ db_test!(
             let _ = docker_cli(&["service", "rm", &format!("{tag}_web")]);
             // Once the tasks' containers are gone.
             for _ in 0..30 {
-                let volumes = docker_cli(&["volume", "rm", &volume, &copy]);
+                // Every volume of the project (the copies, the moved folder).
+                let listed = cli_ok(&[
+                    "volume",
+                    "ls",
+                    "-q",
+                    "--filter",
+                    &format!("name=rdp_{tag}_"),
+                ]);
+                let mut names: Vec<&str> = listed.lines().collect();
+                names.extend([volume.as_str(), copy.as_str()]);
+                let mut rm = vec!["volume", "rm"];
+                rm.extend(names);
+                let volumes = docker_cli(&rm);
                 let net = docker_cli(&["network", "rm", &network]);
                 let gone = |o: &std::process::Output| {
                     o.status.success() || String::from_utf8_lossy(&o.stderr).contains("No such")
@@ -1272,6 +1284,54 @@ db_test!(
         // The service runs in Swarm.
         cli_ok(&["service", "inspect", &format!("{tag}_web")]);
 
+        // Move all: the folder is copied into a volume of the panel's, the
+        // service runs on it; then back on the folder.
+        let web = web_service(&app).await;
+        let folder_mount = mounts_of(&app, web.id)
+            .await
+            .into_iter()
+            .find(|m| m.target == "/bind")
+            .unwrap();
+        let short = folder_mount
+            .source
+            .clone()
+            .unwrap()
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_owned();
+        let moved = admin
+            .post_json(
+                &app.admin_api(&format!("x/services/{}/move-data", web.id)),
+                &json!({"confirm": "web"}),
+            )
+            .await;
+        moved.assert_status(StatusCode::ACCEPTED);
+        let moving = moved.json()["id"].as_i64().unwrap();
+        run_all(&app).await;
+        assert_eq!(import_state(&app, moving).await, "active");
+        assert_eq!(
+            cli_ok(&[
+                "run",
+                "--rm",
+                "-v",
+                &format!("rdp_{tag}_web_{short}:/b"),
+                "alpine:3",
+                "cat",
+                "/b/x"
+            ]),
+            "bind"
+        );
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/services/{}/move-data/undo", web.id)),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(import_state(&app, moving).await, "reverted");
+
         // Undone: the service goes, the original runs as it did, the file is back.
         admin
             .post_json(&app.admin_api(&format!("x/imports/{id}/undo")), &json!({}))
@@ -1386,5 +1446,220 @@ db_test!(
             fake.calls()
         );
         assert!(fake.calls().contains(&"start id-web".to_owned()));
+    }
+);
+
+/// `shop`, with a folder on the host that `web` writes (`/srv/web-folder`).
+fn shop_with_folder(fake: &FakeDocker) {
+    shop(fake);
+    let mut inspected = fake.inspected.lock().unwrap();
+    inspected.get_mut("shop-web-1").unwrap()["Mounts"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"Type": "bind", "Source": "/srv/web-folder", "Destination": "/folder", "RW": true}));
+}
+
+async fn web_service(app: &TestApp) -> rdockpanel::models::service::Model {
+    use rdockpanel::models::service;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    service::Entity::find()
+        .filter(service::Column::Name.eq("web"))
+        .one(app.state().db())
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+async fn mounts_of(app: &TestApp, service: i64) -> Vec<rdockpanel::models::service_mount::Model> {
+    use rdockpanel::models::service_mount;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    service_mount::Entity::find()
+        .filter(service_mount::Column::ServiceId.eq(service))
+        .all(app.state().db())
+        .await
+        .unwrap()
+}
+
+db_test!(
+    a_folder_in_place_moves_into_a_volume_and_back_then_the_old_folder_goes,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop_with_folder(&fake);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/start")),
+                &json!({"confirm": "shop"}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        let web = web_service(&app).await;
+        assert!(web.admin_only);
+        assert!(
+            mounts_of(&app, web.id)
+                .await
+                .iter()
+                .any(|m| m.kind == "link")
+        );
+
+        // Move: the folder is copied into a volume of the panel's and the mount changed.
+        let move_url = app.admin_api(&format!("x/services/{}/move-data", web.id));
+        admin
+            .post_json(&move_url, &json!({"confirm": "nope"}))
+            .await
+            .assert_validation_error("confirm");
+        let started = admin.post_json(&move_url, &json!({"confirm": "web"})).await;
+        started.assert_status(StatusCode::ACCEPTED);
+        let moving = started.json()["id"].as_i64().unwrap();
+        run_all(&app).await;
+        assert_eq!(
+            import_state(&app, moving).await,
+            "active",
+            "{:?}",
+            fake.calls()
+        );
+        let after = mounts_of(&app, web.id).await;
+        assert!(after.iter().all(|m| m.kind != "link"), "{after:?}");
+        assert!(
+            after
+                .iter()
+                .any(|m| m.target == "/folder" && m.kind == "volume")
+        );
+        // The copy came from the folder, read only; the old folder is untouched.
+        let helpers = fake.helpers.lock().unwrap().clone();
+        let copy = helpers
+            .iter()
+            .find(|h| h.mounts.iter().any(|m| m.source == "/srv/web-folder"))
+            .unwrap();
+        assert!(
+            copy.mounts
+                .iter()
+                .find(|m| m.source == "/srv/web-folder")
+                .unwrap()
+                .read_only
+        );
+        // Image only this machine has: still its administrators'.
+        assert!(web_service(&app).await.admin_only);
+
+        // Back: the mount is the link again (what was written since stays in the volume).
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/services/{}/move-data/undo", web.id)),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(
+            import_state(&app, moving).await,
+            "reverted",
+            "{:?}",
+            fake.calls()
+        );
+        assert!(
+            mounts_of(&app, web.id)
+                .await
+                .iter()
+                .any(|m| m.kind == "link" && m.target == "/folder")
+        );
+        // The volume stays (it may hold what was written since): a new move
+        // does not write over it.
+        let volume = format!(
+            "rdp_shop_web_{}",
+            after
+                .iter()
+                .find(|m| m.target == "/folder")
+                .unwrap()
+                .name
+                .clone()
+                .unwrap()
+        );
+        assert!(
+            fake.volumes
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|v| v.name == volume),
+            "{volume}"
+        );
+        let blocked = admin.post_json(&move_url, &json!({"confirm": "web"})).await;
+        blocked.assert_status(StatusCode::ACCEPTED);
+        let refused = blocked.json()["id"].as_i64().unwrap();
+        run_all(&app).await;
+        assert_eq!(import_state(&app, refused).await, "reverted");
+        assert!(
+            mounts_of(&app, web.id)
+                .await
+                .iter()
+                .any(|m| m.kind == "link")
+        );
+        // The admin removes it (the move was undone: the volume is theirs), then moves again.
+        admin
+            .send(
+                Method::DELETE,
+                &app.admin_api(&format!("x/docker/volumes/{volume}")),
+                None,
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        // Move again, then clean the old folder: its name typed, the rules checked again.
+        let again = admin.post_json(&move_url, &json!({"confirm": "web"})).await;
+        again.assert_status(StatusCode::ACCEPTED);
+        let moved_again = again.json()["id"].as_i64().unwrap();
+        run_all(&app).await;
+        assert_eq!(
+            import_state(&app, moved_again).await,
+            "active",
+            "{:?}",
+            fake.calls()
+        );
+        let clean = app.admin_api(&format!("x/services/{}/clean-old-folder", web.id));
+        admin
+            .post_json(
+                &clean,
+                &json!({"folder": "/srv/web-folder", "confirm": "wrong"}),
+            )
+            .await
+            .assert_validation_error("confirm");
+        // Not a folder of this service.
+        admin
+            .post_json(&clean, &json!({"folder": "/srv", "confirm": "srv"}))
+            .await
+            .assert_validation_error("folder");
+        let before = fake.helpers.lock().unwrap().len();
+        admin
+            .post_json(
+                &clean,
+                &json!({"folder": "/srv/web-folder", "confirm": "web-folder"}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let helpers = fake.helpers.lock().unwrap().clone();
+        let cleaning: Vec<_> = helpers[before..].iter().collect();
+        assert!(!cleaning.is_empty());
+        // Only the folder itself (and its parent for the last step) is mounted writable.
+        for h in &cleaning {
+            for m in h.mounts.iter().filter(|m| !m.read_only) {
+                assert!(
+                    ["/srv/web-folder", "/srv"].contains(&m.source.as_str())
+                        || m.source.contains("/links"),
+                    "{}",
+                    m.source
+                );
+            }
+        }
+        // Said once: the same again finds nothing to clean.
+        admin
+            .post_json(
+                &clean,
+                &json!({"folder": "/srv/web-folder", "confirm": "web-folder"}),
+            )
+            .await
+            .assert_validation_error("folder");
     }
 );

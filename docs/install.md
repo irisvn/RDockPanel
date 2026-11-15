@@ -83,6 +83,11 @@ panel is reached over HTTPS only.
     the database at each start. It reaches itself at `http://rdockpanel:3000` from Traefik
     (maintenance pages).
 
+Importing existing containers ([import.md](import.md)) needs no mount in the panel: its helper
+containers read and write the host through Docker. The symlinks of folders used in place live in
+`/var/lib/rdockpanel/links` (Linux; on a Mac `~/.rdockpanel/links`); the helpers use the panel's own
+image (a panel run from source sets `[panel] helper_image`).
+
 The panel's address (`/`) shows a public homepage: what RDockPanel is, its screens, the install
 command and a link to GitHub, with nothing of this server on it. **Settings → Panel** turns it off
 (`/` then opens the sign-in). The panel itself is at `/admin`.

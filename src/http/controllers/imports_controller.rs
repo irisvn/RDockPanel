@@ -489,3 +489,67 @@ pub async fn release_volume(
     .await?;
     Ok(Json(json!({ "released": volume })))
 }
+
+#[derive(Deserialize)]
+pub struct MoveData {
+    /// The service's name, typed to confirm.
+    confirm: String,
+}
+
+/// Moves the folders a service uses in place into volumes of the panel's: 202.
+pub async fn move_data(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+    Json(body): Json<MoveData>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let import = crate::services::import_move_service::start(
+        &app,
+        auth.principal(),
+        request,
+        id,
+        &body.confirm,
+    )
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": import }))))
+}
+
+/// Puts the folders back as the mounts (what was written to the volumes stays).
+pub async fn undo_move(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let import =
+        crate::services::import_move_service::undo(&app, auth.principal(), request, id).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": import }))))
+}
+
+#[derive(Deserialize)]
+pub struct CleanFolder {
+    folder: String,
+    /// The folder's name, typed to confirm.
+    confirm: String,
+}
+
+/// Deletes the old folder of a service whose data moved to a volume.
+pub async fn clean_old_folder(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(id): Path<i64>,
+    Json(body): Json<CleanFolder>,
+) -> AppResult<Json<Value>> {
+    crate::services::import_move_service::clean_old_folder(
+        &app,
+        auth.principal(),
+        request,
+        id,
+        &body.folder,
+        &body.confirm,
+    )
+    .await?;
+    Ok(Json(json!({ "cleaned": body.folder })))
+}

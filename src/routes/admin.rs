@@ -553,6 +553,21 @@ pub fn routes() -> AdminRoutes {
             AdminAccess::can(permissions::SYSTEM_MANAGE),
             imports::rescan,
         )
+        .post(
+            "/services/{id}/move-data",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::move_data,
+        )
+        .post(
+            "/services/{id}/move-data/undo",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::undo_move,
+        )
+        .post(
+            "/services/{id}/clean-old-folder",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::clean_old_folder,
+        )
         .delete(
             "/imports/{id}",
             AdminAccess::can(permissions::SYSTEM_MANAGE),

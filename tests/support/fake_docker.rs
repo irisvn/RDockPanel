@@ -398,6 +398,7 @@ impl DockerApi for FakeDocker {
     }
     async fn remove_volume(&self, name: &str) -> DockerResult<()> {
         self.record(format!("remove-volume {name}"));
+        self.volumes.lock().unwrap().retain(|v| v.name != name);
         Ok(())
     }
     async fn networks(&self) -> DockerResult<Vec<NetworkItem>> {

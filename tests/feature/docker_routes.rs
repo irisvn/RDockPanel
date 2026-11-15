@@ -234,6 +234,15 @@ db_test!(
                 Case::new(Method::POST, "/imports/999/volumes/1/release")
                     .expect("operator", &operator, StatusCode::FORBIDDEN)
                     .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/services/999/move-data")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::UNPROCESSABLE_ENTITY),
+                Case::new(Method::POST, "/services/999/move-data/undo")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::CONFLICT),
+                Case::new(Method::POST, "/services/999/clean-old-folder")
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::UNPROCESSABLE_ENTITY),
                 Case::new(Method::POST, "/imports/999/rescan")
                     .expect("operator", &operator, StatusCode::FORBIDDEN)
                     .expect("manager", &manager, StatusCode::NOT_FOUND),
