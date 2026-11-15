@@ -2714,3 +2714,214 @@ db_test!(
         );
     }
 );
+
+/// `shop-web-1` of [`shop`] routed by Traefik to `rule` on port 8080.
+fn routed_web(fake: &FakeDocker, rule: &str) {
+    let mut inspected = fake.inspected.lock().unwrap();
+    let labels = &mut inspected.get_mut("shop-web-1").unwrap()["Config"]["Labels"];
+    labels["traefik.enable"] = json!("true");
+    labels["traefik.http.routers.web.rule"] = json!(rule);
+    labels["traefik.http.services.web.loadbalancer.server.port"] = json!("8080");
+}
+
+/// A domain the panel serves already, on a service of another project.
+async fn served_elsewhere(app: &TestApp, host: &str) {
+    use rdockpanel::models::project;
+    use rdockpanel::services::creation_service::{NewDomain, NewService, create};
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+    let txn = rustcms::db::begin_write(app.state().db()).await.unwrap();
+    let legacy = match project::Entity::find()
+        .filter(project::Column::Name.eq("legacy"))
+        .one(&txn)
+        .await
+        .unwrap()
+    {
+        Some(p) => p,
+        None => project::ActiveModel {
+            name: Set("legacy".to_owned()),
+            created_at: Set(chrono::Utc::now()),
+            updated_at: Set(chrono::Utc::now()),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await
+        .unwrap(),
+    };
+    let mut new = NewService::app(host.replace('.', "-"), "ghcr.io/traefik/whoami");
+    new.domains = vec![NewDomain {
+        host: host.to_owned(),
+        path: "/".to_owned(),
+        port: 80,
+        https: false,
+        compose_service: None,
+    }];
+    create(&txn, app.state().keyring(), &legacy, new)
+        .await
+        .unwrap();
+    txn.commit().await.unwrap();
+}
+
+/// The panel's domains of `host` (any service): (service id, port).
+async fn domains_of_host(app: &TestApp, host: &str) -> Vec<(i64, i32)> {
+    use rdockpanel::models::service_domain;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    service_domain::Entity::find()
+        .filter(service_domain::Column::Host.eq(host))
+        .all(app.state().db())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|d| (d.service_id, d.port))
+        .collect()
+}
+
+async fn start_and_run(app: &TestApp, admin: &TestClient<'_>, id: i64) {
+    admin
+        .post_json(
+            &app.admin_api(&format!("x/imports/{id}/start")),
+            &json!({"confirm": "shop"}),
+        )
+        .await
+        .assert_status(StatusCode::ACCEPTED);
+    run_all(app).await;
+    assert_eq!(import_state(app, id).await, "active");
+}
+
+db_test!(
+    a_label_domain_is_added_to_the_imported_service,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(&fake, "Host(`shop.example.com`)");
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert_eq!(web["domains"][0]["host"], "shop.example.com", "{web}");
+        start_and_run(&app, &admin, id).await;
+        let served = domains_of_host(&app, "shop.example.com").await;
+        assert_eq!(served.len(), 1, "{served:?}");
+        assert_eq!(served[0].1, 8080);
+    }
+);
+
+db_test!(
+    a_host_the_panel_already_serves_is_skipped_with_a_confirmation,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(
+            &fake,
+            "Host(`shop.example.com`) || Host(`www.shop.example.com`)",
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        served_elsewhere(&app, "shop.example.com").await;
+        let id = planned_shop(&app, &admin).await;
+        let taken = |item: &Value| -> Vec<String> {
+            item["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|f| f["code"] == "domain_taken")
+                .inspect(|f| assert_eq!(f["level"], "CONFIRM"))
+                .map(|f| f["field"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert_eq!(taken(&web), ["shop.example.com"], "{web}");
+        // A host the panel serves since the plan was read: said when it changes.
+        served_elsewhere(&app, "www.shop.example.com").await;
+        let changed = admin
+            .send(
+                Method::PATCH,
+                &app.admin_api(&format!("x/imports/{id}/plan")),
+                Some(&json!({"project_name": "shop"})),
+            )
+            .await;
+        changed.assert_status(StatusCode::OK);
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert_eq!(
+            taken(&web),
+            ["shop.example.com", "www.shop.example.com"],
+            "{web}"
+        );
+        start_and_run(&app, &admin, id).await;
+        // Not routed twice: each stays its first service's.
+        assert_eq!(domains_of_host(&app, "shop.example.com").await.len(), 1);
+        assert_eq!(domains_of_host(&app, "www.shop.example.com").await.len(), 1);
+    }
+);
+
+db_test!(
+    unticking_a_domain_leaves_it_out,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(
+            &fake,
+            "Host(`shop.example.com`) || Host(`www.shop.example.com`)",
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let url = app.admin_api(&format!("x/imports/{id}/plan"));
+        for wrong in [
+            json!({"domains": {"id-ghost": []}}),
+            json!({"domains": {"id-web": ["other.example.com"]}}),
+        ] {
+            admin
+                .send(Method::PATCH, &url, Some(&wrong))
+                .await
+                .assert_validation_error("domains");
+        }
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"domains": {"id-web": ["www.shop.example.com"]}})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        let skipped: Vec<&Value> = web["domains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["skip"] == true)
+            .map(|d| &d["host"])
+            .collect();
+        assert_eq!(skipped, [&json!("www.shop.example.com")], "{web}");
+        start_and_run(&app, &admin, id).await;
+        assert_eq!(domains_of_host(&app, "shop.example.com").await.len(), 1);
+        assert!(
+            domains_of_host(&app, "www.shop.example.com")
+                .await
+                .is_empty()
+        );
+    }
+);
+
+db_test!(
+    undo_removes_the_domains_it_added,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(&fake, "Host(`shop.example.com`)");
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        start_and_run(&app, &admin, id).await;
+        assert_eq!(domains_of_host(&app, "shop.example.com").await.len(), 1);
+        post(&app, &admin, &format!("imports/{id}/undo"), json!({}))
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "reverted");
+        assert!(domains_of_host(&app, "shop.example.com").await.is_empty());
+    }
+);

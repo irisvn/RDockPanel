@@ -164,6 +164,54 @@ pub async fn guard_prune_containers<C: ConnectionTrait>(txn: &C) -> AppResult<()
 
 /// What marks the panel's own database: the loopback ports of its URL, and
 /// the working directory of a panel that runs from source.
+/// Marks the plan's domains the panel serves already (same host and path, any
+/// service): skipped, and a finding to confirm on their container. Run when
+/// the plan is read and when it changes.
+pub async fn mark_taken_domains<C: ConnectionTrait>(db: &C, plan: &mut Value) -> AppResult<()> {
+    use crate::models::service_domain;
+    let hosts: Vec<String> = plan["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|i| i["domains"].as_array().into_iter().flatten())
+        .filter_map(|d| d["host"].as_str().map(str::to_owned))
+        .collect();
+    if hosts.is_empty() {
+        return Ok(());
+    }
+    let served: Vec<(String, String)> = service_domain::Entity::find()
+        .filter(service_domain::Column::Host.is_in(hosts))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|d| (d.host, d.path))
+        .collect();
+    for item in plan["items"].as_array_mut().into_iter().flatten() {
+        let mut taken = Vec::new();
+        for hint in item["domains"].as_array_mut().into_iter().flatten() {
+            let (host, path) = (hint["host"].clone(), hint["path"].clone());
+            if served.iter().any(|(h, p)| host == *h && path == *p) {
+                hint["skip"] = json!(true);
+                taken.push(host);
+            }
+        }
+        let Some(findings) = item["findings"].as_array_mut() else {
+            continue;
+        };
+        findings.retain(|f| f["code"] != "domain_taken");
+        for host in taken {
+            findings.push(json!({
+                "code": "domain_taken",
+                "level": "CONFIRM",
+                "field": host,
+                "text": "the panel already serves this domain on another service: it is not added",
+                "how_to_unblock": "Confirm, or remove it from the other service and read again.",
+            }));
+        }
+    }
+    Ok(())
+}
+
 pub fn panel_facts() -> PanelFacts {
     let database_ports = ["DATABASE_URL", "RUSTCMS_TEST_MYSQL"]
         .iter()
@@ -404,6 +452,9 @@ async fn read(state: &AppState, row: &container_import::Model) -> Result<(Value,
     );
     let mut plan = serde_json::to_value(&plan).map_err(|e| e.to_string())?;
     plan["compose"] = compose_info;
+    mark_taken_domains(state.db(), &mut plan)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok((plan, gathered.fingerprint))
 }
 
@@ -830,7 +881,37 @@ pub async fn start(
             ValidationErrors::field("plan", "something in the plan blocks the import").into(),
         );
     }
-    for permission in ["projects.create", "services.create"] {
+    let brought: Vec<&Value> = items.iter().filter(|i| i["choice"] == "bring").collect();
+    // The ticked domains of each container that becomes a service.
+    let kept_domains = |item: &Value| -> Vec<crate::services::creation_service::NewDomain> {
+        item["domains"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|d| d["skip"] != true)
+            .map(|d| crate::services::creation_service::NewDomain {
+                host: d["host"].as_str().unwrap_or_default().to_owned(),
+                path: d["path"].as_str().unwrap_or("/").to_owned(),
+                port: d["port"]
+                    .as_u64()
+                    .and_then(|p| u16::try_from(p).ok())
+                    .unwrap_or(80),
+                https: d["https"] == true,
+                compose_service: None,
+            })
+            .collect()
+    };
+    let with_domains = brought
+        .iter()
+        .any(|i| i["as_tunnel"] != true && !kept_domains(i).is_empty());
+    for permission in [
+        "projects.create",
+        "services.create",
+        "service_domains.create",
+    ] {
+        if permission == "service_domains.create" && !with_domains {
+            continue;
+        }
         if !crate::services::access_service::admits(app.db(), principal, permission).await? {
             return Err(AppError::Forbidden);
         }
@@ -846,7 +927,6 @@ pub async fn start(
             message: "The containers changed since the plan was read: read it again",
         });
     }
-    let brought: Vec<&Value> = items.iter().filter(|i| i["choice"] == "bring").collect();
     let mut made = Vec::new();
     // Containers that become the panel's own Cloudflare Tunnel: no service.
     let mut tunnels = Vec::new();
@@ -879,8 +959,10 @@ pub async fn start(
             .iter()
             .find(|d| d.member.id == id)
             .ok_or_else(|| AppError::BadRequest("a container of the plan is gone".into()))?;
-        let one = new_service_of(detail, &row.project_name, &settings(app).links())
+        let mut one = new_service_of(detail, &row.project_name, &settings(app).links())
             .map_err(AppError::BadRequest)?;
+        // Written with the service, by its rules (`creation_service::create`).
+        one.service.domains = kept_domains(item);
         made.push((
             id.to_owned(),
             detail.member.name.clone(),
@@ -1065,7 +1147,16 @@ pub async fn start(
     queued.update(&txn).await?;
     let entry = AuditEntry::new("imports.start", "container_imports")
         .key(import_id.to_string())
-        .meta(serde_json::json!({ "project": row.project_name, "services": brought.len() }));
+        .meta(serde_json::json!({
+            "project": row.project_name,
+            "services": brought.len(),
+            "domains": brought
+                .iter()
+                .filter(|i| i["as_tunnel"] != true)
+                .flat_map(|i| kept_domains(i))
+                .map(|d| d.host)
+                .collect::<Vec<_>>(),
+        }));
     audit::record(
         &txn,
         &AuditContext::new(AuditActor::user(principal), request),

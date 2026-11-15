@@ -225,6 +225,8 @@ pub struct PlanChange {
     /// Container id → `true`: it becomes the panel's Cloudflare Tunnel (no
     /// service); `false`: a service again.
     tunnel: Option<BTreeMap<String, bool>>,
+    /// Container id → the hosts of its domains left out (the others are added).
+    domains: Option<BTreeMap<String, Vec<String>>>,
     /// Leaving a container behind breaks calls to it: said, and confirmed.
     confirm: Option<bool>,
 }
@@ -356,6 +358,31 @@ pub async fn change_plan(
             }
         }
     }
+    if let Some(domains) = &change.domains {
+        let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
+        for (container, skipped) in domains {
+            let item = items
+                .iter_mut()
+                .find(|i| i["container_id"] == *container)
+                .ok_or_else(|| invalid("domains", "names a container that is not in the plan"))?;
+            let hints = item["domains"].as_array_mut().ok_or(AppError::NotFound)?;
+            if skipped
+                .iter()
+                .any(|host| !hints.iter().any(|h| h["host"] == *host))
+            {
+                return Err(invalid(
+                    "domains",
+                    "names a domain the container does not have",
+                ));
+            }
+            for hint in hints {
+                let host = hint["host"].as_str().unwrap_or_default();
+                hint["skip"] = json!(skipped.iter().any(|s| s == host));
+            }
+        }
+    }
+    // A domain the panel serves since the plan was read is left out too.
+    crate::services::import_service::mark_taken_domains(&txn, &mut plan).await?;
     if cut_soft && change.confirm != Some(true) {
         return Err(invalid(
             "confirm",
@@ -372,7 +399,11 @@ pub async fn change_plan(
     let saved = changed.update(&txn).await?;
     let entry = AuditEntry::new("imports.plan", "container_imports")
         .key(id.to_string())
-        .meta(json!({ "choices": change.choices, "project_name": change.project_name }));
+        .meta(json!({
+            "choices": change.choices,
+            "project_name": change.project_name,
+            "domains": change.domains,
+        }));
     audit::record(
         &txn,
         &AuditContext::new(AuditActor::user(principal), request),

@@ -90,6 +90,8 @@ pub struct Detail {
     /// The image's own environment (a pair equal to one here is left out).
     pub image_env: Vec<(String, String)>,
     pub ports: Vec<Port>,
+    /// `Config.ExposedPorts` (TCP): the port a domain without one leads to.
+    pub exposed: Vec<u16>,
     pub size_rw: Option<i64>,
     /// Named volumes: name → (driver, has options).
     pub volume_drivers: BTreeMap<String, (String, bool)>,
@@ -168,6 +170,14 @@ impl Detail {
             repo_digests: strings(&image_doc["RepoDigests"]),
             image_env,
             ports,
+            exposed: doc["Config"]["ExposedPorts"]
+                .as_object()
+                .map(|map| {
+                    map.keys()
+                        .filter_map(|k| k.strip_suffix("/tcp")?.parse().ok())
+                        .collect()
+                })
+                .unwrap_or_default(),
             size_rw: doc["SizeRw"].as_i64(),
             volume_drivers: BTreeMap::new(),
             member,
@@ -218,6 +228,8 @@ pub struct DomainHint {
     pub path: String,
     pub port: Option<u16>,
     pub https: bool,
+    /// Left out of the service: unticked, or the panel serves it already.
+    pub skip: bool,
 }
 
 /// A plain hostname: dotted labels of letters, digits and hyphens.
@@ -337,6 +349,7 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
                         path: path.clone(),
                         port,
                         https,
+                        skip: false,
                     };
                     push(&mut hints, hint);
                 }
@@ -363,6 +376,7 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
                 path: "/".to_owned(),
                 port,
                 https: false,
+                skip: false,
             };
             push(&mut hints, hint);
         } else {
@@ -738,7 +752,15 @@ pub fn plan_of(
             };
             let m = &detail.member;
             let mut found = findings(detail, panel);
-            let (domains, skip_domains) = domains_of(m);
+            let (mut domains, skip_domains) = domains_of(m);
+            // As Traefik and nginx-proxy do: the only exposed port, else 80.
+            let fallback = match detail.exposed.as_slice() {
+                [only] => *only,
+                _ => 80,
+            };
+            for hint in domains.iter_mut().filter(|h| h.port.is_none()) {
+                hint.port = Some(fallback);
+            }
             for rule in &skip_domains {
                 found.push(finding(
                     "domain_rule",
@@ -1179,6 +1201,7 @@ mod tests {
             path: path.to_owned(),
             port,
             https,
+            skip: false,
         }
     }
 
@@ -1220,6 +1243,31 @@ mod tests {
         let plan = plan_of(&[d], &c, "a", "p", &PanelFacts::default(), "fp");
         assert!(codes(&plan.items[0].findings).contains(&"domain_rule"));
         assert_eq!(plan.items[0].skip_domains, notes);
+    }
+
+    #[test]
+    fn a_domain_without_a_port_leads_to_the_only_exposed_one_else_80() {
+        let mut d = detail("a", "web");
+        d.member.env = vec![("VIRTUAL_HOST".to_owned(), "a.io".to_owned())];
+        let c = closure(&[d.member.clone()], &["a".to_owned()]);
+        let port = |d: &Detail| {
+            plan_of(
+                std::slice::from_ref(d),
+                &c,
+                "a",
+                "p",
+                &PanelFacts::default(),
+                "fp",
+            )
+            .items[0]
+                .domains[0]
+                .port
+        };
+        assert_eq!(port(&d), Some(80));
+        d.exposed = vec![3000];
+        assert_eq!(port(&d), Some(3000));
+        d.exposed = vec![3000, 9000];
+        assert_eq!(port(&d), Some(80));
     }
 
     #[test]

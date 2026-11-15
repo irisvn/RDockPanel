@@ -3,7 +3,7 @@
 // doing, and the buttons of each state). The plan holds names and findings,
 // never a value of an environment variable.
 import type { PageProps } from "@rustcms/admin-sdk";
-import { Alert, Button, Dialog, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
+import { Alert, Button, Checkbox, Dialog, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { Fragment, useState } from "react";
 import { Icon } from "../../lib/icons";
 import { useAdminQuery } from "../../lib/query";
@@ -23,6 +23,7 @@ type PlanItem = {
   tunnel_token: boolean;
   as_tunnel: boolean;
   ports: Array<{ host_ip: string; host_port: number; container_port: number; protocol: string }>;
+  domains: Array<{ host: string; path: string; port: number | null; https: boolean; skip: boolean }>;
   findings: Finding[];
 };
 type Edge = { from: string; to: string; kind: string; signal: string; hardness: string };
@@ -70,6 +71,11 @@ function message(t: T, error: unknown): string {
   const said = fields ? Object.values(fields).flat() : [];
   if (said.length > 0) return said.map((m) => t(m)).join(" ");
   return t(error instanceof Error ? error.message : String(error));
+}
+
+/** A finding's text (translated), named by its host when it is a domain's. */
+function findingText(t: T, f: Finding) {
+  return f.code === "domain_taken" ? `${f.field}: ${t(f.text)}` : t(f.text);
 }
 
 /** Words of a finding's level (translated). */
@@ -218,7 +224,7 @@ export function ImportPage(props: PageProps<unknown> & { id: number }) {
   const start = async () => {
     const confirmations = items
       .filter((i) => i.choice === "bring")
-      .flatMap((i) => i.findings.filter((f) => f.level === "CONFIRM").map((f) => ({ name: i.compose_service ?? i.name, text: f.text })));
+      .flatMap((i) => i.findings.filter((f) => f.level === "CONFIRM").map((f) => ({ name: i.compose_service ?? i.name, text: findingText(t, f) })));
     const ok = await ask({
       title: t("Start importing {project}?").replace("{project}", imp.project_name),
       body: (
@@ -231,7 +237,7 @@ export function ImportPage(props: PageProps<unknown> & { id: number }) {
                 {confirmations.map((c, n) => (
                   <li key={n}>
                     <span>
-                      <strong>{c.name}</strong>: {t(c.text)}
+                      <strong>{c.name}</strong>: {c.text}
                     </span>
                   </li>
                 ))}
@@ -614,6 +620,22 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
       setBusy(false);
     }
   };
+  // A domain ticked or not: the hosts left out are sent.
+  const setDomain = async (host: string, on: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const skipped = item.domains.filter((d) => (d.host === host ? !on : d.skip)).map((d) => d.host);
+      await props.api.patch(`/imports/${props.imp.id}/plan`, { domains: { [item.container_id]: skipped } });
+      props.toast.success(t("Saved"));
+      props.onSaved();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const taken = (host: string) => item.findings.some((f) => f.code === "domain_taken" && f.field === host);
   const choose = async (choice: "bring" | "leave") => {
     setBusy(true);
     setError(null);
@@ -683,6 +705,22 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
             {item.ports.length === 0 ? "–" : item.ports.map((p) => `${p.host_ip || "*"}:${p.host_port} → ${p.container_port}/${p.protocol}`).join(", ")}
           </span>
         </Field>
+        {item.domains.length > 0 && (
+          <Field label={t("Domains")} help={t("Ticked domains are added to the service when it deploys.")}>
+            <div className="rdp2-form">
+              {item.domains.map((d) => (
+                <label key={`${d.host}${d.path}`} className="rdp2-row">
+                  <Checkbox checked={!d.skip} disabled={!editable || busy || taken(d.host)} onChange={(e) => setDomain(d.host, e.target.checked)} />
+                  <span className="rdp2-mono">
+                    {d.host}
+                    {d.path === "/" ? "" : d.path} → {d.port ?? 80}
+                  </span>
+                  {taken(d.host) && <span className="rdp2-muted rdp2-small">{t("the panel serves it already")}</span>}
+                </label>
+              ))}
+            </div>
+          </Field>
+        )}
         <div>
           <div className="rdp2-field-label">{t("Findings")}</div>
           {item.findings.length === 0 ? (
@@ -693,7 +731,7 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
                 <li key={n}>
                   <span className="rdp2-finding-level">{levelWord(t, f.level)}</span>
                   <span>
-                    {t(f.text)}
+                    {findingText(t, f)}
                     {f.how_to_unblock && <div className="rdp2-muted rdp2-small">{t(f.how_to_unblock)}</div>}
                   </span>
                 </li>
