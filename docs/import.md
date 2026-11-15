@@ -7,6 +7,11 @@ with it, plans the move, stops the originals, copies their data, deploys service
 the originals so that the whole thing can be undone. [Features](features.md) ·
 [Architecture](architecture.md#importing-existing-containers).
 
+**In the interface:** the Dashboard and a project have **Import containers**; Docker → Containers has
+**Bring into the panel…** in a row's menu; a service's Storage tab has **Move all** when it uses a folder in
+place. Each opens or leads to the import's page (`/p/dashboard/_import/{id}`: its plan, what it loses, its
+state and the buttons of that state). A project's name cannot start with `_`, so the path never clashes.
+
 Only users with `system.manage` import (permission checks on the project are made when it starts).
 There is no new permission.
 
@@ -123,7 +128,8 @@ the shared worker pool (`workers = 4` in `config/queue.toml`).
 
 ## Not done yet
 
-The streamed log of an import (poll `GET /imports/{id}`), re-checking a link's target at every later
-deploy (it is checked when the import makes it), databases as database services (they map to apps), a
-partial import of a Compose project does not edit its file (the watch stops what runs again), the
-Docker network guard for the originals' networks, and the interface (pages and dialogs).
+The streamed log of an import (the page looks again every 2 seconds), re-checking a link's target at every
+later deploy (it is checked when the import makes it), databases as database services (they map to apps), a
+partial import of a Compose project does not edit its file (the watch stops what runs again), the Docker
+network guard for the originals' networks, the volume's size and the estimated downtime in the plan's
+overview, and the plan's choice of a domain or another port for a port the panel keeps.

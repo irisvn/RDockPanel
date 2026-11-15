@@ -3,7 +3,7 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
-## Unreleased
+## 0.12.0 — 2026-11-15
 
 - A service with a writable volume or folder no longer rolls with "zero downtime" (two tasks would
   write the same data at once): it stops the old task first.
@@ -12,8 +12,9 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
   the panel reads them and the ones they need, shows a plan with what blocks and what is lost, stops
   the originals, copies their volumes, deploys services of its own and keeps the originals so the
   whole thing can be undone. A folder on the machine is used in place, and **Move all** later copies it
-  into a volume (and **Clean the old folder** deletes it). The interface for it comes next; the routes
-  are in docs/import.md.
+  into a volume (and **Clean the old folder** deletes it). Buttons: Import containers (Dashboard and
+  projects), Bring into the panel… (Docker → Containers) and Move all (a service's Storage tab); the guide
+  is docs/import.md.
 - Removing an image or pruning no longer takes an image that an imported service runs.
 
 ## 0.11.1 — 2026-11-15

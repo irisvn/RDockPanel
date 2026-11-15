@@ -80,6 +80,25 @@ export function ServicePage(props: Props) {
       setError(err);
     }
   };
+  // The folders in use in place go into volumes of the panel's (docs/import.md).
+  const moveAll = async () => {
+    const ok = await ask({
+      title: t("Move the folders of {name} into volumes?").replace("{name}", s.name),
+      body: t("The service stops while its folders are copied into volumes, then runs on them. The old folders stay until you clean them, and it can be undone."),
+      action: t("Move all"),
+      destructive: true,
+      typed: s.name,
+    });
+    if (!ok) return;
+    setError(null);
+    try {
+      const made = await props.api.post<{ id: number }>(`/services/${s.id}/move-data`, { confirm: s.name });
+      props.toast.success(t("Move queued"));
+      props.navigate(`/p/dashboard/_import/${made.id}`);
+    } catch (err) {
+      setError(err);
+    }
+  };
   const saved = () => {
     props.toast.success(t("Saved. Deploy to apply it."));
     refresh();
@@ -202,7 +221,9 @@ export function ServicePage(props: Props) {
         {tab === "scripts" && <ScriptsTab {...props} d={d} onSaved={saved} />}
         {tab === "source" && <SourceTab t={t} d={d} api={props.api} onSaved={saved} />}
         {tab === "storage" && !d.can.mounts.view && <p className="rdp2-muted">{t("You may not see mounts.")}</p>}
-        {tab === "storage" && d.can.mounts.view && <StorageTab t={t} d={d} onSaved={saved} onError={setError} />}
+        {tab === "storage" && d.can.mounts.view && (
+          <StorageTab t={t} d={d} onSaved={saved} onError={setError} onMove={props.can("system.manage") ? moveAll : undefined} />
+        )}
         {tab === "advanced" && (
           <AdvancedTab
             t={t}
@@ -1204,7 +1225,7 @@ function SourceTab(props: { t: T; d: ServiceDetail; api: Props["api"]; onSaved: 
   );
 }
 
-function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onError: (e: unknown) => void }) {
+function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onError: (e: unknown) => void; onMove?: () => void }) {
   const { d, t } = props;
   const ask = useAsk();
   const [adding, setAdding] = useState(false);
@@ -1221,11 +1242,18 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
       description={t("Volumes keep data across deploys. A host directory needs the system permission.")}
       flush
       actions={
-        d.can.mounts.create && (
-          <Button size="sm" onClick={() => setAdding(true)}>
-            {t("Add mount")}
-          </Button>
-        )
+        <>
+          {props.onMove && d.mounts.some((m) => m.kind === "link") && (
+            <Button size="sm" variant="outline" onClick={props.onMove}>
+              {t("Move all")}
+            </Button>
+          )}
+          {d.can.mounts.create && (
+            <Button size="sm" onClick={() => setAdding(true)}>
+              {t("Add mount")}
+            </Button>
+          )}
+        </>
       }
     >
       {d.mounts.length === 0 ? (
@@ -1250,7 +1278,9 @@ function StorageTab(props: { t: T; d: ServiceDetail; onSaved: () => void; onErro
                     {t(m.kind)}
                     {m.read_only && <div className="rdp2-muted rdp2-small">{t("read-only")}</div>}
                   </td>
-                  <td className="rdp2-mono">{m.kind === "file" ? <span className="rdp2-muted">–</span> : m.kind === "bind" ? m.source : m.name}</td>
+                  <td className="rdp2-mono">
+                    {m.kind === "file" ? <span className="rdp2-muted">–</span> : m.kind === "bind" ? m.source : m.kind === "link" ? m.link_target : m.name}
+                  </td>
                   <td className="rdp2-mono">{m.target}</td>
                   <td>
                     <RowActions

@@ -3,7 +3,7 @@
 // reads "Running". Words are English sources translated by `t()`.
 
 export type Tone = "ok" | "busy" | "bad" | "off";
-export type StatusKind = "service" | "deployment" | "action" | "container" | "health";
+export type StatusKind = "service" | "deployment" | "action" | "container" | "health" | "import";
 
 type Entry = [Tone, string];
 
@@ -60,7 +60,30 @@ const HEALTH: Record<string, Entry> = {
   stopped: ["off", "Stopped"],
 };
 
+// An import of existing containers (docs/import.md): where it is.
+const IMPORT: Record<string, Entry> = {
+  discovering: ["busy", "Reading"],
+  discover_failed: ["bad", "Could not read"],
+  planned: ["off", "Ready"],
+  queued: ["busy", "Queued"],
+  preparing: ["busy", "Preparing"],
+  stopping: ["busy", "Stopping the originals"],
+  draining: ["busy", "Waiting for the originals"],
+  copying: ["busy", "Copying"],
+  editing_compose: ["busy", "Editing the Compose file"],
+  deploying: ["busy", "Deploying"],
+  observing: ["busy", "Watching"],
+  active: ["ok", "Active"],
+  needs_attention: ["bad", "Needs you"],
+  undoing: ["busy", "Undoing"],
+  draining_panel: ["busy", "Waiting for the new services"],
+  restoring: ["busy", "Restoring the originals"],
+  reverted: ["off", "Undone"],
+  finished: ["off", "Finished"],
+};
+
 const KINDS: Record<StatusKind, Record<string, Entry>> = {
+  import: IMPORT,
   service: SERVICE,
   deployment: DEPLOYMENT,
   action: ACTION,

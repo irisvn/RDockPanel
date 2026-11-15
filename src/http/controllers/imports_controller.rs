@@ -192,7 +192,29 @@ async fn find(app: &AppState, id: i64) -> AppResult<container_import::Model> {
 }
 
 pub async fn show(State(app): State<AppState>, Path(id): Path<i64>) -> AppResult<Json<Value>> {
-    Ok(Json(view(&find(&app, id).await?)))
+    use crate::models::container_import_volume;
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
+    let row = find(&app, id).await?;
+    let volumes = container_import_volume::Entity::find()
+        .filter(container_import_volume::Column::ImportId.eq(id))
+        .order_by_asc(container_import_volume::Column::Id)
+        .all(app.db())
+        .await?;
+    let mut shown = view(&row);
+    shown["volumes"] = json!(
+        volumes
+            .iter()
+            .map(|v| json!({
+                "id": v.id,
+                "original_name": v.original_name,
+                "mode": v.mode,
+                "panel_volume": v.panel_volume,
+                "copied_at": v.copied_at,
+                "released_at": v.released_at,
+            }))
+            .collect::<Vec<_>>()
+    );
+    Ok(Json(shown))
 }
 
 #[derive(Deserialize)]
