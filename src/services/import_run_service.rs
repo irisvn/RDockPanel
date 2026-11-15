@@ -624,13 +624,13 @@ async fn link_folder(cx: &Cx<'_>, volume: &container_import_volume::Model) -> Re
             .strip_prefix(&format!("{}/", links.to_string_lossy()))
             .ok_or("a link is outside the links folder")?
             .to_owned();
-        let script = format!(
-            "mkdir -p \"$(dirname \"/links/{inside}\")\" && ln -sfn \"{target}\" \"/links/{inside}\" && [ \"$(readlink \"/links/{inside}\")\" = \"{target}\" ]"
-        );
+        // The folder and the link are arguments (`$1`, `$2`), never part of the
+        // script: a path may hold quotes, `$(…)` or a backtick.
+        let script = "link=\"/links/$2\" && mkdir -p \"$(dirname \"$link\")\" && ln -sfn \"$1\" \"$link\" && [ \"$(readlink \"$link\")\" = \"$1\" ]";
         let code = cx
             .helper(
                 &format!("link-{}", mount.id),
-                vec!["sh", "-c", &script],
+                vec!["sh", "-c", script, "sh", &target, &inside],
                 vec![HelperMount {
                     source: links.to_string_lossy().into_owned(),
                     target: "/links".to_owned(),

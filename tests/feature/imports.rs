@@ -1663,3 +1663,42 @@ db_test!(
             .assert_validation_error("folder");
     }
 );
+
+db_test!(
+    a_folder_with_shell_characters_in_its_path_is_never_part_of_a_script,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        let odd = "/srv/we\"ird $(touch /pwned) `x` ;'";
+        fake.inspected
+            .lock()
+            .unwrap()
+            .get_mut("shop-web-1")
+            .unwrap()["Mounts"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"Type": "bind", "Source": odd, "Destination": "/folder", "RW": true}));
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/start")),
+                &json!({"confirm": "shop"}),
+            )
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        // The path reaches the helper as an argument, never inside the script it runs.
+        let helpers = fake.helpers.lock().unwrap().clone();
+        let link = helpers.iter().find(|h| h.name.contains("link")).unwrap();
+        assert!(link.cmd.iter().any(|a| a == odd), "{:?}", link.cmd);
+        let script = &link.cmd[2];
+        assert!(
+            !script.contains("pwned") && !script.contains("ird"),
+            "{script}"
+        );
+    }
+);
