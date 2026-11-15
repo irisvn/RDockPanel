@@ -388,6 +388,23 @@ db_test!(
                 Case::new(Method::POST, "/apps/tunnel/disable")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/tunnels")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
+                Case::new(Method::POST, "/apps/tunnels")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::UNPROCESSABLE_ENTITY),
+                Case::new(Method::POST, "/apps/tunnels/default/enable")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/tunnels/default/disable")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::DELETE, "/apps/tunnels/default")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
                 Case::new(Method::POST, "/apps/templates/refresh")
                     .expect("nobody", &nobody, StatusCode::FORBIDDEN)
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN),

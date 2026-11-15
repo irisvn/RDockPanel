@@ -301,6 +301,7 @@ async fn state_of(docker: &Docker, name: &str, row: Option<&tunnel::Model>) -> A
         "enabled": row.is_some_and(|r| r.enabled),
         "token_set": row.is_some(),
         "service": service.is_some(),
+        "service_name": service_name,
         "running": running,
         "connected": connected,
         "error": error,

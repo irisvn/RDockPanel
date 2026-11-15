@@ -514,3 +514,181 @@ db_test!(
             .unwrap();
     }
 );
+
+db_test!(
+    a_tunnel_is_added_listed_and_removed_over_the_api,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rustcms::axum::http::Method;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let url = |p: &str| app.admin_api(&format!("x/apps/tunnels{p}"));
+
+        // A name and a token, each checked.
+        admin
+            .post_json(&url(""), &json!({"name": "Bad Name", "token": OTHER_TOKEN}))
+            .await
+            .assert_validation_error("name");
+        admin
+            .post_json(&url(""), &json!({"name": "second", "token": "nope"}))
+            .await
+            .assert_validation_error("token");
+        admin
+            .post_json(&url(""), &json!({"name": "second"}))
+            .await
+            .assert_validation_error("token");
+
+        let added = admin
+            .post_json(&url(""), &json!({"name": "second", "token": OTHER_TOKEN}))
+            .await;
+        added.assert_status(StatusCode::OK);
+        assert_eq!(added.json()["name"], "second");
+        assert_eq!(added.json()["enabled"], true);
+        assert!(spec(&fake, "rdp-cloudflared-second").is_some());
+        // A name is one tunnel.
+        admin
+            .post_json(&url(""), &json!({"name": "second", "token": TOKEN}))
+            .await
+            .assert_validation_error("name");
+
+        let list = admin.get(&url("")).await;
+        list.assert_status(StatusCode::OK);
+        let tunnels = list.json()["tunnels"].as_array().unwrap().clone();
+        assert_eq!(tunnels.len(), 1);
+        assert_eq!(tunnels[0]["name"], "second");
+        assert_eq!(tunnels[0]["service"], true);
+        assert!(tunnels[0]["origin"].as_str().unwrap().ends_with(":8081"));
+
+        let off = admin.post_json(&url("/second/disable"), &json!({})).await;
+        off.assert_status(StatusCode::OK);
+        assert_eq!(off.json()["enabled"], false);
+        assert!(spec(&fake, "rdp-cloudflared-second").is_none());
+        let on = admin.post_json(&url("/second/enable"), &json!({})).await;
+        on.assert_status(StatusCode::OK);
+        assert_eq!(on.json()["enabled"], true);
+        assert!(spec(&fake, "rdp-cloudflared-second").is_some());
+        // An unknown tunnel: not found.
+        admin
+            .post_json(&url("/missing/enable"), &json!({"token": TOKEN}))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+
+        admin
+            .send(Method::DELETE, &url("/second"), None)
+            .await
+            .assert_status(StatusCode::OK);
+        assert!(spec(&fake, "rdp-cloudflared-second").is_none());
+        let list = admin.get(&url("")).await;
+        assert_eq!(list.json()["tunnels"], json!([]));
+        admin
+            .send(Method::DELETE, &url("/second"), None)
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+    }
+);
+
+db_test!(
+    deleting_a_tunnel_stops_only_its_service,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rustcms::axum::http::Method;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let url = |p: &str| app.admin_api(&format!("x/apps/tunnels{p}"));
+        for (name, token) in [("first", TOKEN), ("second", OTHER_TOKEN)] {
+            admin
+                .post_json(&url(""), &json!({"name": name, "token": token}))
+                .await
+                .assert_status(StatusCode::OK);
+        }
+        admin
+            .send(Method::DELETE, &url("/first"), None)
+            .await
+            .assert_status(StatusCode::OK);
+        assert!(spec(&fake, "rdp-cloudflared-first").is_none());
+        assert!(spec(&fake, "rdp-cloudflared-second").is_some());
+        let second = secret_of(&fake, "rdp-cloudflared-second");
+        assert!(fake.secrets.lock().unwrap().contains_key(&second));
+        let list = admin.get(&url("")).await;
+        let names: Vec<_> = list.json()["tunnels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].clone())
+            .collect();
+        assert_eq!(names, vec![json!("second")]);
+    }
+);
+
+db_test!(
+    a_tunnel_route_needs_system_manage,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rustcms::axum::http::Method;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let url = |p: &str| app.admin_api(&format!("x/apps/tunnels{p}"));
+        let user = support::user_with(&app, "dev", &["projects.view_any", "docker.manage"]).await;
+        let dev = app.acting_as(&user).await;
+        let body = json!({"name": "second", "token": OTHER_TOKEN});
+        for (method, path) in [
+            (Method::GET, ""),
+            (Method::POST, ""),
+            (Method::POST, "/second/enable"),
+            (Method::POST, "/second/disable"),
+            (Method::DELETE, "/second"),
+        ] {
+            dev.send(method, &url(path), Some(&body))
+                .await
+                .assert_status(StatusCode::FORBIDDEN);
+        }
+        app.client()
+            .get(&url(""))
+            .await
+            .assert_status(StatusCode::UNAUTHORIZED);
+        assert!(spec(&fake, "rdp-cloudflared-second").is_none());
+    }
+);
+
+db_test!(
+    the_tunnel_list_never_holds_a_token,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let url = |p: &str| app.admin_api(&format!("x/apps/tunnels{p}"));
+        for (name, token) in [("first", TOKEN), ("second", OTHER_TOKEN)] {
+            let added = admin
+                .post_json(&url(""), &json!({"name": name, "token": token}))
+                .await;
+            added.assert_status(StatusCode::OK);
+            assert!(!added.json().to_string().contains(token));
+        }
+        let list = admin.get(&url("")).await;
+        list.assert_status(StatusCode::OK);
+        let text = list.json().to_string();
+        assert!(
+            !text.contains(TOKEN) && !text.contains(OTHER_TOKEN),
+            "{text}"
+        );
+        assert!(list.json()["tunnels"][0].get("token").is_none());
+        // Nor the audit.
+        use sea_orm::EntityTrait;
+        let audit = rustcms::models::audit_log::Entity::find()
+            .all(app.state().db())
+            .await
+            .unwrap();
+        let audit = format!("{audit:?}");
+        assert!(audit.contains("tunnel.create"), "{audit}");
+        assert!(!audit.contains(TOKEN) && !audit.contains(OTHER_TOKEN));
+    }
+);

@@ -227,6 +227,32 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can(permissions::SYSTEM_MANAGE),
                     tunnel::disable,
                 )
+                // Many tunnels, by name.
+                .get(
+                    "/tunnels",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::index,
+                )
+                .post(
+                    "/tunnels",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::create,
+                )
+                .post(
+                    "/tunnels/{name}/enable",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::enable_one,
+                )
+                .post(
+                    "/tunnels/{name}/disable",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::disable_one,
+                )
+                .delete(
+                    "/tunnels/{name}",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::destroy,
+                )
                 // Each user's own API tokens.
                 .get("/tokens", member(), tokens::index)
                 .post("/tokens", member(), tokens::create)

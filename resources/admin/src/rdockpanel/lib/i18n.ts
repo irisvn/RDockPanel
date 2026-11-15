@@ -669,8 +669,6 @@ window.rustcms?.registerTranslations?.("vi", {
   Off: "Tắt",
   "In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared), copy its token.":
     "Trong Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared), copy token của nó.",
-  "Paste it below and turn the tunnel on (Traefik restarts once: a few seconds).":
-    "Dán token vào ô dưới và bật tunnel (Traefik khởi động lại một lần, vài giây).",
   "For each domain, add a public hostname to the tunnel with this service:":
     "Với mỗi domain, thêm một public hostname cho tunnel với service này:",
   "Service (origin)": "Service (origin)",
@@ -678,10 +676,32 @@ window.rustcms?.registerTranslations?.("vi", {
     "Cloudflare lo HTTPS (đi qua tunnel thì không dùng certificate của domain); khách vào bằng HTTP thường sẽ được chuyển sang HTTPS. IP của khách tới app qua header Cf-Connecting-Ip của Cloudflare (panel thấy IP của cloudflared).",
   "Tunnel token": "Token của tunnel",
   "Kept (paste a new one to replace it)": "Đã lưu (dán token mới để thay)",
-  "Turn the tunnel off? Domains are then reached only through ports 80 and 443.":
-    "Tắt tunnel? Khi đó chỉ vào được domain qua cổng 80 và 443.",
   "Turn off": "Tắt",
   "Turn on": "Bật",
+  "Add tunnel": "Thêm tunnel",
+  "No tunnel yet.": "Chưa có tunnel.",
+  "Hostnames…": "Hostname…",
+  "Hostnames of {name}": "Hostname của {name}",
+  "Replace token…": "Thay token…",
+  "Replace token": "Thay token",
+  "Replace the token of {name}": "Thay token của {name}",
+  "Remove the tunnel {name}?": "Xoá tunnel {name}?",
+  "Its cloudflared stops and its token is forgotten: domains it served are then reached only another way.":
+    "cloudflared của tunnel này dừng và token bị xoá: các domain đi qua nó chỉ còn vào được bằng đường khác.",
+  "Remove tunnel": "Xoá tunnel",
+  "Turn the tunnel {name} off?": "Tắt tunnel {name}?",
+  "Domains it served are then reached only through ports 80 and 443.":
+    "Khi đó các domain đi qua nó chỉ còn vào được qua cổng 80 và 443.",
+  "Lowercase letters, digits and dashes, starting with a letter.": "Chữ thường, số và dấu gạch ngang, bắt đầu bằng một chữ cái.",
+  "Adding…": "Đang thêm…",
+  "Turning on…": "Đang bật…",
+  "Turning off…": "Đang tắt…",
+  "Removing…": "Đang xoá…",
+  "Tunnel added: connecting…": "Đã thêm tunnel: đang kết nối…",
+  "Token replaced: connecting…": "Đã thay token: đang kết nối…",
+  "Tunnel on: connecting…": "Đã bật tunnel: đang kết nối…",
+  "Tunnel off": "Đã tắt tunnel",
+  "Tunnel removed": "Đã xoá tunnel",
   // Project members
   Members: "Thành viên",
   viewer: "Xem",
