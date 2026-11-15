@@ -2717,8 +2717,13 @@ db_test!(
 
 /// `shop-web-1` of [`shop`] routed by Traefik to `rule` on port 8080.
 fn routed_web(fake: &FakeDocker, rule: &str) {
+    routed(fake, "shop-web-1", rule);
+}
+
+/// The container `name` routed by Traefik to `rule` on port 8080.
+fn routed(fake: &FakeDocker, name: &str, rule: &str) {
     let mut inspected = fake.inspected.lock().unwrap();
-    let labels = &mut inspected.get_mut("shop-web-1").unwrap()["Config"]["Labels"];
+    let labels = &mut inspected.get_mut(name).unwrap()["Config"]["Labels"];
     labels["traefik.enable"] = json!("true");
     labels["traefik.http.routers.web.rule"] = json!(rule);
     labels["traefik.http.services.web.loadbalancer.server.port"] = json!("8080");
@@ -2923,5 +2928,70 @@ db_test!(
         run_all(&app).await;
         assert_eq!(import_state(&app, id).await, "reverted");
         assert!(domains_of_host(&app, "shop.example.com").await.is_empty());
+    }
+);
+
+/// The findings of `code` on a plan's item: (field, text).
+fn findings_of(item: &Value, code: &str) -> Vec<(String, String)> {
+    item["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["code"] == code)
+        .map(|f| {
+            (
+                f["field"].as_str().unwrap().to_owned(),
+                f["text"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+db_test!(
+    two_containers_of_the_plan_with_one_domain_give_it_to_the_first,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed(&fake, "shop-web-1", "Host(`shop.example.com`)");
+        routed(&fake, "shop-db-1", "Host(`shop.example.com`)");
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let web = findings_of(&plan_item(&app, &admin, id, "id-web").await, "domain_taken");
+        let db_ = findings_of(&plan_item(&app, &admin, id, "id-db").await, "domain_taken");
+        // One of them keeps it, the other is told why it does not.
+        let said: Vec<_> = web.iter().chain(&db_).collect();
+        assert_eq!(said.len(), 1, "{web:?} {db_:?}");
+        assert_eq!(said[0].0, "shop.example.com");
+        assert!(
+            said[0].1.contains("another container of this import"),
+            "{said:?}"
+        );
+        start_and_run(&app, &admin, id).await;
+        assert_eq!(domains_of_host(&app, "shop.example.com").await.len(), 1);
+    }
+);
+
+db_test!(
+    a_domain_the_panel_would_refuse_is_left_out_and_said,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(
+            &fake,
+            "Host(`shop.example.com`) && PathPrefix(`/a%20b`) || Host(`ok.example.com`)",
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        let said = findings_of(&web, "domain_invalid");
+        assert_eq!(said.len(), 1, "{web}");
+        assert_eq!(said[0].0, "shop.example.com/a%20b");
+        start_and_run(&app, &admin, id).await;
+        assert!(domains_of_host(&app, "shop.example.com").await.is_empty());
+        assert_eq!(domains_of_host(&app, "ok.example.com").await.len(), 1);
     }
 );

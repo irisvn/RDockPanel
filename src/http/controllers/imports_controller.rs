@@ -381,8 +381,8 @@ pub async fn change_plan(
             }
         }
     }
-    // A domain the panel serves since the plan was read is left out too.
-    crate::services::import_service::mark_taken_domains(&txn, &mut plan).await?;
+    // Checked again: what the panel serves now, what the choices changed.
+    crate::services::import_service::check_domains(&txn, &mut plan).await?;
     if cut_soft && change.confirm != Some(true) {
         return Err(invalid(
             "confirm",

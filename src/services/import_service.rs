@@ -162,13 +162,14 @@ pub async fn guard_prune_containers<C: ConnectionTrait>(txn: &C) -> AppResult<()
     Ok(())
 }
 
-/// What marks the panel's own database: the loopback ports of its URL, and
-/// the working directory of a panel that runs from source.
-/// Marks the plan's domains the panel serves already (same host and path, any
-/// service): skipped, and a finding to confirm on their container. Run when
-/// the plan is read and when it changes.
-pub async fn mark_taken_domains<C: ConnectionTrait>(db: &C, plan: &mut Value) -> AppResult<()> {
+/// Marks the plan's domains that its services could not get: one that breaks
+/// the panel's rules (`creation_service::domain_problems`, the certificate's
+/// `check_domain_tls`), one the panel serves already (same host and path, any
+/// service), one a container before it in the plan has. Each is skipped and
+/// said on its container. Run when the plan is read and when it changes.
+pub async fn check_domains<C: ConnectionTrait>(db: &C, plan: &mut Value) -> AppResult<()> {
     use crate::models::service_domain;
+    use crate::services::creation_service::{NewDomain, domain_problems};
     let hosts: Vec<String> = plan["items"]
         .as_array()
         .into_iter()
@@ -186,32 +187,84 @@ pub async fn mark_taken_domains<C: ConnectionTrait>(db: &C, plan: &mut Value) ->
         .into_iter()
         .map(|d| (d.host, d.path))
         .collect();
+    // Host and path of the containers that become services, in plan order.
+    let mut claimed: Vec<(String, String)> = Vec::new();
     for item in plan["items"].as_array_mut().into_iter().flatten() {
-        let mut taken = Vec::new();
+        let claims = item["choice"] == "bring" && item["as_tunnel"] != true;
+        let mut said = Vec::new();
         for hint in item["domains"].as_array_mut().into_iter().flatten() {
-            let (host, path) = (hint["host"].clone(), hint["path"].clone());
-            if served.iter().any(|(h, p)| host == *h && path == *p) {
-                hint["skip"] = json!(true);
-                taken.push(host);
+            let domain = NewDomain {
+                host: hint["host"].as_str().unwrap_or_default().to_owned(),
+                path: hint["path"].as_str().unwrap_or("/").to_owned(),
+                port: hint["port"]
+                    .as_u64()
+                    .and_then(|p| u16::try_from(p).ok())
+                    .unwrap_or(0),
+                https: hint["https"] == true,
+                compose_service: None,
+            };
+            let key = (domain.host.clone(), domain.path.clone());
+            let field = if domain.path == "/" {
+                domain.host.clone()
+            } else {
+                format!("{}{}", domain.host, domain.path)
+            };
+            let finding = if let Some(problem) = domain_problems(&domain).first() {
+                Some(("domain_invalid", "WARN", *problem, None))
+            } else if served.contains(&key) {
+                Some((
+                    "domain_taken",
+                    "CONFIRM",
+                    "the panel already serves this domain on another service: it is not added",
+                    Some("Confirm, or remove it from the other service and read again."),
+                ))
+            } else if claimed.contains(&key) {
+                Some((
+                    "domain_taken",
+                    "CONFIRM",
+                    "another container of this import has this domain: only the first one gets it",
+                    Some("Confirm, or untick it on the other container."),
+                ))
+            } else if let Some((_, problem)) = crate::services::cert_service::check_domain_tls(
+                db,
+                None,
+                &domain.host,
+                domain.https,
+                None,
+                None,
+            )
+            .await?
+            {
+                Some(("domain_invalid", "WARN", problem, None))
+            } else {
+                None
+            };
+            match finding {
+                Some((code, level, text, unblock)) => {
+                    hint["skip"] = json!(true);
+                    said.push(json!({
+                        "code": code,
+                        "level": level,
+                        "field": field,
+                        "text": text,
+                        "how_to_unblock": unblock,
+                    }));
+                }
+                None if claims => claimed.push(key),
+                None => {}
             }
         }
         let Some(findings) = item["findings"].as_array_mut() else {
             continue;
         };
-        findings.retain(|f| f["code"] != "domain_taken");
-        for host in taken {
-            findings.push(json!({
-                "code": "domain_taken",
-                "level": "CONFIRM",
-                "field": host,
-                "text": "the panel already serves this domain on another service: it is not added",
-                "how_to_unblock": "Confirm, or remove it from the other service and read again.",
-            }));
-        }
+        findings.retain(|f| f["code"] != "domain_taken" && f["code"] != "domain_invalid");
+        findings.extend(said);
     }
     Ok(())
 }
 
+/// What marks the panel's own database: the loopback ports of its URL, and
+/// the working directory of a panel that runs from source.
 pub fn panel_facts() -> PanelFacts {
     let database_ports = ["DATABASE_URL", "RUSTCMS_TEST_MYSQL"]
         .iter()
@@ -452,7 +505,7 @@ async fn read(state: &AppState, row: &container_import::Model) -> Result<(Value,
     );
     let mut plan = serde_json::to_value(&plan).map_err(|e| e.to_string())?;
     plan["compose"] = compose_info;
-    mark_taken_domains(state.db(), &mut plan)
+    check_domains(state.db(), &mut plan)
         .await
         .map_err(|e| e.to_string())?;
     Ok((plan, gathered.fingerprint))

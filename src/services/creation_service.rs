@@ -33,6 +33,29 @@ pub struct DatabaseOptions {
     pub root_password: Option<String>,
 }
 
+/// What a new domain breaks of the panel's rules, without the database
+/// (its certificate is `cert_service::check_domain_tls`'s).
+pub fn domain_problems(domain: &NewDomain) -> Vec<&'static str> {
+    use crate::services::deploy_rules_service::{config, is_panel_host, valid_domain_host};
+    let mut out = Vec::new();
+    if !valid_domain_host(&domain.host) {
+        out.push("is not a hostname");
+    }
+    if is_panel_host(&domain.host) {
+        out.push("is the panel's own domain");
+    }
+    if !valid_route_path(&domain.path) {
+        out.push("the path may hold only letters, digits and / - _ . ~");
+    }
+    if !valid_port(i64::from(domain.port)) {
+        out.push("a port is 1-65535");
+    }
+    if domain.https && domain.host.starts_with("*.") && !config().cert_resolver.is_empty() {
+        out.push("a wildcard's certificate needs a DNS resolver (choose one on the domain after)");
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct NewDomain {
     pub host: String,
@@ -424,30 +447,10 @@ pub async fn create(
         new.replicas.clamp(0, 100)
     };
     for domain in &new.domains {
-        if !crate::services::deploy_rules_service::valid_domain_host(&domain.host) {
-            errors.add("domains", format!("{} is not a hostname", domain.host));
-        }
-        if crate::services::deploy_rules_service::is_panel_host(&domain.host) {
+        for problem in domain_problems(domain) {
             errors.add(
                 "domains",
-                format!("{} is the panel's own domain", domain.host),
-            );
-        }
-        if !valid_route_path(&domain.path) {
-            errors.add("domains", format!("{} is not a path", domain.path));
-        }
-        if !valid_port(i64::from(domain.port)) {
-            errors.add("domains", "a port is 1-65535");
-        }
-        if domain.https
-            && domain.host.starts_with("*.")
-            && !crate::services::deploy_rules_service::config()
-                .cert_resolver
-                .is_empty()
-        {
-            errors.add(
-                "domains",
-                format!("{}: a wildcard's certificate needs a DNS resolver (choose one on the domain after)", domain.host),
+                format!("{}{}: {problem}", domain.host, domain.path),
             );
         }
     }

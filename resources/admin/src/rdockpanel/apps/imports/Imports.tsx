@@ -73,9 +73,12 @@ function message(t: T, error: unknown): string {
   return t(error instanceof Error ? error.message : String(error));
 }
 
-/** A finding's text (translated), named by its host when it is a domain's. */
+/** The finding codes of a domain the panel leaves out: their field is the domain. */
+const DOMAIN_LEFT = ["domain_taken", "domain_invalid"];
+
+/** A finding's text (translated), named by its domain when it is a domain's. */
 function findingText(t: T, f: Finding) {
-  return f.code === "domain_taken" ? `${f.field}: ${t(f.text)}` : t(f.text);
+  return DOMAIN_LEFT.includes(f.code) ? `${f.field}: ${t(f.text)}` : t(f.text);
 }
 
 /** Words of a finding's level (translated). */
@@ -635,7 +638,8 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
       setBusy(false);
     }
   };
-  const taken = (host: string) => item.findings.some((f) => f.code === "domain_taken" && f.field === host);
+  // Why the panel leaves a domain out (it cannot be ticked then).
+  const leftOut = (d: PlanItem["domains"][number]) => item.findings.find((f) => DOMAIN_LEFT.includes(f.code) && f.field === (d.path === "/" ? d.host : d.host + d.path));
   const choose = async (choice: "bring" | "leave") => {
     setBusy(true);
     setError(null);
@@ -708,16 +712,19 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
         {item.domains.length > 0 && (
           <Field label={t("Domains")} help={t("Ticked domains are added to the service when it deploys.")}>
             <div className="rdp2-form">
-              {item.domains.map((d) => (
-                <label key={`${d.host}${d.path}`} className="rdp2-row">
-                  <Checkbox checked={!d.skip} disabled={!editable || busy || taken(d.host)} onChange={(e) => setDomain(d.host, e.target.checked)} />
-                  <span className="rdp2-mono">
-                    {d.host}
-                    {d.path === "/" ? "" : d.path} → {d.port ?? 80}
-                  </span>
-                  {taken(d.host) && <span className="rdp2-muted rdp2-small">{t("the panel serves it already")}</span>}
-                </label>
-              ))}
+              {item.domains.map((d) => {
+                const why = leftOut(d);
+                return (
+                  <label key={`${d.host}${d.path}`} className="rdp2-row">
+                    <Checkbox checked={!d.skip} disabled={!editable || busy || !!why} onChange={(e) => setDomain(d.host, e.target.checked)} />
+                    <span className="rdp2-mono">
+                      {d.host}
+                      {d.path === "/" ? "" : d.path} → {d.port ?? 80}
+                    </span>
+                    {why && <span className="rdp2-muted rdp2-small">{t(why.text)}</span>}
+                  </label>
+                );
+              })}
             </div>
           </Field>
         )}
