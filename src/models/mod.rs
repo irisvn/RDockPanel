@@ -29,4 +29,5 @@ pub mod service_port;
 pub mod service_redirect;
 pub mod service_script;
 pub mod storage_provider;
+pub mod tunnel;
 // rustcms:models

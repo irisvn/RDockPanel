@@ -1,5 +1,5 @@
-//! Settings → Cloudflare Tunnel (`/admin/api/x/apps/tunnel`): its state, on
-//! (with a token) and off. The panel's administrators' only
+//! Settings → Cloudflare Tunnel (`/admin/api/x/apps/tunnel`): the `default`
+//! tunnel's state, on (with a token) and off. The panel's administrators' only
 //! (`system.manage`): it changes Traefik and runs cloudflared. Audited
 //! (never the token).
 
@@ -30,7 +30,9 @@ async fn audited(app: &AppState, auth: &Auth, request: RequestMeta, action: &str
 /// `GET /tunnel`.
 pub async fn status(State(app): State<AppState>) -> AppResult<Json<Value>> {
     let docker = docker(&app)?;
-    Ok(Json(tunnel_service::status(&app, &docker).await?))
+    Ok(Json(
+        tunnel_service::status(&app, &docker, tunnel_service::DEFAULT).await?,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,12 +54,20 @@ pub async fn enable(
     let (state, engine) = (app.clone(), docker.clone());
     tokio::spawn(async move {
         let _changing = tunnel_service::exclusive().await;
-        tunnel_service::enable(&state, &engine, body.token.as_deref()).await
+        tunnel_service::enable(
+            &state,
+            &engine,
+            tunnel_service::DEFAULT,
+            body.token.as_deref(),
+        )
+        .await
     })
     .await
     .map_err(AppError::internal)??;
     audited(&app, &auth, request, "tunnel.enable").await;
-    Ok(Json(tunnel_service::status(&app, &docker).await?))
+    Ok(Json(
+        tunnel_service::status(&app, &docker, tunnel_service::DEFAULT).await?,
+    ))
 }
 
 /// `POST /tunnel/disable`.
@@ -70,10 +80,12 @@ pub async fn disable(
     let (state, engine) = (app.clone(), docker.clone());
     tokio::spawn(async move {
         let _changing = tunnel_service::exclusive().await;
-        tunnel_service::disable(&state, &engine).await
+        tunnel_service::disable(&state, &engine, tunnel_service::DEFAULT).await
     })
     .await
     .map_err(AppError::internal)??;
     audited(&app, &auth, request, "tunnel.disable").await;
-    Ok(Json(tunnel_service::status(&app, &docker).await?))
+    Ok(Json(
+        tunnel_service::status(&app, &docker, tunnel_service::DEFAULT).await?,
+    ))
 }

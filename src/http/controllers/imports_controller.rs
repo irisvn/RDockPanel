@@ -291,9 +291,11 @@ pub async fn change_plan(
                     crate::services::import_service::tunnel_token_of_container(&docker, container)
                         .await
                         .map_err(|why| invalid("tunnel", &why))?;
-                if crate::services::tunnel_service::running_token(&app)
+                // shortcut: only `default` counts, until imports make tunnels of their own.
+                if crate::services::tunnel_service::running_tokens(&app)
                     .await?
-                    .is_some_and(|running| running != token)
+                    .iter()
+                    .any(|(name, running)| name == "default" && *running != token)
                 {
                     return Err(invalid(
                         "tunnel",

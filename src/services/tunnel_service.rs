@@ -1,13 +1,16 @@
-//! Settings → Cloudflare Tunnel: the panel runs `cloudflared` (the Swarm
-//! service `rdp-cloudflared`) with a tunnel's token, so domains are reached
-//! through Cloudflare without opening ports 80 and 443. cloudflared sends
-//! every hostname to Traefik's `tunnel` entrypoint (`:8081`, never published,
-//! reached on the network `rdp-tunnel` only), where each domain is served
-//! over plain HTTP (Cloudflare holds TLS): no redirect to HTTPS, so no loop.
+//! Settings → Cloudflare Tunnel: the panel runs one `cloudflared` per tunnel
+//! (the Swarm service [`service_name`]: `rdp-cloudflared` for `default`,
+//! `rdp-cloudflared-<name>` else) with that tunnel's token, so domains are
+//! reached through Cloudflare without opening ports 80 and 443. Every
+//! cloudflared sends every hostname to Traefik's `tunnel` entrypoint
+//! (`:8081`, never published, reached on the network `rdp-tunnel` only, which
+//! they all share), where each domain is served over plain HTTP (Cloudflare
+//! holds TLS): no redirect to HTTPS, so no loop.
 //!
-//! The token is sealed (`panel_settings`, APP_KEY) and given to cloudflared
-//! as a Swarm secret read with `--token-file` (never an argument, an
-//! environment variable or a log). The panel's administrators' only
+//! Each token is sealed (`tunnels`, APP_KEY; `default`'s in `panel_settings`
+//! too, for a release rolled back), one tunnel per token, and given to its
+//! cloudflared as a Swarm secret read with `--token-file` (never an
+//! argument, an environment variable or a log). The panel's administrators' only
 //! (`system.manage`). Public hostnames are set in Cloudflare (Zero Trust →
 //! Tunnels → the tunnel → Public Hostname), each to [`status`]'s `origin`.
 
@@ -17,13 +20,19 @@ use rustcms::crypto::{Context, Encrypted};
 use rustcms::{AppError, AppResult, AppState, ValidationErrors};
 use serde_json::{Value, json};
 
-use crate::models::panel_setting;
+use rustcms::db::begin_write;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+
+use crate::models::{panel_setting, tunnel};
 use crate::services::docker_service::{Docker, DockerError, NetworkRequest, SYSTEM_LABEL};
 use crate::services::traefik_service::Traefik;
 
 /// cloudflared, pinned (it reads `--token-file`).
 pub const IMAGE: &str = "cloudflare/cloudflared:2026.10.2";
+/// The service of the tunnel `default` (the panel's first, of one token).
 pub const SERVICE: &str = "rdp-cloudflared";
+/// The first tunnel's name (the one Settings had before many).
+pub const DEFAULT: &str = "default";
 pub const NETWORK: &str = "rdp-tunnel";
 /// Traefik's entrypoint for the tunnel, and its port.
 pub const ENTRYPOINT: &str = "tunnel";
@@ -59,41 +68,111 @@ const CLOUDFLARED_UID: &str = "65532";
 
 static CHANGING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Held while the tunnel is turned on or off (one change at a time).
+/// Held while a tunnel is turned on or off (one change at a time).
 pub async fn exclusive() -> tokio::sync::MutexGuard<'static, ()> {
     CHANGING.lock().await
 }
 
-fn token_context() -> Context {
+/// Where `default`'s token is sealed in `panel_settings`.
+fn settings_context() -> Context {
     Context::column("panel_settings", "tunnel.token")
 }
 
-/// Whether routes serve the tunnel's entrypoint too.
+/// The Swarm service of the tunnel `name`.
+pub fn service_name(name: &str) -> String {
+    if name == DEFAULT {
+        SERVICE.to_owned()
+    } else {
+        format!("{SERVICE}-{name}")
+    }
+}
+
+/// 1-40 lowercase letters, digits and dashes, starting with a letter.
+pub fn valid_name(name: &str) -> bool {
+    (1..=40).contains(&name.len())
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Whether routes serve the tunnel's entrypoint too (a tunnel is on).
 pub fn enabled(app: &AppState) -> bool {
     app.service::<Traefik>().is_some_and(|t| t.tunnel())
 }
 
-/// Reads whether the tunnel is on (at boot).
+async fn any_enabled(app: &AppState) -> AppResult<bool> {
+    Ok(tunnel::Entity::find()
+        .filter(tunnel::Column::Enabled.eq(true))
+        .one(app.db())
+        .await?
+        .is_some())
+}
+
+/// At boot: the tunnel of an older panel's settings becomes `default`, and
+/// routes serve the tunnel's entrypoint when a tunnel is on.
 pub async fn load(app: &AppState) -> AppResult<()> {
-    let on = panel_setting::get(app.db(), ENABLED_KEY).await?.as_deref() == Some("true");
+    adopt_settings(app).await?;
+    let on = any_enabled(app).await?;
     if let Some(traefik) = app.service::<Traefik>() {
         traefik.set_tunnel(on);
     }
     Ok(())
 }
 
-/// The token of the tunnel the panel runs now (`None`: it is off, or its token
-/// cannot be read).
-pub async fn running_token(app: &AppState) -> AppResult<Option<String>> {
-    let on = panel_setting::get(app.db(), ENABLED_KEY).await?.as_deref() == Some("true");
-    if !on {
-        return Ok(None);
-    }
-    let Some(kept) = panel_setting::get(app.db(), TOKEN_KEY).await? else {
-        return Ok(None);
+/// `panel_settings`' tunnel (`tunnel.*`, before many) as the row `default`,
+/// once. Here, not in the migration: sealing for the new column needs the
+/// APP_KEY. A token it cannot open is kept as it is (Settings asks again).
+async fn adopt_settings(app: &AppState) -> AppResult<()> {
+    let db = app.db();
+    let Some(kept) = panel_setting::get(db, TOKEN_KEY).await? else {
+        return Ok(());
     };
-    let sealed: Encrypted<String> = Encrypted::from_envelope(kept);
-    Ok(sealed.open(app.keyring(), &token_context()).ok())
+    if tunnel::named(db, DEFAULT).await?.is_some() {
+        return Ok(());
+    }
+    let old: Encrypted<String> = Encrypted::from_envelope(kept);
+    let token = match old.open(app.keyring(), &settings_context()) {
+        Ok(token) => Encrypted::seal(app.keyring(), &tunnel::token_context(), &token)?,
+        Err(_) => old,
+    };
+    let enabled = panel_setting::get(db, ENABLED_KEY).await?.as_deref() == Some("true");
+    let now = chrono::Utc::now();
+    // One statement: two boots at once make one row.
+    tunnel::Entity::insert(tunnel::ActiveModel {
+        name: Set(DEFAULT.to_owned()),
+        token: Set(token),
+        enabled: Set(enabled),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    })
+    .on_conflict(
+        // A row made meanwhile kept (MySQL has no `DO NOTHING`).
+        sea_orm::sea_query::OnConflict::column(tunnel::Column::Name)
+            .update_column(tunnel::Column::Name)
+            .to_owned(),
+    )
+    .exec_without_returning(db)
+    .await?;
+    Ok(())
+}
+
+/// The name and token of every tunnel that is on (a token the APP_KEY
+/// cannot open left out).
+pub async fn running_tokens(app: &AppState) -> AppResult<Vec<(String, String)>> {
+    Ok(tunnel::all(app.db())
+        .await?
+        .into_iter()
+        .filter(|row| row.enabled)
+        .filter_map(|row| {
+            let token = row
+                .token
+                .open(app.keyring(), &tunnel::token_context())
+                .ok()?;
+            Some((row.name, token))
+        })
+        .collect())
 }
 
 /// A tunnel token as Cloudflare gives it: base64 of a JSON object with its
@@ -124,19 +203,33 @@ fn docker_err(err: DockerError) -> AppError {
     AppError::from(err)
 }
 
-/// What Settings shows: on or off, a token kept (never shown), cloudflared's
-/// tasks.
-pub async fn status(app: &AppState, docker: &Docker) -> AppResult<Value> {
-    let token_set = panel_setting::get(app.db(), TOKEN_KEY).await?.is_some();
+/// What Settings shows of the tunnel `name`: on or off, a token kept (never
+/// shown), its cloudflared's tasks.
+pub async fn status(app: &AppState, docker: &Docker, name: &str) -> AppResult<Value> {
+    let row = tunnel::named(app.db(), name).await?;
+    state_of(docker, name, row.as_ref()).await
+}
+
+/// Every tunnel and its [`status`] (never its token).
+pub async fn list(app: &AppState, docker: &Docker) -> AppResult<Value> {
+    let mut all = vec![];
+    for row in tunnel::all(app.db()).await? {
+        all.push(state_of(docker, &row.name, Some(&row)).await?);
+    }
+    Ok(Value::Array(all))
+}
+
+async fn state_of(docker: &Docker, name: &str, row: Option<&tunnel::Model>) -> AppResult<Value> {
+    let service_name = service_name(name);
     let service = docker
         .engine()
-        .inspect_service(SERVICE)
+        .inspect_service(&service_name)
         .await
         .map_err(docker_err)?;
     let tasks = if service.is_some() {
         docker
             .engine()
-            .list_tasks(SERVICE)
+            .list_tasks(&service_name)
             .await
             .unwrap_or_default()
     } else {
@@ -166,8 +259,9 @@ pub async fn status(app: &AppState, docker: &Docker) -> AppResult<Value> {
         log_error.or_else(|| failed.then(|| UNHEALTHY.to_owned()))
     };
     Ok(json!({
-        "enabled": enabled(app),
-        "token_set": token_set,
+        "name": name,
+        "enabled": row.is_some_and(|r| r.enabled),
+        "token_set": row.is_some(),
         "service": service.is_some(),
         "running": running,
         "connected": connected,
@@ -219,11 +313,24 @@ fn health_news(document: &Value) -> (bool, Option<String>) {
     }
 }
 
-/// Keeps `token` (sealed) when given, then runs cloudflared with the token
-/// kept: Traefik gets its entrypoint and the tunnel's network, every route
-/// its tunnel router.
-pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> AppResult<()> {
+/// Keeps the tunnel `name` (made when new) with `token` (sealed) when given,
+/// then runs its cloudflared with the token kept: Traefik gets its
+/// entrypoint and the tunnel's network, every route its tunnel router.
+pub async fn enable(
+    app: &AppState,
+    docker: &Docker,
+    name: &str,
+    token: Option<&str>,
+) -> AppResult<()> {
     let db = app.db();
+    if !valid_name(name) {
+        return Err(ValidationErrors::field(
+            "name",
+            "is 1-40 lowercase letters, digits and dashes, starting with a letter",
+        )
+        .into());
+    }
+    let row = tunnel::named(db, name).await?;
     // A new token is kept only once cloudflared runs with it (the one kept
     // goes on working until then).
     let new = token.map(str::trim).filter(|t| !t.is_empty());
@@ -236,19 +343,31 @@ pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> App
                 )
                 .into());
             }
+            // One cloudflared per token (two would share its connections).
+            let others = tunnel::all(db).await?;
+            if others.iter().filter(|o| o.name != name).any(|o| {
+                o.token
+                    .open(app.keyring(), &tunnel::token_context())
+                    .is_ok_and(|t| t == token)
+            }) {
+                return Err(
+                    ValidationErrors::field("token", "is already used by another tunnel").into(),
+                );
+            }
             token.to_owned()
         }
         None => {
-            let Some(kept) = panel_setting::get(db, TOKEN_KEY).await? else {
+            let Some(row) = &row else {
                 return Err(ValidationErrors::field("token", "is required").into());
             };
-            let sealed: Encrypted<String> = Encrypted::from_envelope(kept);
-            sealed.open(app.keyring(), &token_context()).map_err(|_| {
-                ValidationErrors::field(
-                    "token",
-                    "cannot be read (sealed with another APP_KEY): set it again",
-                )
-            })?
+            row.token
+                .open(app.keyring(), &tunnel::token_context())
+                .map_err(|_| {
+                    ValidationErrors::field(
+                        "token",
+                        "cannot be read (sealed with another APP_KEY): set it again",
+                    )
+                })?
         }
     };
     let traefik = app
@@ -297,8 +416,9 @@ pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> App
             true,
         ),
     };
+    let service = service_name(name);
     let spec: crate::services::docker_service::ServiceSpec = serde_json::from_value(json!({
-        "Name": SERVICE,
+        "Name": service,
         "Labels": { SYSTEM_LABEL: "true" },
         "TaskTemplate": {
             "ContainerSpec": {
@@ -327,12 +447,12 @@ pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> App
     }))
     .map_err(AppError::internal)?;
     let ran = async {
-        match docker.engine().inspect_service(SERVICE).await? {
+        match docker.engine().inspect_service(&service).await? {
             Some(found) => {
                 let version = found.version.and_then(|v| v.index).unwrap_or(0);
                 docker
                     .engine()
-                    .update_service(SERVICE, version, spec, None)
+                    .update_service(&service, version, spec, None)
                     .await
                     .map(|_| ())
             }
@@ -347,18 +467,47 @@ pub async fn enable(app: &AppState, docker: &Docker, token: Option<&str>) -> App
         }
         return Err(docker_err(err));
     }
-    if new.is_some() {
-        let sealed = Encrypted::seal(app.keyring(), &token_context(), &token)?;
-        panel_setting::set(db, TOKEN_KEY, sealed.envelope()).await?;
+    let now = chrono::Utc::now();
+    let sealed = Encrypted::seal(app.keyring(), &tunnel::token_context(), &token)?;
+    let txn = begin_write(db).await?;
+    match row {
+        Some(row) => {
+            let mut kept = row.into_active_model();
+            if new.is_some() {
+                kept.token = Set(sealed);
+            }
+            kept.enabled = Set(true);
+            kept.updated_at = Set(now);
+            kept.update(&txn).await?;
+        }
+        None => {
+            tunnel::ActiveModel {
+                name: Set(name.to_owned()),
+                token: Set(sealed),
+                enabled: Set(true),
+                created_at: Set(now),
+                updated_at: Set(now),
+                ..Default::default()
+            }
+            .insert(&txn)
+            .await?;
+        }
     }
+    if name == DEFAULT {
+        // As an older release reads it (one rolled back).
+        if new.is_some() {
+            let old = Encrypted::seal(app.keyring(), &settings_context(), &token)?;
+            panel_setting::set(&txn, TOKEN_KEY, old.envelope()).await?;
+        }
+        panel_setting::set(&txn, ENABLED_KEY, "true").await?;
+    }
+    txn.commit().await?;
     // Older tokens' secrets, unused now.
     remove_secrets(docker, Some(&secret_name)).await;
-    panel_setting::set(db, ENABLED_KEY, "true").await?;
     traefik.set_tunnel(true);
     republish(app).await
 }
 
-/// Stops cloudflared (its token kept), and the routes' tunnel routers.
 /// Traefik on the tunnel's network (`id`), with the tunnel's entrypoint
 /// trusting that network's forwarded headers, and nothing else of it.
 /// Restarted only when that changes.
@@ -414,14 +563,27 @@ async fn entrypoint(docker: &Docker, traefik: &Traefik, id: &str) -> AppResult<(
     Ok(())
 }
 
-pub async fn disable(app: &AppState, docker: &Docker) -> AppResult<()> {
+/// Stops the tunnel `name`'s cloudflared (its token kept); the routes' tunnel
+/// routers go when no tunnel is on.
+pub async fn disable(app: &AppState, docker: &Docker, name: &str) -> AppResult<()> {
     // Off first (routes without the tunnel), then cloudflared stopped.
-    panel_setting::set(app.db(), ENABLED_KEY, "false").await?;
+    let txn = begin_write(app.db()).await?;
+    if let Some(row) = tunnel::named(&txn, name).await? {
+        let mut off = row.into_active_model();
+        off.enabled = Set(false);
+        off.updated_at = Set(chrono::Utc::now());
+        off.update(&txn).await?;
+    }
+    if name == DEFAULT {
+        panel_setting::set(&txn, ENABLED_KEY, "false").await?;
+    }
+    txn.commit().await?;
+    let on = any_enabled(app).await?;
     if let Some(traefik) = app.service::<Traefik>() {
-        traefik.set_tunnel(false);
+        traefik.set_tunnel(on);
     }
     republish(app).await?;
-    match docker.engine().delete_service(SERVICE).await {
+    match docker.engine().delete_service(&service_name(name)).await {
         Ok(()) | Err(DockerError::NotFound) => {}
         Err(err) => return Err(err.into()),
     }
@@ -429,7 +591,27 @@ pub async fn disable(app: &AppState, docker: &Docker) -> AppResult<()> {
     Ok(())
 }
 
-/// The tunnel's secrets but `keep` (one in use is refused: kept until the
+/// Stops the tunnel `name` and forgets it (its token, and `default`'s
+/// settings: not taken back at the next boot).
+pub async fn remove(app: &AppState, docker: &Docker, name: &str) -> AppResult<()> {
+    let Some(row) = tunnel::named(app.db(), name).await? else {
+        return Err(AppError::NotFound);
+    };
+    disable(app, docker, name).await?;
+    let txn = begin_write(app.db()).await?;
+    tunnel::Entity::delete_by_id(row.id).exec(&txn).await?;
+    if name == DEFAULT {
+        panel_setting::Entity::delete_many()
+            .filter(panel_setting::Column::Key.is_in([TOKEN_KEY, ENABLED_KEY]))
+            .exec(&txn)
+            .await?;
+    }
+    txn.commit().await?;
+    Ok(())
+}
+
+/// The tunnels' secrets but `keep`. One in use is refused (another
+/// tunnel's, held by its cloudflared; or one still stopping: kept until the
 /// next change).
 async fn remove_secrets(docker: &Docker, keep: Option<&str>) {
     let Ok(secrets) = docker.engine().list_secrets(SYSTEM_LABEL, "true").await else {
@@ -442,8 +624,8 @@ async fn remove_secrets(docker: &Docker, keep: Option<&str>) {
     }
 }
 
-/// At boot: cloudflared as the setting says (run again when on and missing,
-/// stopped when off), in the background.
+/// At boot: each tunnel's cloudflared as its row says (run again when on
+/// and missing, stopped when off), in the background.
 pub fn reconcile(app: &AppState) {
     let app = app.clone();
     tokio::spawn(async move {
@@ -451,54 +633,64 @@ pub fn reconcile(app: &AppState) {
             return;
         };
         let _changing = exclusive().await;
-        let found = docker
-            .engine()
-            .inspect_service(SERVICE)
-            .await
-            .ok()
-            .flatten();
-        let present = found.is_some();
-        // Made by an older panel (no healthcheck, another cloudflared): made
-        // again as now (Cloudflare stops supporting old versions).
-        let older = found.is_some_and(|s| {
-            let container = s
-                .spec
-                .and_then(|spec| spec.task_template)
-                .and_then(|t| t.container_spec);
-            container.as_ref().is_none_or(|c| {
-                c.health_check.is_none()
-                    || c.image
-                        .as_deref()
-                        .is_none_or(|i| i.split('@').next() != Some(IMAGE))
-            })
-        });
-        let result = match (enabled(&app), present) {
-            (true, false) => enable(&app, &docker, None).await,
-            (true, true) if older => enable(&app, &docker, None).await,
-            (false, true) => disable(&app, &docker).await,
-            (false, false) => {
-                // Left by a change cut short.
-                remove_secrets(&docker, None).await;
-                Ok(())
+        let rows = match tunnel::all(app.db()).await {
+            Ok(rows) => rows,
+            Err(err) => {
+                tracing::warn!(%err, "the tunnels not read");
+                return;
             }
-            // Traefik's entrypoint as now (an older panel's trusted nobody).
-            (true, true) => match app.service::<Traefik>() {
-                Some(traefik) if !traefik.service.is_empty() => {
-                    match docker.engine().networks().await {
-                        Ok(networks) => match networks.into_iter().find(|n| n.name == NETWORK) {
-                            Some(network) => entrypoint(&docker, &traefik, &network.id).await,
-                            None => enable(&app, &docker, None).await,
-                        },
-                        Err(err) => Err(docker_err(err)),
-                    }
-                }
-                _ => Ok(()),
-            },
         };
-        if let Err(err) = result {
-            tracing::warn!(%err, "the tunnel not reconciled");
+        for row in rows {
+            if let Err(err) = reconcile_one(&app, &docker, &row).await {
+                tracing::warn!(%err, tunnel = %row.name, "the tunnel not reconciled");
+            }
         }
+        // Left by a change cut short.
+        remove_secrets(&docker, None).await;
     });
+}
+
+async fn reconcile_one(app: &AppState, docker: &Docker, row: &tunnel::Model) -> AppResult<()> {
+    let found = docker
+        .engine()
+        .inspect_service(&service_name(&row.name))
+        .await
+        .ok()
+        .flatten();
+    let present = found.is_some();
+    // Made by an older panel (no healthcheck, another cloudflared): made
+    // again as now (Cloudflare stops supporting old versions).
+    let older = found.is_some_and(|s| {
+        let container = s
+            .spec
+            .and_then(|spec| spec.task_template)
+            .and_then(|t| t.container_spec);
+        container.as_ref().is_none_or(|c| {
+            c.health_check.is_none()
+                || c.image
+                    .as_deref()
+                    .is_none_or(|i| i.split('@').next() != Some(IMAGE))
+        })
+    });
+    match (row.enabled, present) {
+        (true, false) => enable(app, docker, &row.name, None).await,
+        (true, true) if older => enable(app, docker, &row.name, None).await,
+        (false, true) => disable(app, docker, &row.name).await,
+        (false, false) => Ok(()),
+        // Traefik's entrypoint as now (an older panel's trusted nobody).
+        (true, true) => match app.service::<Traefik>() {
+            Some(traefik) if !traefik.service.is_empty() => {
+                match docker.engine().networks().await {
+                    Ok(networks) => match networks.into_iter().find(|n| n.name == NETWORK) {
+                        Some(network) => entrypoint(docker, &traefik, &network.id).await,
+                        None => enable(app, docker, &row.name, None).await,
+                    },
+                    Err(err) => Err(docker_err(err)),
+                }
+            }
+            _ => Ok(()),
+        },
+    }
 }
 
 /// Every service's routes written again (with or without their tunnel

@@ -907,10 +907,11 @@ async fn deploy_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> Resu
     let token =
         crate::services::import_service::tunnel_token_of_container(&cx.docker, &item.container_id)
             .await?;
-    let was_on = crate::services::tunnel_service::running_token(cx.app)
+    let was_on = crate::services::tunnel_service::running_tokens(cx.app)
         .await
         .map_err(|e| e.to_string())?
-        .is_some();
+        .iter()
+        .any(|(name, _)| name == crate::services::tunnel_service::DEFAULT);
     // Marked before: a failure from here waits for the admin, and an undo turns it off.
     let current = container_import::Entity::find_by_id(cx.import.id)
         .one(cx.db())
@@ -929,6 +930,7 @@ async fn deploy_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> Resu
         cx.keeping(crate::services::tunnel_service::enable(
             cx.app,
             &cx.docker,
+            crate::services::tunnel_service::DEFAULT,
             Some(&token),
         ))
         .await
@@ -1031,9 +1033,13 @@ async fn undoing_step(cx: &Cx<'_>) -> Result<Next, Failure> {
     // The panel's tunnel this import turned on goes off before the originals run again.
     if cx.import.has_flag("tunnel") {
         let _changing = crate::services::tunnel_service::exclusive().await;
-        cx.keeping(crate::services::tunnel_service::disable(cx.app, &cx.docker))
-            .await
-            .map_err(|e| e.to_string())?;
+        cx.keeping(crate::services::tunnel_service::disable(
+            cx.app,
+            &cx.docker,
+            crate::services::tunnel_service::DEFAULT,
+        ))
+        .await
+        .map_err(|e| e.to_string())?;
     }
     let mut items: Vec<_> = cx.items.iter().collect();
     items.sort_by_key(|i| std::cmp::Reverse((i.level, i.id)));

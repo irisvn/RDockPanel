@@ -242,3 +242,187 @@ db_test!(
         assert_eq!(image(&fake), rdockpanel::services::tunnel_service::IMAGE);
     }
 );
+
+/// A second Cloudflare account's token (base64 of JSON), never a real one.
+const OTHER_TOKEN: &str = "eyJhIjoiZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTAiLCJ0IjoiNzY1NDMyMTAtYmE5OC1mZWRjLTMyMTAtZmVkY2JhOTg3NjU0IiwicyI6ImIzUm9aWEl0YzJWamNtVjBMVzkwYUdWeUxYTmxZM0psZEE9PSJ9";
+
+fn docker_of(
+    app: &rustcms_testing::TestApp,
+) -> std::sync::Arc<rdockpanel::services::docker_service::Docker> {
+    app.state()
+        .service::<rdockpanel::services::docker_service::Docker>()
+        .unwrap()
+}
+
+fn secret_of(fake: &FakeDocker, service: &str) -> String {
+    spec(fake, service).unwrap()["TaskTemplate"]["ContainerSpec"]["Secrets"][0]["SecretName"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+db_test!(
+    a_second_tunnel_runs_beside_the_first,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::tunnel_service;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let docker = docker_of(&app);
+        tunnel_service::enable(app.state(), &docker, "default", Some(TOKEN))
+            .await
+            .unwrap();
+        tunnel_service::enable(app.state(), &docker, "second", Some(OTHER_TOKEN))
+            .await
+            .unwrap();
+        assert_eq!(
+            tunnel_service::service_name("second"),
+            "rdp-cloudflared-second"
+        );
+        let (first, second) = (
+            secret_of(&fake, "rdp-cloudflared"),
+            secret_of(&fake, "rdp-cloudflared-second"),
+        );
+        assert_ne!(first, second);
+        let secrets = fake.secrets.lock().unwrap().clone();
+        assert_eq!(secrets[&first].1, TOKEN.as_bytes());
+        assert_eq!(secrets[&second].1, OTHER_TOKEN.as_bytes());
+        // Both on the tunnel's network, which Traefik shares.
+        for name in ["rdp-cloudflared", "rdp-cloudflared-second"] {
+            assert_eq!(
+                spec(&fake, name).unwrap()["TaskTemplate"]["Networks"][0]["Target"],
+                "netid-rdp-tunnel"
+            );
+        }
+        let running = tunnel_service::running_tokens(app.state()).await.unwrap();
+        assert_eq!(
+            running,
+            vec![
+                ("default".to_owned(), TOKEN.to_owned()),
+                ("second".to_owned(), OTHER_TOKEN.to_owned())
+            ]
+        );
+        // Listed with their state, never their token.
+        let list = tunnel_service::list(app.state(), &docker).await.unwrap();
+        assert_eq!(list.as_array().unwrap().len(), 2);
+        assert!(!list.to_string().contains(OTHER_TOKEN));
+        assert_eq!(list[1]["name"], "second");
+        assert_eq!(list[1]["enabled"], true);
+        // A name of letters, digits and dashes only.
+        let bad = tunnel_service::enable(app.state(), &docker, "Bad Name", Some(OTHER_TOKEN)).await;
+        assert!(bad.is_err());
+    }
+);
+
+db_test!(
+    the_same_token_cannot_be_added_twice,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let docker = docker_of(&app);
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        admin
+            .post_json(
+                &app.admin_api("x/apps/tunnel/enable"),
+                &json!({"token": TOKEN}),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let again = rdockpanel::services::tunnel_service::enable(
+            app.state(),
+            &docker,
+            "second",
+            Some(TOKEN),
+        )
+        .await;
+        let Err(rustcms::AppError::Validation(errors)) = again else {
+            panic!("{again:?}");
+        };
+        assert!(serde_json::to_string(&errors).unwrap().contains("token"));
+        assert!(spec(&fake, "rdp-cloudflared-second").is_none());
+    }
+);
+
+db_test!(
+    the_existing_tunnel_is_migrated_as_default,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::tunnel_service;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        // As an older panel kept it: the settings only.
+        let sealed = rustcms::crypto::Encrypted::seal(
+            app.state().keyring(),
+            &rustcms::crypto::Context::column("panel_settings", "tunnel.token"),
+            &TOKEN.to_owned(),
+        )
+        .unwrap();
+        let db = app.state().db();
+        rdockpanel::models::panel_setting::set(db, "tunnel.token", sealed.envelope())
+            .await
+            .unwrap();
+        rdockpanel::models::panel_setting::set(db, "tunnel.enabled", "true")
+            .await
+            .unwrap();
+        tunnel_service::load(app.state()).await.unwrap();
+        // Twice: one row.
+        tunnel_service::load(app.state()).await.unwrap();
+        let docker = docker_of(&app);
+        let list = tunnel_service::list(app.state(), &docker).await.unwrap();
+        assert_eq!(list.as_array().unwrap().len(), 1);
+        assert_eq!(list[0]["name"], "default");
+        assert_eq!(list[0]["enabled"], true);
+        assert!(tunnel_service::enabled(app.state()));
+        assert_eq!(
+            tunnel_service::running_tokens(app.state()).await.unwrap(),
+            vec![("default".to_owned(), TOKEN.to_owned())]
+        );
+        // Run with the token kept: its service's name as before.
+        tunnel_service::enable(app.state(), &docker, "default", None)
+            .await
+            .unwrap();
+        assert_eq!(tunnel_service::service_name("default"), "rdp-cloudflared");
+        assert!(spec(&fake, "rdp-cloudflared").is_some());
+    }
+);
+
+db_test!(
+    removing_one_tunnel_keeps_the_other_running,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::tunnel_service;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let docker = docker_of(&app);
+        tunnel_service::enable(app.state(), &docker, "default", Some(TOKEN))
+            .await
+            .unwrap();
+        tunnel_service::enable(app.state(), &docker, "second", Some(OTHER_TOKEN))
+            .await
+            .unwrap();
+        let kept = secret_of(&fake, "rdp-cloudflared");
+        let gone = secret_of(&fake, "rdp-cloudflared-second");
+        tunnel_service::remove(app.state(), &docker, "second")
+            .await
+            .unwrap();
+        assert!(spec(&fake, "rdp-cloudflared-second").is_none());
+        assert!(spec(&fake, "rdp-cloudflared").is_some());
+        let secrets = fake.secrets.lock().unwrap().clone();
+        assert!(secrets.contains_key(&kept));
+        assert!(!secrets.contains_key(&gone));
+        assert!(tunnel_service::enabled(app.state()));
+        assert_eq!(
+            tunnel_service::running_tokens(app.state()).await.unwrap(),
+            vec![("default".to_owned(), TOKEN.to_owned())]
+        );
+        // Turning the default off leaves no tunnel on.
+        tunnel_service::disable(app.state(), &docker, "default")
+            .await
+            .unwrap();
+        assert!(!tunnel_service::enabled(app.state()));
+        assert!(spec(&fake, "rdp-cloudflared").is_none());
+    }
+);

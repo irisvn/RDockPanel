@@ -1035,8 +1035,11 @@ pub async fn start(
             .await
             .map_err(|why| ValidationErrors::field("tunnel", &why))?;
         // The panel has one tunnel: not taken from another.
-        if let Some(running) = crate::services::tunnel_service::running_token(app).await?
-            && running != token
+        // shortcut: only `default` counts, until imports make tunnels of their own.
+        if crate::services::tunnel_service::running_tokens(app)
+            .await?
+            .iter()
+            .any(|(name, running)| name == "default" && *running != token)
         {
             return Err(ValidationErrors::field(
                 "tunnel",

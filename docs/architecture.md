@@ -603,7 +603,8 @@ sessions, audit log, API tokens, jobs, schedule slots, …), the panel adds `act
 with its configuration snapshot, pinned image, status and log), then `service_redirects`,
 `service_basic_auth`, `service_scripts`, `storage_providers`, `database_backups`, `backup_runs`,
 `notification_channels`, `cert_resolvers`, `certificates`, `panel_settings` (custom middlewares,
-the homepage switch, …), `project_members`, `git_providers` and `branding_images`; for the import of existing containers
+the homepage switch, …), `project_members`, `git_providers`, `branding_images` and `tunnels` (the Cloudflare Tunnels, one
+cloudflared each, their token sealed; the one of `panel_settings` `tunnel.*` becomes `default` at boot); for the import of existing containers
 `container_imports`, `container_import_items`, `container_import_volumes`, `container_import_claims`
 and `container_import_files`, and the columns `services.admin_only`, `services.user` (the user a container ran as, when it is not its
 image's), `service_mounts.link_target` and `container_imports.flags` (`ingress`, `back`, `tunnel`).
