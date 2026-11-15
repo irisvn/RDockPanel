@@ -51,6 +51,27 @@ const RUNNING = ["discovering", "queued", "preparing", "stopping", "draining", "
 
 const LEVELS: Record<string, string> = { BLOCK: "Blocks", CONFIRM: "Confirm", WARN: "Lost", INFO: "Note" };
 
+/** What kind of edge joins two containers (English source, translated). */
+const EDGE_KINDS: Record<string, string> = {
+  dns: "Called by name",
+  depends_on: "Depends on",
+  links: "Linked",
+  ip: "Fixed address",
+  network_mode: "Network mode",
+  volumes_from: "Volumes from",
+  volume: "Shared data",
+  bind: "Shared data",
+};
+
+/** An error's message, translated when the panel knows it. */
+function message(t: T, error: unknown): string {
+  // A refused field says why (the form's errors); the message alone says "invalid".
+  const fields = (error as { fieldErrors?: Record<string, string[]> } | null)?.fieldErrors;
+  const said = fields ? Object.values(fields).flat() : [];
+  if (said.length > 0) return said.map((m) => t(m)).join(" ");
+  return t(error instanceof Error ? error.message : String(error));
+}
+
 /** Words of a finding's level (translated). */
 function levelWord(t: T, level: Finding["level"]) {
   return t(LEVELS[level]);
@@ -88,7 +109,7 @@ export function SourceDialog(props: PageProps<unknown> & { onClose: () => void }
       <div className="rdp2-form">
         <p className="rdp2-muted">{t("Choose a container or a Compose project. The panel reads the containers it needs with it.")}</p>
         <Input aria-label={t("Search")} placeholder={t("Search")} value={search} onChange={(e) => setSearch(e.target.value)} />
-        {error ? <Alert variant="destructive">{error instanceof Error ? error.message : String(error)}</Alert> : null}
+        {error ? <Alert variant="destructive">{message(t, error)}</Alert> : null}
         {sources.isLoading ? (
           <Loading />
         ) : sources.error ? (
@@ -328,8 +349,8 @@ export function ImportPage(props: PageProps<unknown> & { id: number }) {
         </>
       }
     >
-      {error ? <Alert variant="destructive">{error instanceof Error ? error.message : String(error)}</Alert> : null}
-      {imp.error && <Alert variant="destructive">{imp.error}</Alert>}
+      {error ? <Alert variant="destructive">{message(t, error)}</Alert> : null}
+      {imp.error && <Alert variant="destructive">{t(imp.error)}</Alert>}
       {plan && (
         <>
           <Section title={t("Overview")}>
@@ -394,7 +415,7 @@ export function ImportPage(props: PageProps<unknown> & { id: number }) {
                       <tr key={i}>
                         <td className="rdp2-strong-cell">{nameOf(plan, e.from)}</td>
                         <td>{nameOf(plan, e.to)}</td>
-                        <td>{t(e.kind === "dns" ? "Called by name" : e.kind === "volume" || e.kind === "bind" ? "Shared data" : e.kind)}</td>
+                        <td>{t(EDGE_KINDS[e.kind] ?? e.kind)}</td>
                         <td className="rdp2-mono rdp2-small">{e.signal}</td>
                       </tr>
                     ))}
@@ -623,7 +644,7 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
   return (
     <Dialog open onClose={props.onClose} title={item.compose_service ?? item.name} >
       <div className="rdp2-form">
-        {error ? <Alert variant="destructive">{error instanceof Error ? error.message : String(error)}</Alert> : null}
+        {error ? <Alert variant="destructive">{message(t, error)}</Alert> : null}
         <Field label={t("Container")}>
           <span className="rdp2-mono">{item.name}</span>
         </Field>

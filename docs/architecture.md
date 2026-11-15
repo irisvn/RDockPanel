@@ -605,4 +605,5 @@ with its configuration snapshot, pinned image, status and log), then `service_re
 `notification_channels`, `cert_resolvers`, `certificates`, `panel_settings` (custom middlewares,
 the homepage switch, …), `project_members`, `git_providers` and `branding_images`; for the import of existing containers
 `container_imports`, `container_import_items`, `container_import_volumes`, `container_import_claims`
-and `container_import_files`, and the columns `services.admin_only` and `service_mounts.link_target`.
+and `container_import_files`, and the columns `services.admin_only`, `services.user` (the user a container ran as, when it is not its
+image's), `service_mounts.link_target` and `container_imports.flags` (`ingress`, `back`, `tunnel`).

@@ -22,7 +22,9 @@ Everything RDockPanel does today. [Tiếng Việt](features.vi.md) · back to th
 - A container (or a Compose project, with the containers it needs) started outside the panel becomes
   a service of a project: read, planned (what blocks, what is lost), stopped, copied, deployed, and the
   originals kept until the import is finished, so it can be undone. Folders on the machine are used in
-  place and can be moved into volumes later.
+  place and can be moved into volumes later. A cloudflared container can become the panel's own Cloudflare
+  Tunnel; a password on a command line moves to an environment variable; a container that ran as another
+  user keeps it.
 
 **Server and Docker**
 

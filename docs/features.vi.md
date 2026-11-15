@@ -19,7 +19,9 @@ Những gì RDockPanel làm được hiện nay. [English](features.md) · quay 
 
 - Container (hoặc dự án Compose cùng các container nó cần) chạy ngoài panel trở thành service của một
   dự án: đọc, lập kế hoạch (cái gì chặn, cái gì mất), dừng, chép dữ liệu, deploy, và giữ bản gốc tới
-  khi kết thúc để hoàn tác được. Thư mục trên máy được dùng tại chỗ, về sau có thể chuyển vào volume.
+  khi kết thúc để hoàn tác được. Thư mục trên máy được dùng tại chỗ, về sau có thể chuyển vào volume. Container cloudflared có thể thành
+  Cloudflare Tunnel của chính panel; mật khẩu trên dòng lệnh được chuyển sang biến môi trường; container
+  chạy bằng user khác image giữ nguyên user đó.
 
 **Server và Docker**
 
