@@ -31,8 +31,6 @@ use crate::services::deployment_service::{self, Timings, Trigger};
 use crate::services::docker_service::{ContainerAction, Docker, HelperMount, HelperSpec};
 use crate::services::import_service::{ImportSettings, RUNNING, helper_image, settings};
 
-const LEASE: i64 = 90;
-
 /// The image of the helpers is missing, a wait ran out, Docker refused: the
 /// message the admin reads.
 pub(crate) type Failure = String;
@@ -56,14 +54,14 @@ fn token_for(id: i64) -> String {
 }
 
 /// Takes the import's lease if it is free or expired; its token.
-async fn claim<C: ConnectionTrait>(db: &C, id: i64) -> AppResult<Option<String>> {
+async fn claim<C: ConnectionTrait>(db: &C, id: i64, lease: Duration) -> AppResult<Option<String>> {
     let token = token_for(id);
     let now = Utc::now();
     container_import::Entity::update_many()
         .col_expr(container_import::Column::LeaseToken, token.clone().into())
         .col_expr(
             container_import::Column::LeaseExpiresAt,
-            (now + chrono::Duration::seconds(LEASE)).into(),
+            (now + lease_for(lease)).into(),
         )
         .filter(container_import::Column::Id.eq(id))
         .filter(
@@ -81,11 +79,21 @@ async fn claim<C: ConnectionTrait>(db: &C, id: i64) -> AppResult<Option<String>>
 }
 
 /// Pushes the lease on; false when it is no longer ours.
-async fn renew<C: ConnectionTrait>(db: &C, id: i64, token: &str) -> AppResult<bool> {
+/// A lease as a `chrono` span.
+fn lease_for(lease: Duration) -> chrono::Duration {
+    chrono::Duration::from_std(lease).unwrap_or_else(|_| chrono::Duration::seconds(90))
+}
+
+async fn renew<C: ConnectionTrait>(
+    db: &C,
+    id: i64,
+    token: &str,
+    lease: Duration,
+) -> AppResult<bool> {
     container_import::Entity::update_many()
         .col_expr(
             container_import::Column::LeaseExpiresAt,
-            (Utc::now() + chrono::Duration::seconds(LEASE)).into(),
+            (Utc::now() + lease_for(lease)).into(),
         )
         .filter(container_import::Column::Id.eq(id))
         .filter(container_import::Column::LeaseToken.eq(token))
@@ -122,12 +130,30 @@ pub(crate) struct Cx<'a> {
 }
 
 impl Cx<'_> {
+    /// Runs `work` and keeps the lease while it does: a copy or a deployment
+    /// waits longer than a lease, and a step that lets it lapse would be run
+    /// again beside itself.
+    pub(crate) async fn keeping<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        tokio::pin!(work);
+        let beat = (self.settings.lease / 3).max(Duration::from_millis(50));
+        let mut ticker = tokio::time::interval(beat);
+        ticker.tick().await;
+        loop {
+            tokio::select! {
+                done = &mut work => return done,
+                _ = ticker.tick() => {
+                    let _ = renew(self.db(), self.import.id, &self.token, self.settings.lease).await;
+                }
+            }
+        }
+    }
+
     pub(crate) fn db(&self) -> &sea_orm::DatabaseConnection {
         self.app.db()
     }
 
     pub(crate) async fn alive(&self) -> Result<(), Failure> {
-        match renew(self.db(), self.import.id, &self.token).await {
+        match renew(self.db(), self.import.id, &self.token, self.settings.lease).await {
             Ok(true) => Ok(()),
             _ => Err("the import's lease was lost".to_owned()),
         }
@@ -194,9 +220,7 @@ impl Cx<'_> {
             .engine()
             .remove_container(&spec.name, true)
             .await;
-        self.docker
-            .engine()
-            .run_helper(spec)
+        self.keeping(self.docker.engine().run_helper(spec))
             .await
             .map_err(|e| e.to_string())
     }
@@ -204,7 +228,7 @@ impl Cx<'_> {
 
 /// Runs the step the import is at, if no other holds it.
 pub async fn step(state: &AppState, import_id: i64) -> AppResult<()> {
-    let Some(token) = claim(state.db(), import_id).await? else {
+    let Some(token) = claim(state.db(), import_id, settings(state).lease).await? else {
         return Ok(());
     };
     let outcome = run(state, import_id, &token).await;
@@ -238,14 +262,14 @@ async fn run(app: &AppState, import_id: i64, token: &str) -> AppResult<()> {
         items,
         token: token.to_owned(),
     };
+    let undoing = matches!(state.as_str(), "undoing" | "draining_panel" | "restoring");
+    // An undo asked for while a step held the import: taken here, for a move too.
+    if cx.import.undo_requested && !undoing {
+        return go(&cx, "undoing", None).await;
+    }
     // Moving a folder into a volume has its own steps.
     if cx.import.source_kind == "move" {
         return crate::services::import_move_service::step(&cx).await;
-    }
-    let undoing = matches!(state.as_str(), "undoing" | "draining_panel" | "restoring");
-    // An undo asked for while a step held the import: taken here.
-    if cx.import.undo_requested && !undoing {
-        return go(&cx, "undoing", None).await;
     }
     let result = match state.as_str() {
         "queued" | "preparing" => prepare(&cx).await,
@@ -263,11 +287,16 @@ async fn run(app: &AppState, import_id: i64, token: &str) -> AppResult<()> {
     match result {
         Ok(Next::Go(next)) => go(&cx, next, None).await,
         Ok(Next::Attention(resume, why)) => attention(&cx, resume, &why).await,
-        Err(why) if undoing => attention(&cx, "restoring", &why).await,
+        // A failed undo goes on from where it failed, never from a later step.
+        Err(why) if undoing => attention(&cx, resume_of(&state), &why).await,
         Err(why) => {
             // Before traffic could arrive the import undoes itself; after, or
-            // when it was asked not to, the admin decides.
-            let ingress = cx.import.step.as_deref() == Some("ingress");
+            // when it was asked not to, the admin decides. The mark is read
+            // now: a step sets it while it runs.
+            let fresh = container_import::Entity::find_by_id(cx.import.id)
+                .one(cx.db())
+                .await?;
+            let ingress = fresh.as_ref().is_some_and(|i| i.has_flag("ingress"));
             if cx.import.auto_undo && !ingress {
                 go(&cx, "undoing", Some(&why)).await
             } else {
@@ -293,6 +322,19 @@ fn resume_of(state: &str) -> &'static str {
 }
 
 /// Moves the import to `next` and queues its step, if the lease is still ours.
+/// Whether `task` failed or was refused at or after `since`.
+pub(crate) fn failed_since(
+    task: &crate::services::docker_service::SwarmTask,
+    since: chrono::DateTime<Utc>,
+) -> bool {
+    use crate::services::docker_service::TaskState;
+    let Some(status) = task.status.as_ref() else {
+        return false;
+    };
+    matches!(status.state, Some(TaskState::FAILED | TaskState::REJECTED))
+        && status.timestamp.is_some_and(|at| at >= since)
+}
+
 pub(crate) async fn go(cx: &Cx<'_>, next: &str, why: Option<&str>) -> AppResult<()> {
     let txn = rustcms::db::begin_write(cx.db()).await?;
     let row = container_import::Entity::find_by_id(cx.import.id)
@@ -303,6 +345,12 @@ pub(crate) async fn go(cx: &Cx<'_>, next: &str, why: Option<&str>) -> AppResult<
     if row.lease_token.as_deref() != Some(&cx.token) {
         return Ok(());
     }
+    // An undo asked for meanwhile is not lost to the end of the way forward.
+    let next = if next == "active" && row.undo_requested {
+        "undoing"
+    } else {
+        next
+    };
     let mut change = row.into_active_model();
     change.state = Set(next.to_owned());
     if next == "undoing" {
@@ -340,16 +388,10 @@ pub(crate) async fn attention(cx: &Cx<'_>, resume: &str, why: &str) -> AppResult
     if row.lease_token.as_deref() != Some(&cx.token) {
         return Ok(());
     }
-    // What the admin retries from, and whether traffic could have arrived.
-    let ingress = row.step.as_deref() == Some("ingress");
-    let step = if ingress {
-        format!("ingress:{resume}")
-    } else {
-        resume.to_owned()
-    };
     let mut change = row.into_active_model();
     change.state = Set("needs_attention".to_owned());
-    change.step = Set(Some(step));
+    // What the admin retries from; the flags (`ingress`, `back`) stay.
+    change.step = Set(Some(resume.to_owned()));
     change.error = Set(Some(why.to_owned()));
     change.updated_at = Set(Utc::now());
     change.update(cx.db()).await?;
@@ -551,6 +593,42 @@ async fn copying(cx: &Cx<'_>) -> Result<Next, Failure> {
                         .await
                         .map_err(|e| e.to_string())?;
                 }
+                // Room for the copy, with a margin: a full disk stops the other
+                // services and the panel's own database.
+                let sizes = engine.volume_sizes().await.unwrap_or_default();
+                if let Some(size) = sizes
+                    .get(&volume.original_name)
+                    .copied()
+                    .filter(|size| *size > 0)
+                {
+                    let need_kb = (size + (size / 10).max(2 * 1024 * 1024 * 1024)) / 1024;
+                    let room = cx
+                        .helper(
+                            &format!("space-{}", volume.id),
+                            vec![
+                                "sh",
+                                "-c",
+                                "[ \"$(df -Pk /to | awk 'NR==2{print $4}')\" -gt \"$1\" ]",
+                                "sh",
+                                &need_kb.to_string(),
+                            ],
+                            vec![HelperMount {
+                                source: target.clone(),
+                                target: "/to".to_owned(),
+                                read_only: false,
+                                kind: "volume".to_owned(),
+                            }],
+                            &[],
+                        )
+                        .await?;
+                    if room != 0 {
+                        return Err(format!(
+                            "not enough room to copy {} ({} MiB and a margin)",
+                            volume.original_name,
+                            size / (1024 * 1024)
+                        ));
+                    }
+                }
                 let code = cx
                     .helper(
                         &format!("copy-{}", volume.id),
@@ -662,7 +740,10 @@ async fn editing_compose(cx: &Cx<'_>) -> Result<Next, Failure> {
         .is_some_and(|items| items.iter().all(|i| i["choice"] == "bring"));
     for info in plan["compose"].as_array().into_iter().flatten() {
         for file in info["files"].as_array().into_iter().flatten() {
-            if !whole || file["read"] != true {
+            // Whole: every container of the import comes along and so does every
+            // container of this file's project.
+            let project_whole = info["containers"] == info["taken"];
+            if !whole || !project_whole || file["read"] != true {
                 continue;
             }
             cx.alive().await?;
@@ -713,7 +794,8 @@ async fn editing_compose(cx: &Cx<'_>) -> Result<Next, Failure> {
                         read_only: false,
                         kind: "bind".to_owned(),
                     }],
-                    &[],
+                    // As root without these, a helper cannot rename in a user's folder.
+                    &["DAC_OVERRIDE", "FOWNER"],
                 )
                 .await?;
             if code != 0 {
@@ -753,15 +835,18 @@ async fn deploying(cx: &Cx<'_>) -> Result<Next, Failure> {
         };
         // From here a request may reach the service (a port, a domain).
         let ingress = ports_or_domains(cx, &service).await;
-        if ingress && cx.import.step.as_deref() != Some("ingress") {
-            let mut mark = container_import::Entity::find_by_id(cx.import.id)
+        if ingress {
+            let current = container_import::Entity::find_by_id(cx.import.id)
                 .one(cx.db())
                 .await
                 .map_err(|e| e.to_string())?
-                .ok_or("the import is gone")?
-                .into_active_model();
-            mark.step = Set(Some("ingress".to_owned()));
-            mark.update(cx.db()).await.map_err(|e| e.to_string())?;
+                .ok_or("the import is gone")?;
+            if !current.has_flag("ingress") {
+                let flags = container_import::with_flag(current.flags.as_deref(), "ingress");
+                let mut mark = current.into_active_model();
+                mark.flags = Set(Some(flags));
+                mark.update(cx.db()).await.map_err(|e| e.to_string())?;
+            }
         }
         let deployed = deploy_service(cx, &service, Trigger::Deploy).await?;
         set_item(cx, item, |a| {
@@ -800,7 +885,9 @@ async fn ports_or_domains(cx: &Cx<'_>, service: &service::Model) -> bool {
         .ok()
         .flatten()
         .is_some();
-    ports || domains
+    // A tunnel carries traffic with neither a port nor a domain of its own.
+    let tunnel = service.image.contains("cloudflared");
+    ports || domains || tunnel
 }
 
 /// Asks a deployment of `service` as this import's step, and runs it here
@@ -825,7 +912,7 @@ pub(crate) async fn deploy_service(
     .await
     .map_err(|e| e.to_string())?;
     txn.commit().await.map_err(|e| e.to_string())?;
-    deployment_service::run(cx.app, asked.id, cx.timings())
+    cx.keeping(deployment_service::run(cx.app, asked.id, cx.timings()))
         .await
         .map_err(|e| e.to_string())?;
     let done = deployment::Entity::find_by_id(asked.id)
@@ -846,6 +933,9 @@ pub(crate) async fn deploy_service(
 async fn observing(cx: &Cx<'_>) -> Result<Next, Failure> {
     let project = cx.project().await?;
     let until = std::time::Instant::now() + cx.settings.observe;
+    // Only what fails while it is watched: Swarm keeps the failures of the
+    // start (a database that was not ready yet), which the deployment accepted.
+    let started = Utc::now();
     loop {
         cx.alive().await?;
         for item in &cx.items {
@@ -858,15 +948,7 @@ async fn observing(cx: &Cx<'_>) -> Result<Next, Failure> {
                 .list_tasks(&service_name(&project.name, &service.name))
                 .await
                 .map_err(|e| e.to_string())?;
-            if tasks.iter().any(|t| {
-                matches!(
-                    t.status.as_ref().and_then(|s| s.state),
-                    Some(
-                        crate::services::docker_service::TaskState::FAILED
-                            | crate::services::docker_service::TaskState::REJECTED
-                    )
-                )
-            }) {
+            if tasks.iter().any(|t| failed_since(t, started)) {
                 return Err(format!("{} has failed tasks", service.name));
             }
         }
@@ -965,7 +1047,7 @@ async fn restoring(cx: &Cx<'_>) -> Result<Next, Failure> {
                     read_only: false,
                     kind: "bind".to_owned(),
                 }],
-                &[],
+                &["DAC_OVERRIDE", "FOWNER"],
             )
             .await?;
         if code != 0 {
@@ -997,7 +1079,12 @@ async fn restoring(cx: &Cx<'_>) -> Result<Next, Failure> {
                 .await
                 .map_err(|e| e.to_string())?;
         }
-        if item.was_running {
+        // One that never stopped runs already: a start would be refused.
+        let runs = engine
+            .inspect_container_raw(&item.container_id, false)
+            .await
+            .is_ok_and(|d| running(&d));
+        if item.was_running && !runs {
             let started = wait_until(cx, || async {
                 // A port may still be held by a task that is going.
                 engine
@@ -1148,8 +1235,10 @@ async fn watch(app: &AppState) -> AppResult<()> {
     let Some(docker) = app.service::<Docker>() else {
         return Ok(());
     };
+    // A container import, a project's or a partial one: all are watched. A
+    // move has no originals.
     let imports = container_import::Entity::find()
-        .filter(container_import::Column::SourceKind.eq("project"))
+        .filter(container_import::Column::SourceKind.ne("move"))
         .filter(container_import::Column::State.is_in([
             "stopping",
             "draining",
@@ -1171,40 +1260,72 @@ async fn watch(app: &AppState) -> AppResult<()> {
         return Ok(());
     };
     for import in imports {
+        // Undoing: the originals are being started again on purpose.
+        if matches!(
+            import.step.as_deref(),
+            Some("undoing" | "draining_panel" | "restoring")
+        ) {
+            continue;
+        }
         if crate::models::panel_setting::get(app.db(), &unwatched_key(import.id))
             .await?
             .is_some()
         {
             continue;
         }
+        let plan: Value = import
+            .plan
+            .as_deref()
+            .and_then(|p| serde_json::from_str(p).ok())
+            .unwrap_or(Value::Null);
         let items = container_import_item::Entity::find()
             .filter(container_import_item::Column::ImportId.eq(import.id))
             .all(app.db())
             .await?;
+        // (original id, Compose project, Compose service), as the plan read them.
+        let originals: Vec<(String, Option<String>, Option<String>)> = plan["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|i| i["choice"] == "bring")
+            .filter_map(|i| {
+                Some((
+                    i["container_id"].as_str()?.to_owned(),
+                    i["compose_project"].as_str().map(str::to_owned),
+                    i["compose_service"].as_str().map(str::to_owned),
+                ))
+            })
+            .collect();
         for container in &listed {
             let label = |name: &str| container["Labels"][name].as_str();
             let id = container["Id"].as_str().unwrap_or_default();
-            let ours = items.iter().any(|i| {
-                // The original, or a container compose made again for its service.
-                i.container_id == id
-                    || i.compose_service.as_deref() == label("com.docker.compose.service")
-            });
-            if label("com.docker.compose.project") == Some(import.source_ref.as_str())
-                && label("com.docker.swarm.service.id").is_none()
-                && container["State"] == "running"
-                && ours
-                && items
-                    .iter()
-                    .any(|i| i.state == "stopped" || i.state == "deployed" || i.state == "pending")
-            {
-                tracing::warn!(
-                    import = import.id,
-                    container = id,
-                    "an imported original runs again: stopped"
-                );
-                let _ = engine.update_container_restart(id, "no").await;
-                let _ = engine.container_action(id, ContainerAction::Stop).await;
+            if container["State"] != "running" || label("com.docker.swarm.service.id").is_some() {
+                continue;
             }
+            // The original, or a container Compose made again for its service.
+            let matched = originals.iter().find(|(cid, project, service)| {
+                cid == id
+                    || (project.is_some()
+                        && project.as_deref() == label("com.docker.compose.project")
+                        && service.as_deref() == label("com.docker.compose.service"))
+            });
+            let Some((cid, _, _)) = matched else {
+                continue;
+            };
+            // Already put back by an undo: it is the user's again.
+            if items
+                .iter()
+                .any(|i| &i.container_id == cid && i.state == "restored")
+            {
+                continue;
+            }
+            tracing::warn!(
+                import = import.id,
+                container = id,
+                "an imported original runs again: stopped"
+            );
+            let _ = engine.update_container_restart(id, "no").await;
+            let _ = engine.container_action(id, ContainerAction::Stop).await;
         }
     }
     Ok(())
@@ -1232,14 +1353,10 @@ pub async fn resume(
             message: "This import is not waiting for you",
         });
     }
-    let step = row.step.clone().unwrap_or_else(|| "preparing".to_owned());
-    let (ingress, state) = match step.strip_prefix("ingress:") {
-        Some(rest) => (true, rest.to_owned()),
-        None => (false, step),
-    };
+    let state = row.step.clone().unwrap_or_else(|| "preparing".to_owned());
     let mut change = row.into_active_model();
     change.state = Set(state);
-    change.step = Set(ingress.then(|| "ingress".to_owned()));
+    change.step = Set(None);
     change.error = Set(None);
     change.updated_at = Set(Utc::now());
     change.update(&txn).await?;

@@ -209,8 +209,8 @@ db_test!(
         // (MySQL's; other databases have no 64 KiB TEXT to go back to).
         if app.state().db().get_database_backend() == sea_orm::DatabaseBackend::MySql {
             use sea_orm_migration::MigratorTrait;
-            // The import tables' migration (empty here) goes first, then the widening.
-            let undone = Migrator::down(app.state().db(), Some(2)).await;
+            // The import migrations (their tables are empty here) go first, then the widening.
+            let undone = Migrator::down(app.state().db(), Some(3)).await;
             assert!(
                 undone
                     .as_ref()

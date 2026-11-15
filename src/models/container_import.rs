@@ -24,7 +24,11 @@ pub struct Model {
     pub undo_requested: bool,
     pub lease_token: Option<String>,
     pub lease_expires_at: Option<DateTimeUtc>,
+    /// The state to go on from when the admin retries.
     pub step: Option<String>,
+    /// Comma separated: `ingress` (traffic could have reached a new service),
+    /// `back` (a move is on its way back).
+    pub flags: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub error: Option<String>,
     pub created_by: Option<i64>,
@@ -40,3 +44,24 @@ impl ActiveModelBehavior for ActiveModel {}
 
 /// The states in which the plan can be changed or the import deleted.
 pub const EDITABLE: [&str; 3] = ["planned", "failed", "discover_failed"];
+
+impl Model {
+    pub fn has_flag(&self, flag: &str) -> bool {
+        self.flags
+            .as_deref()
+            .is_some_and(|f| f.split(',').any(|x| x == flag))
+    }
+}
+
+/// `flags` with `flag` added.
+pub fn with_flag(flags: Option<&str>, flag: &str) -> String {
+    let mut all: Vec<&str> = flags
+        .unwrap_or_default()
+        .split(',')
+        .filter(|f| !f.is_empty())
+        .collect();
+    if !all.contains(&flag) {
+        all.push(flag);
+    }
+    all.join(",")
+}

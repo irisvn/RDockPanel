@@ -26,11 +26,13 @@ There is no new permission.
    the admin saw (else `409 plan_stale`). In one write the project, a service for each container, the
    import's items, volumes and claims (one container or volume belongs to one import), the audit entry
    `imports.start` and the first step are recorded.
-4. **Steps** (a job each, under a lease): stop the originals (restart policy off first), wait for them,
-   copy each named volume with a helper (`cp -a`, no network, no capability but `CHOWN`,
+4. **Steps** (a job each, under a lease that a long copy or deployment renews): stop the originals
+   (restart policy off first), wait for them, check there is room (the volume's size and a margin of 10% or
+   2 GB), copy each named volume with a helper (`cp -a`, no network, no capability but `CHOWN`,
    `DAC_OVERRIDE`, `FOWNER`), make the symlink of each folder, rename the Compose file to
-   `<name>.rdockpanel-imported` (a whole project only), deploy the services a level at a time
-   (a service after what it calls), observe them for 60 seconds, then `active`.
+   `<name>.rdockpanel-imported` (only when every container of that project goes), deploy the services a level at a time
+   (a service after what it calls), observe them for 60 seconds (a failure that happens while they are watched counts, not the failures of
+   their start), then `active`.
 5. **Finish** removes the originals (not their volumes). The original volumes stay until the admin
    releases them.
 
@@ -38,7 +40,7 @@ There is no new permission.
 
 Until `finished`, **Undo** destroys the new services, waits until their task containers are gone,
 puts the Compose file back, restores the restart policies and starts the originals again. A failure
-before traffic could reach a new service (a port or a domain) undoes by itself; after, the import waits
+before traffic could reach a new service (a port, a domain or a tunnel) undoes by itself; after, the import waits
 in `needs_attention` with **Retry**, **Continue** (after a database stopped by force, exit 137),
 **Accept** (when every service runs) or **Undo**. The copied volumes are kept when undone (they may
 hold what was written since).
@@ -58,16 +60,20 @@ entrypoint different from the image's, a volume with a driver or options, an env
 is not a valid name or holds `$(…)`, more than 100 variables or a value over 16 KiB, a secret in the
 command line (`--requirepass x`: make the container read it from the environment first), two containers
 sharing a Docker volume (in the panel a volume belongs to one service), and the panel's own objects.
-Said and lost: hostname, extra aliases and networks, ulimits, log config, the restart policy
+a secret in a container's health check, and two containers sharing a Docker volume (in the panel a
+volume belongs to one service; two that only read the same one each get a copy).
+Said and lost: a port published on one address only (the panel publishes it on every address), hostname, extra aliases and networks, ulimits, log config, the restart policy
 (the panel always restarts).
 
 ## Move all, and clean the old folder
 
-A service with a folder in use in place has two buttons (`POST /services/{id}/move-data`,
+A service with a folder in use in place has these buttons (`POST /services/{id}/move-data`,
 `/move-data/undo`, `/clean-old-folder`): **Move all** stops it, copies the folder into a volume, switches the
 mount in one write with its audit entry, deploys and observes; **Undo** puts the link back (what was
 written to the volume stays there); **Clean the old folder** (the folder's name typed) deletes it with
-helpers that mount exactly that folder, after the rules are checked again against the record.
+helpers that mount exactly that folder, after the rules are checked again against the record. It is
+refused while the import that brought the service in can still be undone (its original runs on that folder)
+and while the service uses the folder again.
 
 ## Safety
 

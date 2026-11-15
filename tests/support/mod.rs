@@ -75,6 +75,26 @@ pub async fn app_with_import(
     .await
 }
 
+/// [`app_with_docker`] with the import's settings of the test's own.
+pub async fn app_with_settings(
+    db: TestDb,
+    docker: fake_docker::FakeDocker,
+    settings: rdockpanel::services::import_service::ImportSettings,
+) -> TestApp {
+    use rdockpanel::services::docker_service::Docker;
+    TestApp::new(
+        move |config| {
+            let mut app = bootstrap::build(config);
+            app.bind(Docker::new(docker));
+            app.bind(scratch_traefik());
+            app.bind(settings);
+            app
+        },
+        db,
+    )
+    .await
+}
+
 /// [`app_with_docker`] with the image of the import's helper containers.
 pub async fn app_with_helper(db: TestDb, docker: fake_docker::FakeDocker, helper: &str) -> TestApp {
     use rdockpanel::services::docker_service::Docker;
@@ -85,6 +105,7 @@ pub async fn app_with_helper(db: TestDb, docker: fake_docker::FakeDocker, helper
         deadline: std::time::Duration::from_millis(200),
         poll: std::time::Duration::from_millis(10),
         links_dir: None,
+        lease: std::time::Duration::from_secs(90),
     };
     TestApp::new(
         move |config| {

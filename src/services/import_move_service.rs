@@ -310,7 +310,14 @@ async fn copying(cx: &Cx<'_>) -> Result<Option<&'static str>, Failure> {
 
 async fn deploying(cx: &Cx<'_>) -> Result<Option<&'static str>, Failure> {
     let svc = item_service(cx).await?;
-    deploy_service(cx, &svc, Trigger::Deploy).await?;
+    // The service was stopped for the copy: a deployment would keep it stopped.
+    // Start applies its configuration as it is now (the volume, or the link).
+    let trigger = if cx.items[0].was_running {
+        Trigger::Start
+    } else {
+        Trigger::Deploy
+    };
+    deploy_service(cx, &svc, trigger).await?;
     Ok(Some("observing"))
 }
 
@@ -322,6 +329,7 @@ async fn observing(cx: &Cx<'_>) -> Result<Option<&'static str>, Failure> {
         .map_err(|e| e.to_string())?
         .ok_or("the project is gone")?;
     let until = std::time::Instant::now() + cx.settings.observe;
+    let started = Utc::now();
     loop {
         cx.alive().await?;
         let tasks = cx
@@ -333,20 +341,15 @@ async fn observing(cx: &Cx<'_>) -> Result<Option<&'static str>, Failure> {
             ))
             .await
             .map_err(|e| e.to_string())?;
-        if tasks.iter().any(|t| {
-            matches!(
-                t.status.as_ref().and_then(|s| s.state),
-                Some(
-                    crate::services::docker_service::TaskState::FAILED
-                        | crate::services::docker_service::TaskState::REJECTED
-                )
-            )
-        }) {
+        if tasks
+            .iter()
+            .any(|t| crate::services::import_run_service::failed_since(t, started))
+        {
             return Err(format!("{} has failed tasks", svc.name));
         }
         if std::time::Instant::now() >= until {
             // The way back ends in `reverted`, the way forward in `active`.
-            return Ok(Some(if cx.import.step.as_deref() == Some("back") {
+            return Ok(Some(if cx.import.has_flag("back") {
                 "reverted"
             } else {
                 "active"
@@ -357,6 +360,11 @@ async fn observing(cx: &Cx<'_>) -> Result<Option<&'static str>, Failure> {
 }
 
 async fn undoing(cx: &Cx<'_>) -> Result<Option<&'static str>, Failure> {
+    // The mounts are the links again already (this step ran, and its way back
+    // failed after): only the deployment is left. Never guess from the mounts.
+    if cx.import.has_flag("back") {
+        return Ok(Some("deploying"));
+    }
     let svc = item_service(cx).await?;
     let project = project::Entity::find_by_id(svc.project_id)
         .one(cx.db())
@@ -421,7 +429,10 @@ async fn undoing(cx: &Cx<'_>) -> Result<Option<&'static str>, Failure> {
         .map_err(|e| e.to_string())?
         .ok_or("the import is gone")?
         .into_active_model();
-    mark.step = Set(Some("back".to_owned()));
+    mark.flags = Set(Some(container_import::with_flag(
+        mark.flags.clone().take().flatten().as_deref(),
+        "back",
+    )));
     mark.update(&txn).await.map_err(|e| e.to_string())?;
     let entry = AuditEntry::new("services.move_data_undo", "services")
         .key(svc.id.to_string())
@@ -498,6 +509,39 @@ pub async fn clean_old_folder(
         || path.parent().is_none_or(|p| p == std::path::Path::new("/"))
     {
         return Err(bad("folder", "this folder may not be deleted from here"));
+    }
+    // Nor this service itself (a move undone puts the link back on it).
+    let own = service_mount::Entity::find()
+        .filter(service_mount::Column::ServiceId.eq(service_id))
+        .filter(service_mount::Column::LinkTarget.eq(folder))
+        .one(app.db())
+        .await?;
+    if own.is_some() {
+        return Err(bad(
+            "folder",
+            "the service uses this folder again: move it first",
+        ));
+    }
+    // Nor an import that can still be undone: its original runs on that folder.
+    let held = container_import_volume::Entity::find()
+        .filter(container_import_volume::Column::OriginalName.eq(folder))
+        .filter(container_import_volume::Column::Mode.eq("link"))
+        .all(app.db())
+        .await?;
+    for row in held {
+        let open = match row.import_id {
+            Some(id) => container_import::Entity::find_by_id(id)
+                .one(app.db())
+                .await?
+                .is_some_and(|i| !matches!(i.state.as_str(), "finished" | "reverted")),
+            None => false,
+        };
+        if open {
+            return Err(bad(
+                "folder",
+                "the import that brought this service in can still be undone: finish it first",
+            ));
+        }
     }
     // Nothing else uses it.
     let used = service_mount::Entity::find()

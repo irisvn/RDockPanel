@@ -207,6 +207,9 @@ pub struct ImportSettings {
     /// can bind): the installer's folder on a Mac, `/var/lib/rdockpanel/links`
     /// on Linux, unless set.
     pub links_dir: Option<std::path::PathBuf>,
+    /// How long a step holds the import before another may take it over; a
+    /// long wait renews it (a third of it apart).
+    pub lease: std::time::Duration,
 }
 
 impl Default for ImportSettings {
@@ -217,6 +220,7 @@ impl Default for ImportSettings {
             deadline: std::time::Duration::from_secs(120),
             poll: std::time::Duration::from_secs(1),
             links_dir: None,
+            lease: std::time::Duration::from_secs(90),
         }
     }
 }
@@ -505,6 +509,13 @@ async fn compose_of(
             "with_secrets": facts.with_secrets,
             "command_vars": facts.command_vars,
             "without_container": without_container,
+            // Whether every container of the project goes: only then its file
+            // is renamed (else the ones left behind would lose it).
+            "containers": members.iter().filter(|m| m.compose_project() == Some(project)).count(),
+            "taken": members
+                .iter()
+                .filter(|m| m.compose_project() == Some(project) && taken.contains(&m.id))
+                .count(),
             "notes": notes,
         }));
     }
@@ -615,9 +626,14 @@ pub fn new_service_of(
         new.mem_limit_mb = u32::try_from(detail.memory / (1024 * 1024)).ok();
     }
     let reserved = &config().reserved_ports;
+    // Docker lists a port once for IPv4 and once for IPv6: the panel has one.
+    let mut published = std::collections::BTreeSet::new();
     for port in &detail.ports {
         let loopback = matches!(port.host_ip.as_str(), "127.0.0.1" | "::1");
-        if !loopback && !reserved.contains(&port.host_port) {
+        if !loopback
+            && !reserved.contains(&port.host_port)
+            && published.insert((port.host_port, port.protocol.clone()))
+        {
             new.ports.push(NewPort {
                 published: port.host_port,
                 target: port.container_port,
@@ -875,10 +891,10 @@ pub async fn start(
                     &moved.name,
                 )
             });
-            // One row, one claim and one copy for a volume several members mount.
-            if moved.mode == "copy" && !claimed_volumes.insert(moved.original.clone()) {
-                continue;
-            }
+            // A copy for each service that mounts it (a panel volume is one
+            // service's); the claim, once.
+            let first_claim =
+                moved.mode == "copy" && claimed_volumes.insert(moved.original.clone());
             container_import_volume::ActiveModel {
                 import_id: Set(Some(import_id)),
                 original_name: Set(moved.original.clone()),
@@ -888,7 +904,7 @@ pub async fn start(
             }
             .insert(&txn)
             .await?;
-            if moved.mode == "copy" {
+            if first_claim {
                 container_import_claim::ActiveModel {
                     import_id: Set(import_id),
                     container_id: Set(None),
@@ -919,4 +935,26 @@ pub async fn start(
     txn.commit().await?;
     let _ = service_model::Entity;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::import_plan_service::Port;
+
+    #[test]
+    fn a_port_published_on_both_address_families_is_one_port() {
+        let mut detail = Detail::default();
+        detail.member.name = "web".to_owned();
+        detail.repo_digests = vec!["web@sha256:abc".to_owned()];
+        let port = |ip: &str| Port {
+            host_ip: ip.to_owned(),
+            host_port: 9000,
+            container_port: 80,
+            protocol: "tcp".to_owned(),
+        };
+        detail.ports = vec![port("0.0.0.0"), port("::")];
+        let made = new_service_of(&detail, "p", std::path::Path::new("/links")).unwrap();
+        assert_eq!(made.service.ports.len(), 1, "{:?}", made.service.ports);
+    }
 }

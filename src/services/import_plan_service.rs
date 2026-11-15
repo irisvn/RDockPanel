@@ -281,6 +281,18 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
         })
         .map(|(_, value)| value.clone())
         .collect();
+    let health = detail.health_test.get(1..).unwrap_or_default();
+    if !health.is_empty()
+        && crate::services::secret_scan_service::redact_args(health, &known) != health
+    {
+        out.push(finding(
+            "argv_secret",
+            Level::Block,
+            "healthcheck",
+            "its health check holds a secret",
+            Some("Make it read the secret from an environment variable, then read again."),
+        ));
+    }
     if crate::services::secret_scan_service::redact_args(&detail.cmd, &known) != detail.cmd {
         out.push(finding(
             "argv_secret",
@@ -327,6 +339,14 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
                 &format!("port {}", port.host_port),
                 "published on the loopback only: left out, never opened to the network",
                 None,
+            ));
+        } else if !matches!(port.host_ip.as_str(), "" | "0.0.0.0" | "::") {
+            out.push(finding(
+                "port_one_address",
+                Level::Confirm,
+                &format!("port {}", port.host_port),
+                "published on one address only: the panel publishes it on every address",
+                Some("Confirm, or leave the port out and use a domain."),
             ));
         } else if RESERVED_PORTS.contains(&port.host_port) {
             out.push(finding(
@@ -763,6 +783,52 @@ mod tests {
             "6379".to_owned(),
         ];
         assert!(!codes(&findings(&d, &panel)).contains(&"argv_secret"));
+    }
+
+    #[test]
+    fn a_secret_in_the_health_check_blocks_too() {
+        let panel = PanelFacts::default();
+        let mut d = detail("a", "cache");
+        d.member.env = vec![("REDIS_PASSWORD".to_owned(), "hunter22".to_owned())];
+        d.health_test = vec![
+            "CMD-SHELL".to_owned(),
+            "redis-cli -a hunter22 ping".to_owned(),
+        ];
+        let found = findings(&d, &panel);
+        let f = found.iter().find(|f| f.code == "argv_secret").unwrap();
+        assert_eq!(f.field, "healthcheck");
+        assert!(!format!("{found:?}").contains("hunter22"));
+    }
+
+    #[test]
+    fn a_port_on_one_address_is_said_not_opened_on_all_silently() {
+        let panel = PanelFacts::default();
+        let mut d = detail("a", "web");
+        d.ports = vec![Port {
+            host_ip: "192.168.1.5".to_owned(),
+            host_port: 9000,
+            container_port: 80,
+            protocol: "tcp".to_owned(),
+        }];
+        let found = findings(&d, &panel);
+        let f = found.iter().find(|f| f.code == "port_one_address").unwrap();
+        assert_eq!(f.level, Level::Confirm);
+        // On every address (v4 and v6): nothing to say.
+        d.ports = vec![
+            Port {
+                host_ip: "0.0.0.0".to_owned(),
+                host_port: 9000,
+                container_port: 80,
+                protocol: "tcp".to_owned(),
+            },
+            Port {
+                host_ip: "::".to_owned(),
+                host_port: 9000,
+                container_port: 80,
+                protocol: "tcp".to_owned(),
+            },
+        ];
+        assert!(!codes(&findings(&d, &panel)).contains(&"port_one_address"));
     }
 
     #[test]

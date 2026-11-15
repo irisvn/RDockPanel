@@ -77,6 +77,17 @@ pub struct FakeDocker {
     pub stop_exit: Arc<Mutex<i64>>,
     /// Containers a helper's run starts (what `compose up` does meanwhile).
     pub started_by_helper: Arc<Mutex<Vec<String>>>,
+    /// Swarm services whose tasks fail, containers that do not stop, and a
+    /// `delete service` that fails.
+    pub deploy_fail_for: Arc<Mutex<Vec<String>>>,
+    pub stop_fails: Arc<Mutex<Vec<String>>>,
+    pub delete_fail: Arc<Mutex<bool>>,
+    /// The exit code of the helpers whose name contains the key.
+    pub helper_exits: Arc<Mutex<HashMap<String, i64>>>,
+    /// How long a helper runs (a copy that takes time), in milliseconds.
+    pub helper_delay_ms: Arc<Mutex<u64>>,
+    /// A failed task from long ago in every service's task list.
+    pub old_failed: Arc<Mutex<bool>>,
 }
 
 pub fn labels(system: bool) -> HashMap<String, String> {
@@ -219,6 +230,15 @@ impl DockerApi for FakeDocker {
     }
     async fn container_action(&self, id: &str, action: ContainerAction) -> DockerResult<()> {
         let c = self.by_id(id)?;
+        // As a real engine: a start of what runs is refused (304), a stop may fail.
+        if matches!(action, ContainerAction::Start) && c.state == "running" {
+            return Err(DockerError::Conflict("already started".to_owned()));
+        }
+        if matches!(action, ContainerAction::Stop)
+            && self.stop_fails.lock().unwrap().contains(&c.id)
+        {
+            return Err(DockerError::Other("cannot stop".to_owned()));
+        }
         self.record(format!(
             "{} {id}",
             serde_json::to_value(action).unwrap().as_str().unwrap()
@@ -373,9 +393,25 @@ impl DockerApi for FakeDocker {
     }
     async fn run_helper(&self, spec: HelperSpec) -> DockerResult<i64> {
         self.record(format!("helper {}", spec.name));
+        let delay = *self.helper_delay_ms.lock().unwrap();
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
+        let exit = self
+            .helper_exits
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(key, _)| spec.name.contains(key.as_str()))
+            .map(|(_, code)| *code);
+        if let Some(code) = exit {
+            self.helpers.lock().unwrap().push(spec);
+            return Ok(code);
+        }
         let starting = self.started_by_helper.lock().unwrap().clone();
         for id in starting {
-            self.container_action(&id, ContainerAction::Start).await?;
+            // Whatever starts it, a start of what runs is refused: ignored here.
+            let _ = self.container_action(&id, ContainerAction::Start).await;
         }
         self.helpers.lock().unwrap().push(spec);
         Ok(*self.helper_exit.lock().unwrap())
@@ -790,6 +826,9 @@ impl DockerApi for FakeDocker {
         Ok(())
     }
     async fn delete_service(&self, name: &str) -> DockerResult<()> {
+        if *self.delete_fail.lock().unwrap() {
+            return Err(DockerError::Other("cannot delete".to_owned()));
+        }
         self.services
             .lock()
             .unwrap()
@@ -813,11 +852,20 @@ impl DockerApi for FakeDocker {
             .and_then(|m| m.replicated.as_ref())
             .and_then(|r| r.replicas)
             .unwrap_or(1);
-        let state = self
-            .task_state
+        let state = if self
+            .deploy_fail_for
             .lock()
             .unwrap()
-            .unwrap_or(TaskState::RUNNING);
+            .iter()
+            .any(|s| s == service)
+        {
+            TaskState::FAILED
+        } else {
+            self.task_state
+                .lock()
+                .unwrap()
+                .unwrap_or(TaskState::RUNNING)
+        };
         let now = serde_json::from_value(serde_json::json!(chrono::Utc::now().to_rfc3339())).ok();
         if replicas == 0 && *self.lingering.lock().unwrap() {
             return Ok(vec![SwarmTask {
@@ -835,7 +883,7 @@ impl DockerApi for FakeDocker {
         }
         // A failing task is restarted by Swarm: three tries per slot.
         let tries = if state == TaskState::FAILED { 3 } else { 1 };
-        Ok((1..=replicas)
+        let mut tasks: Vec<SwarmTask> = (1..=replicas)
             .flat_map(|slot| std::iter::repeat_n(slot, tries))
             .map(|slot| SwarmTask {
                 id: Some(format!("task-{service}-{slot}")),
@@ -854,7 +902,28 @@ impl DockerApi for FakeDocker {
                 }),
                 ..Default::default()
             })
-            .collect())
+            .collect();
+        if *self.old_failed.lock().unwrap() {
+            // A failure from before this look (Swarm keeps the history).
+            let long_ago = serde_json::from_value(serde_json::json!(
+                (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339()
+            ))
+            .ok();
+            tasks.push(SwarmTask {
+                id: Some(format!("task-{service}-old")),
+                slot: Some(1),
+                spec: spec.task_template.clone(),
+                desired_state: Some(TaskState::SHUTDOWN),
+                status: Some(rdockpanel::services::docker_service::TaskStatus {
+                    state: Some(TaskState::FAILED),
+                    timestamp: long_ago,
+                    err: Some("exit code 1".to_owned()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        }
+        Ok(tasks)
     }
     fn service_logs(
         &self,

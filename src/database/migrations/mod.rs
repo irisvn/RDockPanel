@@ -37,6 +37,7 @@ mod m20261023_000000_add_rate_limit_to_services;
 mod m20261024_000000_add_maintenance_page;
 mod m20261025_000000_widen_long_text_columns;
 mod m20261026_000000_create_import_tables;
+mod m20261026_000100_add_import_flags;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -80,6 +81,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261024_000000_add_maintenance_page::Migration),
             Box::new(m20261025_000000_widen_long_text_columns::Migration),
             Box::new(m20261026_000000_create_import_tables::Migration),
+            Box::new(m20261026_000100_add_import_flags::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);
