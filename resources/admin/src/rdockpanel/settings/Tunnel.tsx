@@ -68,7 +68,7 @@ export function Tunnel(props: PageProps<unknown>) {
         <ErrorNote error={error} />
         {failing.map((x) => (
           <Alert key={x.name} variant="warning">
-            {x.name}: {x.error}
+            {x.name}: {t(x.error!)}
           </Alert>
         ))}
       </div>
@@ -97,7 +97,7 @@ export function Tunnel(props: PageProps<unknown>) {
                       {mine ? (
                         <StatusBadge tone="busy" label={t(busy.label)} />
                       ) : (
-                        <Status kind="health" status={state(x)} t={t} detail={x.error ?? undefined} />
+                        <Status kind="health" status={state(x)} t={t} />
                       )}
                     </td>
                     <td className="rdp2-hide-sm rdp2-mono">{x.service_name}</td>
@@ -230,11 +230,11 @@ function TunnelDialog(props: PageProps<unknown> & { name?: string; onClose: () =
         }}
       >
         {adding && (
-          <Field label={t("Name")} help={t("Lowercase letters, digits and dashes, starting with a letter.")} error={fields.name}>
+          <Field label={t("Name")} help={t("Lowercase letters, digits and dashes, starting with a letter.")} error={fields.name?.map((m) => t(m))}>
             <Input name="name" autoFocus autoComplete="off" className="rdp2-mono" value={name} onChange={(e) => setName(e.target.value)} placeholder="cloudflare-team" />
           </Field>
         )}
-        <Field label={t("Tunnel token")} help={t("In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared), copy its token.")} error={fields.token}>
+        <Field label={t("Tunnel token")} help={t("In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared), copy its token.")} error={fields.token?.map((m) => t(m))}>
           <Input
             name="token"
             type="password"

@@ -185,7 +185,7 @@ async fn adopt_settings(app: &AppState) -> AppResult<()> {
 
 /// The tunnel `name`'s row: none only for `default` not made yet (the old
 /// routes act on it); any other name not found.
-async fn known(app: &AppState, name: &str) -> AppResult<Option<tunnel::Model>> {
+pub async fn known(app: &AppState, name: &str) -> AppResult<Option<tunnel::Model>> {
     if !valid_name(name) {
         return Err(AppError::NotFound);
     }

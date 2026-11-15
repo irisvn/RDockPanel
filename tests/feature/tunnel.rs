@@ -576,10 +576,9 @@ db_test!(
             .await
             .assert_status(StatusCode::NOT_FOUND);
 
-        admin
-            .send(Method::DELETE, &url("/second"), None)
-            .await
-            .assert_status(StatusCode::OK);
+        let deleted = admin.send(Method::DELETE, &url("/second"), None).await;
+        deleted.assert_status(StatusCode::OK);
+        assert_eq!(deleted.json(), json!({"deleted": "second"}));
         assert!(spec(&fake, "rdp-cloudflared-second").is_none());
         let list = admin.get(&url("")).await;
         assert_eq!(list.json()["tunnels"], json!([]));
@@ -690,5 +689,123 @@ db_test!(
         let audit = format!("{audit:?}");
         assert!(audit.contains("tunnel.create"), "{audit}");
         assert!(!audit.contains(TOKEN) && !audit.contains(OTHER_TOKEN));
+    }
+);
+
+db_test!(
+    a_change_is_audited_even_when_its_request_is_cut,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::tunnel_service;
+        use rustcms::axum::http::Method;
+        use rustcms::models::audit_log;
+        use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let count = |event: &'static str| {
+            let db = app.state().db().clone();
+            async move {
+                audit_log::Entity::find()
+                    .filter(audit_log::Column::Event.eq(event))
+                    .count(&db)
+                    .await
+                    .unwrap()
+            }
+        };
+        let changes = [
+            (
+                Method::POST,
+                "tunnels",
+                json!({"name": "second", "token": OTHER_TOKEN}),
+                "tunnel.create",
+            ),
+            (
+                Method::POST,
+                "tunnels/second/disable",
+                json!({}),
+                "tunnel.disable",
+            ),
+            (
+                Method::POST,
+                "tunnels/second/enable",
+                json!({}),
+                "tunnel.enable",
+            ),
+            (Method::DELETE, "tunnels/second", json!({}), "tunnel.remove"),
+            (
+                Method::POST,
+                "tunnel/enable",
+                json!({"token": TOKEN}),
+                "tunnel.enable",
+            ),
+            (Method::POST, "tunnel/disable", json!({}), "tunnel.disable"),
+        ];
+        for (method, path, body, event) in changes {
+            let before = count(event).await;
+            // The change waits for another; the request is cut meanwhile.
+            let busy = tunnel_service::exclusive().await;
+            let cut = tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                admin.send(
+                    method,
+                    &app.admin_api(&format!("x/apps/{path}")),
+                    Some(&body),
+                ),
+            )
+            .await;
+            assert!(cut.is_err(), "{path} answered while another change ran");
+            drop(busy);
+            // It still runs whole, its audit entry included.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while count(event).await == before {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{path}: no {event} audited"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            // Its effect done before the next change.
+            let _settled = tunnel_service::exclusive().await;
+        }
+        assert!(spec(&fake, "rdp-cloudflared-second").is_none());
+        assert!(spec(&fake, "rdp-cloudflared").is_none());
+    }
+);
+
+db_test!(
+    a_tunnel_name_that_cannot_be_one_is_not_found,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rustcms::axum::http::Method;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        for name in ["Bad%20Name", "UPPER", "a.b", "missing"] {
+            let url = |p: &str| app.admin_api(&format!("x/apps/tunnels/{name}{p}"));
+            admin
+                .post_json(&url("/enable"), &json!({"token": TOKEN}))
+                .await
+                .assert_status(StatusCode::NOT_FOUND);
+            admin
+                .post_json(&url("/disable"), &json!({}))
+                .await
+                .assert_status(StatusCode::NOT_FOUND);
+            admin
+                .send(Method::DELETE, &url(""), None)
+                .await
+                .assert_status(StatusCode::NOT_FOUND);
+        }
+        assert!(
+            fake.services
+                .lock()
+                .unwrap()
+                .keys()
+                .all(|k| !k.starts_with("rdp-cloudflared"))
+        );
     }
 );

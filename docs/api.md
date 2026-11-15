@@ -252,9 +252,9 @@ Resolvers are written through the `cert_resolvers` resource (their token sealed,
 | POST | `/tunnel/disable` | system.manage | stops it; audited |
 | GET | `/tunnels` | system.manage | `{"tunnels": [{"name", "enabled", "token_set", "service", "service_name", "running", "connected", "error", "image", "origin"}]}`: every tunnel and its state (never a token). The `/tunnel` routes above act on the tunnel `default` |
 | POST | `/tunnels` | system.manage | `{"name", "token"}`: a new tunnel (its own cloudflared, `rdp-cloudflared-<name>`), on; 422 on `name` (1-40 lowercase letters, digits and dashes, starting with a letter; or taken) or `token` (not a tunnel token, or another tunnel's); audited (never the token) |
-| POST | `/tunnels/{name}/enable` | system.manage | `{"token"?}` (none: the one kept): on; 404 for an unknown name; audited |
+| POST | `/tunnels/{name}/enable` | system.manage | `{"token"?}` (none: the one kept): on; 404 for an unknown name (never made here: `POST /tunnels` makes one); audited |
 | POST | `/tunnels/{name}/disable` | system.manage | stops its cloudflared (its token kept); audited |
-| DELETE | `/tunnels/{name}` | system.manage | stops it and forgets its token; the other tunnels keep running; audited |
+| DELETE | `/tunnels/{name}` | system.manage | stops it and forgets its token, answers `{"deleted": name}`; the other tunnels keep running; audited |
 | GET | `/system/status` | system.manage | Settings → Panel: version, installed, image, hostname, public IP, whether it restarts and reboots |
 | GET (SSE) | `/system/logs/{tail}` | system.manage | `lines` events: the panel's log (its service's when installed; else the lines this process kept) |
 | POST | `/system/restart` | system.manage | restarts the panel's service (installed only); logged and audited first |

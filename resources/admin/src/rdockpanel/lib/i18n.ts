@@ -702,6 +702,17 @@ window.rustcms?.registerTranslations?.("vi", {
   "Tunnel on: connecting…": "Đã bật tunnel: đang kết nối…",
   "Tunnel off": "Đã tắt tunnel",
   "Tunnel removed": "Đã xoá tunnel",
+  // The server's words about tunnels (field errors, health).
+  "is already a tunnel": "đã là tên của một tunnel",
+  "is 1-40 lowercase letters, digits and dashes, starting with a letter":
+    "gồm 1-40 chữ thường, số và dấu gạch ngang, bắt đầu bằng một chữ cái",
+  "is not a tunnel token (Cloudflare → Zero Trust → Tunnels)": "không phải token của tunnel (Cloudflare → Zero Trust → Tunnels)",
+  "is already used by another tunnel": "đã được một tunnel khác dùng",
+  "cannot be read (sealed with another APP_KEY): set it again": "không đọc được (được mã hoá bằng APP_KEY khác): hãy nhập lại",
+  "is required": "là bắt buộc",
+  "Traefik is not a Swarm service of the panel's here": "Ở đây Traefik không phải service Swarm do panel quản lý",
+  "Cloudflare does not accept the connection: is the tunnel's token still valid?":
+    "Cloudflare không nhận kết nối: token của tunnel còn hiệu lực không?",
   // Project members
   Members: "Thành viên",
   viewer: "Xem",
