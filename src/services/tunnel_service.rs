@@ -112,7 +112,9 @@ async fn any_enabled(app: &AppState) -> AppResult<bool> {
 /// At boot: the tunnel of an older panel's settings becomes `default`, and
 /// routes serve the tunnel's entrypoint when a tunnel is on.
 pub async fn load(app: &AppState) -> AppResult<()> {
-    adopt_settings(app).await?;
+    if let Err(err) = adopt_settings(app).await {
+        tracing::warn!(%err, "the tunnel's settings not taken");
+    }
     let on = any_enabled(app).await?;
     if let Some(traefik) = app.service::<Traefik>() {
         traefik.set_tunnel(on);
@@ -120,28 +122,51 @@ pub async fn load(app: &AppState) -> AppResult<()> {
     Ok(())
 }
 
-/// `panel_settings`' tunnel (`tunnel.*`, before many) as the row `default`,
-/// once. Here, not in the migration: sealing for the new column needs the
-/// APP_KEY. A token it cannot open is kept as it is (Settings asks again).
+/// `panel_settings`' tunnel (`tunnel.*`, before many) as the row `default`.
+/// Here, not in the migration: sealing for the new column needs the
+/// APP_KEY. A token it cannot open is left (a later boot tries again).
+/// Once the row exists, the settings still win when they differ: both are
+/// written together, so only an older release (rolled back to) changed them.
 async fn adopt_settings(app: &AppState) -> AppResult<()> {
     let db = app.db();
     let Some(kept) = panel_setting::get(db, TOKEN_KEY).await? else {
         return Ok(());
     };
-    if tunnel::named(db, DEFAULT).await?.is_some() {
-        return Ok(());
-    }
     let old: Encrypted<String> = Encrypted::from_envelope(kept);
-    let token = match old.open(app.keyring(), &settings_context()) {
-        Ok(token) => Encrypted::seal(app.keyring(), &tunnel::token_context(), &token)?,
-        Err(_) => old,
+    let Ok(token) = old.open(app.keyring(), &settings_context()) else {
+        return Ok(());
     };
     let enabled = panel_setting::get(db, ENABLED_KEY).await?.as_deref() == Some("true");
     let now = chrono::Utc::now();
+    if let Some(row) = tunnel::named(db, DEFAULT).await? {
+        let same_token = row
+            .token
+            .open(app.keyring(), &tunnel::token_context())
+            .is_ok_and(|t| t == token);
+        if row.enabled == enabled && same_token {
+            return Ok(());
+        }
+        let mut taken = row.into_active_model();
+        if !same_token {
+            taken.token = Set(Encrypted::seal(
+                app.keyring(),
+                &tunnel::token_context(),
+                &token,
+            )?);
+        }
+        taken.enabled = Set(enabled);
+        taken.updated_at = Set(now);
+        taken.update(db).await?;
+        return Ok(());
+    }
     // One statement: two boots at once make one row.
     tunnel::Entity::insert(tunnel::ActiveModel {
         name: Set(DEFAULT.to_owned()),
-        token: Set(token),
+        token: Set(Encrypted::seal(
+            app.keyring(),
+            &tunnel::token_context(),
+            &token,
+        )?),
         enabled: Set(enabled),
         created_at: Set(now),
         updated_at: Set(now),
@@ -156,6 +181,19 @@ async fn adopt_settings(app: &AppState) -> AppResult<()> {
     .exec_without_returning(db)
     .await?;
     Ok(())
+}
+
+/// The tunnel `name`'s row: none only for `default` not made yet (the old
+/// routes act on it); any other name not found.
+async fn known(app: &AppState, name: &str) -> AppResult<Option<tunnel::Model>> {
+    if !valid_name(name) {
+        return Err(AppError::NotFound);
+    }
+    let row = tunnel::named(app.db(), name).await?;
+    if row.is_none() && name != DEFAULT {
+        return Err(AppError::NotFound);
+    }
+    Ok(row)
 }
 
 /// The name and token of every tunnel that is on (a token the APP_KEY
@@ -206,7 +244,7 @@ fn docker_err(err: DockerError) -> AppError {
 /// What Settings shows of the tunnel `name`: on or off, a token kept (never
 /// shown), its cloudflared's tasks.
 pub async fn status(app: &AppState, docker: &Docker, name: &str) -> AppResult<Value> {
-    let row = tunnel::named(app.db(), name).await?;
+    let row = known(app, name).await?;
     state_of(docker, name, row.as_ref()).await
 }
 
@@ -566,6 +604,7 @@ async fn entrypoint(docker: &Docker, traefik: &Traefik, id: &str) -> AppResult<(
 /// Stops the tunnel `name`'s cloudflared (its token kept); the routes' tunnel
 /// routers go when no tunnel is on.
 pub async fn disable(app: &AppState, docker: &Docker, name: &str) -> AppResult<()> {
+    known(app, name).await?;
     // Off first (routes without the tunnel), then cloudflared stopped.
     let txn = begin_write(app.db()).await?;
     if let Some(row) = tunnel::named(&txn, name).await? {

@@ -81,8 +81,8 @@ impl MigrationTrait for Migration {
                 "SELECT COUNT(*) AS n FROM tunnels WHERE name <> 'default'".to_owned(),
             ))
             .await?
-            .and_then(|row| row.try_get::<i64>("", "n").ok())
-            .unwrap_or(0);
+            .ok_or_else(|| DbErr::Custom("the tunnels could not be counted".to_owned()))?
+            .try_get::<i64>("", "n")?;
         if others > 0 {
             return Err(DbErr::Custom(
                 "tunnels other than the default exist: removing the table would lose their tokens"

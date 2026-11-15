@@ -353,6 +353,25 @@ db_test!(
         use rdockpanel::services::tunnel_service;
         let fake = FakeDocker::default();
         let app = support::app_with_docker(db, fake.clone()).await;
+        // A token this APP_KEY cannot open: no row (a later boot tries again).
+        let foreign = rustcms::crypto::Encrypted::seal(
+            app.state().keyring(),
+            &rustcms::crypto::Context::column("elsewhere", "token"),
+            &TOKEN.to_owned(),
+        )
+        .unwrap();
+        rdockpanel::models::panel_setting::set(
+            app.state().db(),
+            "tunnel.token",
+            foreign.envelope(),
+        )
+        .await
+        .unwrap();
+        tunnel_service::load(app.state()).await.unwrap();
+        let none = tunnel_service::list(app.state(), &docker_of(&app))
+            .await
+            .unwrap();
+        assert_eq!(none, json!([]));
         // As an older panel kept it: the settings only.
         let sealed = rustcms::crypto::Encrypted::seal(
             app.state().keyring(),
@@ -424,5 +443,74 @@ db_test!(
             .unwrap();
         assert!(!tunnel_service::enabled(app.state()));
         assert!(spec(&fake, "rdp-cloudflared").is_none());
+    }
+);
+
+db_test!(
+    a_rolled_back_release_s_tunnel_settings_are_taken_back,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::tunnel_service;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let docker = docker_of(&app);
+        tunnel_service::enable(app.state(), &docker, "default", Some(TOKEN))
+            .await
+            .unwrap();
+        // The older release (rolled back to) turned it off and set another token.
+        let db = app.state().db();
+        let other = rustcms::crypto::Encrypted::seal(
+            app.state().keyring(),
+            &rustcms::crypto::Context::column("panel_settings", "tunnel.token"),
+            &OTHER_TOKEN.to_owned(),
+        )
+        .unwrap();
+        rdockpanel::models::panel_setting::set(db, "tunnel.token", other.envelope())
+            .await
+            .unwrap();
+        rdockpanel::models::panel_setting::set(db, "tunnel.enabled", "false")
+            .await
+            .unwrap();
+        tunnel_service::load(app.state()).await.unwrap();
+        let list = tunnel_service::list(app.state(), &docker).await.unwrap();
+        assert_eq!(list[0]["enabled"], false);
+        assert!(!tunnel_service::enabled(app.state()));
+        // On again there: run with its token.
+        rdockpanel::models::panel_setting::set(db, "tunnel.enabled", "true")
+            .await
+            .unwrap();
+        tunnel_service::load(app.state()).await.unwrap();
+        assert_eq!(
+            tunnel_service::running_tokens(app.state()).await.unwrap(),
+            vec![("default".to_owned(), OTHER_TOKEN.to_owned())]
+        );
+    }
+);
+
+db_test!(
+    an_unknown_tunnel_is_not_found,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::tunnel_service;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let docker = docker_of(&app);
+        for name in ["missing", "Bad Name", "../x"] {
+            assert!(matches!(
+                tunnel_service::status(app.state(), &docker, name).await,
+                Err(rustcms::AppError::NotFound)
+            ));
+            assert!(matches!(
+                tunnel_service::disable(app.state(), &docker, name).await,
+                Err(rustcms::AppError::NotFound)
+            ));
+        }
+        // `default` before it is made: off (the old routes).
+        tunnel_service::status(app.state(), &docker, "default")
+            .await
+            .unwrap();
+        tunnel_service::disable(app.state(), &docker, "default")
+            .await
+            .unwrap();
     }
 );
