@@ -162,14 +162,36 @@ pub async fn guard_prune_containers<C: ConnectionTrait>(txn: &C) -> AppResult<()
     Ok(())
 }
 
+/// A domain of the plan as the service gets it. A hint without a port (a plan
+/// read before ports were filled in) leads to 80.
+pub fn domain_of_hint(hint: &Value) -> crate::services::creation_service::NewDomain {
+    crate::services::creation_service::NewDomain {
+        host: hint["host"].as_str().unwrap_or_default().to_owned(),
+        path: hint["path"].as_str().unwrap_or("/").to_owned(),
+        port: hint["port"]
+            .as_u64()
+            .and_then(|p| u16::try_from(p).ok())
+            .unwrap_or(80),
+        https: hint["https"] == true,
+        compose_service: None,
+    }
+}
+
 /// Marks the plan's domains that its services could not get: one that breaks
 /// the panel's rules (`creation_service::domain_problems`, the certificate's
 /// `check_domain_tls`), one the panel serves already (same host and path, any
-/// service), one a container before it in the plan has. Each is skipped and
-/// said on its container. Run when the plan is read and when it changes.
+/// service), one another container of the plan has ticked (the first in plan
+/// order keeps it; an unticked one claims nothing). Each is skipped and said
+/// on its container. Run when the plan is read and when it changes.
 pub async fn check_domains<C: ConnectionTrait>(db: &C, plan: &mut Value) -> AppResult<()> {
     use crate::models::service_domain;
-    use crate::services::creation_service::{NewDomain, domain_problems};
+    use crate::services::creation_service::domain_problems;
+    type Said = (
+        &'static str,
+        &'static str,
+        &'static str,
+        Option<&'static str>,
+    );
     let hosts: Vec<String> = plan["items"]
         .as_array()
         .into_iter()
@@ -187,71 +209,103 @@ pub async fn check_domains<C: ConnectionTrait>(db: &C, plan: &mut Value) -> AppR
         .into_iter()
         .map(|d| (d.host, d.path))
         .collect();
-    // Host and path of the containers that become services, in plan order.
-    let mut claimed: Vec<(String, String)> = Vec::new();
-    for item in plan["items"].as_array_mut().into_iter().flatten() {
-        let claims = item["choice"] == "bring" && item["as_tunnel"] != true;
+    let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
+    // What the panel says of each hint by itself, in plan order.
+    let mut alone: Vec<Vec<Option<Said>>> = Vec::new();
+    for item in items.iter() {
         let mut said = Vec::new();
-        for hint in item["domains"].as_array_mut().into_iter().flatten() {
-            let domain = NewDomain {
-                host: hint["host"].as_str().unwrap_or_default().to_owned(),
-                path: hint["path"].as_str().unwrap_or("/").to_owned(),
-                port: hint["port"]
-                    .as_u64()
-                    .and_then(|p| u16::try_from(p).ok())
-                    .unwrap_or(0),
-                https: hint["https"] == true,
-                compose_service: None,
-            };
-            let key = (domain.host.clone(), domain.path.clone());
-            let field = if domain.path == "/" {
-                domain.host.clone()
-            } else {
-                format!("{}{}", domain.host, domain.path)
-            };
-            let finding = if let Some(problem) = domain_problems(&domain).first() {
+        for hint in item["domains"].as_array().into_iter().flatten() {
+            let domain = domain_of_hint(hint);
+            said.push(if let Some(problem) = domain_problems(&domain).first() {
                 Some(("domain_invalid", "WARN", *problem, None))
-            } else if served.contains(&key) {
+            } else if served.contains(&(domain.host.clone(), domain.path.clone())) {
                 Some((
                     "domain_taken",
                     "CONFIRM",
                     "the panel already serves this domain on another service: it is not added",
                     Some("Confirm, or remove it from the other service and read again."),
                 ))
-            } else if claimed.contains(&key) {
-                Some((
-                    "domain_taken",
-                    "CONFIRM",
-                    "another container of this import has this domain: only the first one gets it",
-                    Some("Confirm, or untick it on the other container."),
-                ))
-            } else if let Some((_, problem)) = crate::services::cert_service::check_domain_tls(
-                db,
-                None,
-                &domain.host,
-                domain.https,
-                None,
-                None,
-            )
-            .await?
-            {
-                Some(("domain_invalid", "WARN", problem, None))
             } else {
-                None
-            };
-            match finding {
-                Some((code, level, text, unblock)) => {
-                    hint["skip"] = json!(true);
-                    said.push(json!({
-                        "code": code,
-                        "level": level,
-                        "field": field,
-                        "text": text,
-                        "how_to_unblock": unblock,
-                    }));
-                }
-                None if claims => claimed.push(key),
-                None => {}
+                crate::services::cert_service::check_domain_tls(
+                    db,
+                    None,
+                    &domain.host,
+                    domain.https,
+                    None,
+                    None,
+                )
+                .await?
+                .map(|(_, problem)| ("domain_invalid", "WARN", problem, None))
+            });
+        }
+        alone.push(said);
+    }
+    // Who keeps a host and path: the first container that becomes a service
+    // and has it ticked, without a problem of its own.
+    let mut keepers: Vec<((String, String), usize)> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        if item["choice"] != "bring" || item["as_tunnel"] == true {
+            continue;
+        }
+        for (h, hint) in item["domains"].as_array().into_iter().flatten().enumerate() {
+            let key = (domain_of_hint(hint).host, domain_of_hint(hint).path);
+            if hint["skip"] != true
+                && alone[i][h].is_none()
+                && !keepers.iter().any(|(k, _)| *k == key)
+            {
+                keepers.push((key, i));
+            }
+        }
+    }
+    let names: Vec<String> = items
+        .iter()
+        .map(|i| {
+            i["compose_service"]
+                .as_str()
+                .or(i["name"].as_str())
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect();
+    for (i, item) in items.iter_mut().enumerate() {
+        let mut said = Vec::new();
+        for (h, hint) in item["domains"]
+            .as_array_mut()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            let domain = domain_of_hint(hint);
+            let key = (domain.host.clone(), domain.path.clone());
+            let keeper = keepers
+                .iter()
+                .find(|(k, at)| *k == key && *at != i)
+                .map(|(_, at)| names[*at].clone());
+            let finding = alone[i][h].or_else(|| {
+                keeper.as_ref().map(|_| {
+                    (
+                        "domain_taken",
+                        "CONFIRM",
+                        "{name}, in this import, has this domain: it goes to {name} only",
+                        Some("Confirm, or untick it on {name}."),
+                    )
+                })
+            });
+            if let Some((code, level, text, unblock)) = finding {
+                hint["skip"] = json!(true);
+                let field = if domain.path == "/" {
+                    domain.host.clone()
+                } else {
+                    format!("{}{}", domain.host, domain.path)
+                };
+                said.push(json!({
+                    "code": code,
+                    "level": level,
+                    "field": field,
+                    "text": text,
+                    "how_to_unblock": unblock,
+                    "name": keeper,
+                }));
             }
         }
         let Some(findings) = item["findings"].as_array_mut() else {
@@ -942,16 +996,7 @@ pub async fn start(
             .into_iter()
             .flatten()
             .filter(|d| d["skip"] != true)
-            .map(|d| crate::services::creation_service::NewDomain {
-                host: d["host"].as_str().unwrap_or_default().to_owned(),
-                path: d["path"].as_str().unwrap_or("/").to_owned(),
-                port: d["port"]
-                    .as_u64()
-                    .and_then(|p| u16::try_from(p).ok())
-                    .unwrap_or(80),
-                https: d["https"] == true,
-                compose_service: None,
-            })
+            .map(domain_of_hint)
             .collect()
     };
     let with_domains = brought

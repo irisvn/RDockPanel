@@ -2964,10 +2964,21 @@ db_test!(
         let said: Vec<_> = web.iter().chain(&db_).collect();
         assert_eq!(said.len(), 1, "{web:?} {db_:?}");
         assert_eq!(said[0].0, "shop.example.com");
-        assert!(
-            said[0].1.contains("another container of this import"),
-            "{said:?}"
-        );
+        // It names the container that keeps the domain.
+        let (keeper, loser) = if web.is_empty() {
+            ("web", "id-db")
+        } else {
+            ("db", "id-web")
+        };
+        let finding = plan_item(&app, &admin, id, loser).await["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["code"] == "domain_taken")
+            .cloned()
+            .unwrap();
+        assert_eq!(finding["name"], keeper, "{finding}");
+        assert!(said[0].1.contains("{name}"), "{said:?}");
         start_and_run(&app, &admin, id).await;
         assert_eq!(domains_of_host(&app, "shop.example.com").await.len(), 1);
     }
@@ -2993,5 +3004,93 @@ db_test!(
         start_and_run(&app, &admin, id).await;
         assert!(domains_of_host(&app, "shop.example.com").await.is_empty());
         assert_eq!(domains_of_host(&app, "ok.example.com").await.len(), 1);
+    }
+);
+
+db_test!(
+    an_unticked_domain_can_go_to_the_other_container,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::service;
+        use sea_orm::EntityTrait;
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed(&fake, "shop-web-1", "Host(`shop.example.com`)");
+        routed(&fake, "shop-db-1", "Host(`shop.example.com`)");
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let url = app.admin_api(&format!("x/imports/{id}/plan"));
+        let web_lost =
+            !findings_of(&plan_item(&app, &admin, id, "id-web").await, "domain_taken").is_empty();
+        let (keeper, other, other_name) = if web_lost {
+            ("id-db", "id-web", "web")
+        } else {
+            ("id-web", "id-db", "db")
+        };
+        // Unticked on the one that has it, ticked on the other: the other gets it.
+        for change in [
+            json!({"domains": {keeper: ["shop.example.com"]}}),
+            json!({"domains": {other: []}}),
+        ] {
+            admin
+                .send(Method::PATCH, &url, Some(&change))
+                .await
+                .assert_status(StatusCode::OK);
+        }
+        let item = plan_item(&app, &admin, id, other).await;
+        assert!(findings_of(&item, "domain_taken").is_empty(), "{item}");
+        assert_eq!(item["domains"][0]["skip"], false, "{item}");
+        start_and_run(&app, &admin, id).await;
+        let served = domains_of_host(&app, "shop.example.com").await;
+        assert_eq!(served.len(), 1, "{served:?}");
+        let owner = service::Entity::find_by_id(served[0].0)
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(owner.name, other_name);
+    }
+);
+
+db_test!(
+    a_domain_of_a_plan_without_its_port_leads_to_80,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::container_import;
+        use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(&fake, "Host(`shop.example.com`)");
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        // A plan read before ports were filled in: the hint has none.
+        let row = container_import::Entity::find_by_id(id)
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut plan: Value = serde_json::from_str(row.plan.as_deref().unwrap()).unwrap();
+        for item in plan["items"].as_array_mut().unwrap() {
+            for hint in item["domains"].as_array_mut().unwrap() {
+                hint["port"] = Value::Null;
+            }
+        }
+        let mut change = row.into_active_model();
+        change.plan = Set(Some(plan.to_string()));
+        change.update(app.state().db()).await.unwrap();
+        admin
+            .send(
+                Method::PATCH,
+                &app.admin_api(&format!("x/imports/{id}/plan")),
+                Some(&json!({"project_name": "shop"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert!(findings_of(&web, "domain_invalid").is_empty(), "{web}");
+        start_and_run(&app, &admin, id).await;
+        assert_eq!(domains_of_host(&app, "shop.example.com").await[0].1, 80);
     }
 );

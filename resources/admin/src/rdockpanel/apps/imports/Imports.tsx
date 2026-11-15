@@ -11,7 +11,7 @@ import { EmptyState, Field, Metric, type MenuItem, Pager, Page, RowActions, Sect
 
 type T = (s: string) => string;
 
-type Finding = { code: string; level: "BLOCK" | "CONFIRM" | "WARN" | "INFO"; field: string; text: string; how_to_unblock: string | null };
+type Finding = { code: string; level: "BLOCK" | "CONFIRM" | "WARN" | "INFO"; field: string; text: string; how_to_unblock: string | null; name?: string | null };
 type PlanItem = {
   container_id: string;
   name: string;
@@ -76,9 +76,14 @@ function message(t: T, error: unknown): string {
 /** The finding codes of a domain the panel leaves out: their field is the domain. */
 const DOMAIN_LEFT = ["domain_taken", "domain_invalid"];
 
+/** A finding's words (translated), with the container it names. */
+function said(t: T, f: Finding, text: string) {
+  return t(text).replaceAll("{name}", f.name ?? "");
+}
+
 /** A finding's text (translated), named by its domain when it is a domain's. */
 function findingText(t: T, f: Finding) {
-  return DOMAIN_LEFT.includes(f.code) ? `${f.field}: ${t(f.text)}` : t(f.text);
+  return DOMAIN_LEFT.includes(f.code) ? `${f.field}: ${said(t, f, f.text)}` : t(f.text);
 }
 
 /** Words of a finding's level (translated). */
@@ -721,7 +726,7 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
                       {d.host}
                       {d.path === "/" ? "" : d.path} → {d.port ?? 80}
                     </span>
-                    {why && <span className="rdp2-muted rdp2-small">{t(why.text)}</span>}
+                    {why && <span className="rdp2-muted rdp2-small">{said(t, why, why.text)}</span>}
                   </label>
                 );
               })}
@@ -739,7 +744,7 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
                   <span className="rdp2-finding-level">{levelWord(t, f.level)}</span>
                   <span>
                     {findingText(t, f)}
-                    {f.how_to_unblock && <div className="rdp2-muted rdp2-small">{t(f.how_to_unblock)}</div>}
+                    {f.how_to_unblock && <div className="rdp2-muted rdp2-small">{said(t, f, f.how_to_unblock)}</div>}
                   </span>
                 </li>
               ))}
