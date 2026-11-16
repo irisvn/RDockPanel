@@ -809,3 +809,81 @@ db_test!(
         );
     }
 );
+
+db_test!(
+    replacing_the_token_of_a_tunnel_that_is_off_keeps_it_off,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::tunnel_service;
+        use rustcms::axum::http::Method;
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        let admin = app.acting_as(&root).await;
+        let url = |p: &str| app.admin_api(&format!("x/apps/tunnels{p}"));
+        admin
+            .post_json(&url(""), &json!({"name": "second", "token": TOKEN}))
+            .await
+            .assert_status(StatusCode::OK);
+        admin
+            .post_json(&url("/second/disable"), &json!({}))
+            .await
+            .assert_status(StatusCode::OK);
+        let replace = |token: &str| {
+            let body = json!({ "token": token });
+            let (admin, to) = (&admin, url("/second"));
+            async move { admin.send(Method::PATCH, &to, Some(&body)).await }
+        };
+        replace("not a token")
+            .await
+            .assert_validation_error("token");
+        let got = replace(OTHER_TOKEN).await;
+        got.assert_status(StatusCode::OK);
+        assert_eq!(got.json()["enabled"], false);
+        assert!(!got.text().contains(OTHER_TOKEN));
+        // Kept, still off: no cloudflared.
+        let db = app.state().db();
+        assert_eq!(
+            tunnel_service::holder(app.state(), db, OTHER_TOKEN)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("second")
+        );
+        assert!(spec(&fake, "rdp-cloudflared-second").is_none());
+        assert!(
+            tunnel_service::running_tokens(app.state())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // On: it runs with the new token.
+        admin
+            .post_json(&url("/second/enable"), &json!({}))
+            .await
+            .assert_status(StatusCode::OK);
+        let secret = secret_of(&fake, "rdp-cloudflared-second");
+        assert_eq!(
+            fake.secrets.lock().unwrap()[&secret].1,
+            OTHER_TOKEN.as_bytes()
+        );
+        // A tunnel that is on is run again with the token it gets.
+        replace(TOKEN).await.assert_status(StatusCode::OK);
+        let secret = secret_of(&fake, "rdp-cloudflared-second");
+        assert_eq!(fake.secrets.lock().unwrap()[&secret].1, TOKEN.as_bytes());
+        assert_eq!(
+            tunnel_service::running_tokens(app.state()).await.unwrap(),
+            vec![("second".to_owned(), TOKEN.to_owned())]
+        );
+        // Unknown: not found, never made.
+        admin
+            .send(
+                Method::PATCH,
+                &url("/missing"),
+                Some(&json!({"token": OTHER_TOKEN})),
+            )
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+    }
+);

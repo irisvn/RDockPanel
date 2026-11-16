@@ -248,6 +248,11 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can(permissions::SYSTEM_MANAGE),
                     tunnel::disable_one,
                 )
+                .patch(
+                    "/tunnels/{name}",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::update,
+                )
                 .delete(
                     "/tunnels/{name}",
                     AdminAccess::can(permissions::SYSTEM_MANAGE),

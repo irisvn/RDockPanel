@@ -460,18 +460,7 @@ pub async fn enable(
     let new = token.map(str::trim).filter(|t| !t.is_empty());
     let token = match new {
         Some(token) => {
-            if !valid_token(token) {
-                return Err(ValidationErrors::field(
-                    "token",
-                    "is not a tunnel token (Cloudflare → Zero Trust → Tunnels)",
-                )
-                .into());
-            }
-            if holder(app, db, token).await?.is_some_and(|h| h != name) {
-                return Err(
-                    ValidationErrors::field("token", "is already used by another tunnel").into(),
-                );
-            }
+            check_token(app, name, token).await?;
             token.to_owned()
         }
         None => {
@@ -624,6 +613,55 @@ pub async fn enable(
     remove_secrets(docker, Some(&secret_name)).await;
     traefik.set_tunnel(true);
     republish(app).await
+}
+
+/// `token` as the tunnel `name`'s: a tunnel token no other tunnel has.
+async fn check_token(app: &AppState, name: &str, token: &str) -> AppResult<()> {
+    if !valid_token(token) {
+        return Err(ValidationErrors::field(
+            "token",
+            "is not a tunnel token (Cloudflare → Zero Trust → Tunnels)",
+        )
+        .into());
+    }
+    if holder(app, app.db(), token)
+        .await?
+        .is_some_and(|h| h != name)
+    {
+        return Err(ValidationErrors::field("token", "is already used by another tunnel").into());
+    }
+    Ok(())
+}
+
+/// A new token for the tunnel `name`, on or off as it was: one that is on
+/// runs again with it ([`enable`]), one that is off only keeps it.
+pub async fn replace_token(
+    app: &AppState,
+    docker: &Docker,
+    name: &str,
+    token: &str,
+) -> AppResult<()> {
+    let Some(row) = known(app, name).await? else {
+        return Err(AppError::NotFound);
+    };
+    let token = token.trim();
+    check_token(app, name, token).await?;
+    if row.enabled {
+        return enable(app, docker, name, Some(token)).await;
+    }
+    let sealed = Encrypted::seal(app.keyring(), &tunnel::token_context(), &token.to_owned())?;
+    let txn = begin_write(app.db()).await?;
+    let mut kept = row.into_active_model();
+    kept.token = Set(sealed);
+    kept.updated_at = Set(chrono::Utc::now());
+    kept.update(&txn).await?;
+    if name == DEFAULT {
+        // As an older release reads it (one rolled back).
+        let old = Encrypted::seal(app.keyring(), &settings_context(), &token.to_owned())?;
+        panel_setting::set(&txn, TOKEN_KEY, old.envelope()).await?;
+    }
+    txn.commit().await?;
+    Ok(())
 }
 
 /// Traefik on the tunnel's network (`id`), with the tunnel's entrypoint

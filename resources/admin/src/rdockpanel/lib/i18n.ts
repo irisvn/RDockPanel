@@ -699,6 +699,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "Removing…": "Đang xoá…",
   "Tunnel added: connecting…": "Đã thêm tunnel: đang kết nối…",
   "Token replaced: connecting…": "Đã thay token: đang kết nối…",
+  "Token replaced (the tunnel stays off)": "Đã thay token (tunnel vẫn tắt)",
   "Tunnel on: connecting…": "Đã bật tunnel: đang kết nối…",
   "Tunnel off": "Đã tắt tunnel",
   "Tunnel removed": "Đã xoá tunnel",

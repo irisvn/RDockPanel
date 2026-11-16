@@ -36,7 +36,7 @@ export function Tunnel(props: PageProps<unknown>) {
   const [busy, setBusy] = useState<{ name: string; label: string } | null>(null);
   const [error, setError] = useState<unknown>(null);
   // The dialog open: adding (no name), a new token for `name`, or its guide.
-  const [editing, setEditing] = useState<{ name?: string } | null>(null);
+  const [editing, setEditing] = useState<{ name?: string; enabled?: boolean } | null>(null);
   const [guide, setGuide] = useState<Tunnel | null>(null);
   if (list.isLoading) return <Loading />;
   if (list.error || !list.data) return <ErrorState error={list.error} />;
@@ -106,7 +106,7 @@ export function Tunnel(props: PageProps<unknown>) {
                         label={t("Actions for {host}").replace("{host}", x.name)}
                         menu={[
                           { label: t("Hostnames…"), onSelect: () => setGuide(x) },
-                          { label: t("Replace token…"), disabled: busy != null, onSelect: () => setEditing({ name: x.name }) },
+                          { label: t("Replace token…"), disabled: busy != null, onSelect: () => setEditing({ name: x.name, enabled: x.enabled }) },
                           "separator",
                           {
                             label: t("Remove…"),
@@ -164,6 +164,7 @@ export function Tunnel(props: PageProps<unknown>) {
         <TunnelDialog
           {...props}
           name={editing.name}
+          enabled={editing.enabled}
           onClose={() => setEditing(null)}
           onDone={() => {
             setEditing(null);
@@ -193,8 +194,8 @@ export function Tunnel(props: PageProps<unknown>) {
 }
 
 /** Adds a tunnel (a name and its token), or gives the tunnel `name` a new
- * token (write-only: the one kept is never shown). Either way it runs. */
-function TunnelDialog(props: PageProps<unknown> & { name?: string; onClose: () => void; onDone: () => void }) {
+ * token (write-only: the one kept is never shown), on or off as it was. */
+function TunnelDialog(props: PageProps<unknown> & { name?: string; enabled?: boolean; onClose: () => void; onDone: () => void }) {
   const t = props.t;
   const adding = props.name == null;
   const [name, setName] = useState("");
@@ -219,8 +220,8 @@ function TunnelDialog(props: PageProps<unknown> & { name?: string; onClose: () =
           setError(null);
           try {
             if (adding) await props.api.post("/apps/tunnels", { name: name.trim(), token: token.trim() || null });
-            else await props.api.post(`/apps/tunnels/${encodeURIComponent(props.name!)}/enable`, { token: token.trim() });
-            props.toast.success(t(adding ? "Tunnel added: connecting…" : "Token replaced: connecting…"));
+            else await props.api.patch(`/apps/tunnels/${encodeURIComponent(props.name!)}`, { token: token.trim() });
+            props.toast.success(t(adding ? "Tunnel added: connecting…" : props.enabled ? "Token replaced: connecting…" : "Token replaced (the tunnel stays off)"));
             props.onDone();
           } catch (err) {
             setError(err);

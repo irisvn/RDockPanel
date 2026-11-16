@@ -253,6 +253,7 @@ Resolvers are written through the `cert_resolvers` resource (their token sealed,
 | GET | `/tunnels` | system.manage | `{"tunnels": [{"name", "enabled", "token_set", "service", "service_name", "running", "connected", "error", "image", "origin"}]}`: every tunnel and its state (never a token). The `/tunnel` routes above act on the tunnel `default` |
 | POST | `/tunnels` | system.manage | `{"name", "token"}`: a new tunnel (its own cloudflared, `rdp-cloudflared-<name>`), on; 422 on `name` (1-40 lowercase letters, digits and dashes, starting with a letter; or taken) or `token` (not a tunnel token, or another tunnel's); audited (never the token) |
 | POST | `/tunnels/{name}/enable` | system.manage | `{"token"?}` (none: the one kept): on; 404 for an unknown name (never made here: `POST /tunnels` makes one); audited |
+| PATCH | `/tunnels/{name}` | system.manage | `{"token"}`: a new token, the tunnel on or off as it was (on: its cloudflared runs again with it; off: only kept); 422 on `token`, 404 for an unknown name; audited (never the token) |
 | POST | `/tunnels/{name}/disable` | system.manage | stops its cloudflared (its token kept); audited |
 | DELETE | `/tunnels/{name}` | system.manage | stops it and forgets its token, answers `{"deleted": name}`; the other tunnels keep running; audited |
 | GET | `/system/status` | system.manage | Settings → Panel: version, installed, image, hostname, public IP, whether it restarts and reboots |

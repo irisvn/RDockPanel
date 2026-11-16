@@ -9,7 +9,8 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
   service. A domain already in use, or one the panel refuses, is left out and said in the plan, and any
   domain can be unticked.
 - **Several Cloudflare Tunnels**: one cloudflared per tunnel (one per token), added, switched on or off
-  and deleted in Settings → Cloudflare Tunnel. The tunnel you had becomes `default`.
+  and deleted in Settings → Cloudflare Tunnel. The tunnel you had becomes `default`. Replacing the
+  token of a tunnel that is off keeps it off.
 - Importing a cloudflared container makes a tunnel of its own, so two cloudflared with two tokens stay
   two tunnels. A token a tunnel already has is refused, and an undo removes only the tunnels the import made.
 - Before going back to an older release, keep the tunnel `default` on, or remove the other tunnels:

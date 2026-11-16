@@ -187,6 +187,35 @@ pub async fn enable_one(
     Ok(Json(tunnel_service::status(&app, &docker, &name).await?))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Replace {
+    #[serde(default)]
+    pub token: String,
+}
+
+/// `PATCH /tunnels/{name}`: a new token, the tunnel on or off as it was.
+pub async fn update(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+    Path(name): Path<String>,
+    Json(body): Json<Replace>,
+) -> AppResult<Json<Value>> {
+    let named = name.clone();
+    let docker = changing(
+        &app,
+        &auth,
+        request,
+        tunnel_entry("tunnel.update", &name),
+        move |state, docker| async move {
+            tunnel_service::replace_token(&state, &docker, &named, &body.token).await
+        },
+    )
+    .await?;
+    Ok(Json(tunnel_service::status(&app, &docker, &name).await?))
+}
+
 /// `POST /tunnels/{name}/disable`: off, its token kept.
 pub async fn disable_one(
     State(app): State<AppState>,
