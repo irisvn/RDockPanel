@@ -3,6 +3,16 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.13.0 — 2026-11-16
+
+- Importing a container reads its Traefik labels and `VIRTUAL_HOST` and adds those domains to the new
+  service. A domain already in use, or one the panel refuses, is left out and said in the plan, and any
+  domain can be unticked.
+- **Several Cloudflare Tunnels**: one cloudflared per tunnel (one per token), added, switched on or off
+  and deleted in Settings → Cloudflare Tunnel. The tunnel you had becomes `default`.
+- Importing a cloudflared container makes a tunnel of its own, so two cloudflared with two tokens stay
+  two tunnels. A token a tunnel already has is refused, and an undo removes only the tunnels the import made.
+
 ## 0.12.0 — 2026-11-15
 
 - A service with a writable volume or folder no longer rolls with "zero downtime" (two tasks would
