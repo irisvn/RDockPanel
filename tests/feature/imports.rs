@@ -2913,6 +2913,57 @@ db_test!(
 );
 
 db_test!(
+    undo_waiting_for_a_tunnel_change_leaves_the_tunnel_the_admin_recreated,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::tunnel;
+        use rdockpanel::services::tunnel_service;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let fake = FakeDocker::default();
+        shop_with_tunnel(&fake, TUNNEL_A);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        patch_tunnel(&app, &admin, id, json!({"id-tunnel": true}))
+            .await
+            .assert_status(StatusCode::OK);
+        run_import(&app, &admin, id).await;
+        assert_eq!(import_state(&app, id).await, "active", "{:?}", fake.calls());
+        post(&app, &admin, &format!("imports/{id}/undo"), json!({})).await;
+        // A tunnel change holds the lock while the undo starts: it removes
+        // the import's tunnel and makes another of the same name.
+        let changing = tunnel_service::exclusive().await;
+        let admin_change = async {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let db = app.state().db();
+            tunnel::Entity::delete_many()
+                .filter(tunnel::Column::Name.eq("tunnel"))
+                .exec(db)
+                .await
+                .unwrap();
+            tunnel_service::reserve(app.state(), db, "tunnel", TUNNEL_B)
+                .await
+                .unwrap();
+            drop(changing);
+        };
+        tokio::join!(run_all(&app), admin_change);
+        assert_eq!(
+            import_state(&app, id).await,
+            "reverted",
+            "{:?}",
+            fake.calls()
+        );
+        assert_eq!(
+            tunnel_service::holder(app.state(), app.state().db(), TUNNEL_B)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("tunnel")
+        );
+    }
+);
+
+db_test!(
     a_retry_never_overwrites_another_tunnels_token,
     migrate = Migrator,
     |db: TestDb| async move {

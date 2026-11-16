@@ -1089,12 +1089,14 @@ async fn undoing_step(cx: &Cx<'_>) -> Result<Next, Failure> {
     // The tunnels this import made go before the originals run again: their
     // rows, not a tunnel the admin made since under the same name.
     for item in cx.items.iter().filter(|i| i.tunnel_id.is_some()) {
+        // Looked up under the lock: a tunnel removed and made again under the
+        // same name while it waited is the admin's, never removed here.
+        let changing = crate::services::tunnel_service::exclusive().await;
         let row = crate::models::tunnel::Entity::find_by_id(item.tunnel_id.unwrap_or_default())
             .one(cx.db())
             .await
             .map_err(|e| e.to_string())?;
         if let Some(row) = &row {
-            let _changing = crate::services::tunnel_service::exclusive().await;
             match cx
                 .keeping(crate::services::tunnel_service::remove(
                     cx.app, &cx.docker, &row.name,
@@ -1105,6 +1107,7 @@ async fn undoing_step(cx: &Cx<'_>) -> Result<Next, Failure> {
                 Err(err) => return Err(err.to_string()),
             }
         }
+        drop(changing);
         let txn = rustcms::db::begin_write(cx.db())
             .await
             .map_err(|e| e.to_string())?;
