@@ -117,6 +117,8 @@ panel's schedules.
   stricter constraint in the same release. Settings → Version's Update rolls a failing release
   back, and the previous version starts on the database as the new one left it (`migrate
   --allow-newer`): it must still be one it can use.
+  Releases before 0.13 know only the Cloudflare Tunnel `default`: before going back to one, keep
+  `default` on or remove the other tunnels, or the domains reached through those tunnels answer 404.
 - **A release for a big change**: bump `Cargo.toml`, write its `## X.Y.Z` section of
   `CHANGELOG.md` (the GitHub Release's notes), push, let CI and the image build, then push the tag
   `vX.Y.Z` (`release.yml` names the image and publishes the Release). The docs follow the code in

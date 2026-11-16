@@ -12,6 +12,9 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
   and deleted in Settings → Cloudflare Tunnel. The tunnel you had becomes `default`.
 - Importing a cloudflared container makes a tunnel of its own, so two cloudflared with two tokens stay
   two tunnels. A token a tunnel already has is refused, and an undo removes only the tunnels the import made.
+- Before going back to an older release, keep the tunnel `default` on, or remove the other tunnels:
+  an older release knows only `default`, and the domains reached through another tunnel stop
+  answering (404).
 
 ## 0.12.0 — 2026-11-15
 
@@ -32,9 +35,6 @@ Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push 
   import when it writes data (it gets 2 minutes to stop first), and the start dialog lists what the admin
   confirms.
 - Removing an image or pruning no longer takes an image that an imported service runs.
-- An imported container keeps its domains: the hosts of its Traefik labels and `VIRTUAL_HOST` are
-  added to its service (each can be unticked in the plan). A domain the panel already serves is left
-  out, and the plan asks to confirm it.
 
 ## 0.11.1 — 2026-11-15
 
