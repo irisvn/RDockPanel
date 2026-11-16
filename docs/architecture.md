@@ -608,5 +608,5 @@ cloudflared each, their token sealed; the one of `panel_settings` `tunnel.*` bec
 `container_imports`, `container_import_items`, `container_import_volumes`, `container_import_claims`
 and `container_import_files`, and the columns `services.admin_only`, `services.user` (the user a container ran as, when it is not its
 image's), `service_mounts.link_target`, `container_imports.flags` (`ingress`, `back`; `tunnel` from older
-releases) and `container_import_items.tunnel` (the tunnel an import made of a cloudflared: an undo
-removes it).
+releases) and `container_import_items.tunnel_id` (the tunnel row an import made of a cloudflared: an undo
+removes that row, not another tunnel made since under its name).

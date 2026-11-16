@@ -1417,6 +1417,7 @@ window.rustcms?.registerTranslations?.("vi", {
   "something in the plan blocks the import": "có thứ trong kế hoạch chặn việc nhập",
   "The containers changed since the plan was read: read it again": "Container đã đổi từ lúc đọc kế hoạch: hãy đọc lại",
   "that tunnel token is already used by another tunnel": "token tunnel này đã được một tunnel khác dùng",
+  "two containers share one tunnel token: only one can become a tunnel": "hai container dùng chung một token tunnel: chỉ một container được làm tunnel",
   "a container of the plan is gone": "một container của kế hoạch không còn nữa",
   "a project of that name exists: choose another": "đã có project tên đó: hãy chọn tên khác",
   "Another import holds one of these containers or volumes": "Một import khác đang giữ một trong các container hoặc volume này",

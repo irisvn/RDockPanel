@@ -918,11 +918,18 @@ async fn deploy_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> Resu
     mark.flags = Set(Some(flags));
     mark.update(cx.db()).await.map_err(|e| e.to_string())?;
     let _changing = tunnel_service::exclusive().await;
-    // A retry keeps the tunnel made before.
-    let made = match &item.tunnel {
-        Some(name) => crate::models::tunnel::named(cx.db(), name)
+    // A retry keeps the tunnel made before: that row (a name can be made
+    // again, by the admin), still with the container's token.
+    let made = match item.tunnel_id {
+        Some(id) => crate::models::tunnel::Entity::find_by_id(id)
+            .one(cx.db())
             .await
             .map_err(|e| e.to_string())?
+            .filter(|t| {
+                t.token
+                    .open(cx.app.keyring(), &crate::models::tunnel::token_context())
+                    .is_ok_and(|t| t == token)
+            })
             .map(|t| t.name),
         None => None,
     };
@@ -944,22 +951,15 @@ async fn deploy_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> Resu
             let txn = rustcms::db::begin_write(cx.db())
                 .await
                 .map_err(|e| e.to_string())?;
-            tunnel_service::reserve(cx.app, &txn, &name, &token)
+            let id = tunnel_service::reserve(cx.app, &txn, &name, &token)
                 .await
                 .map_err(|e| e.to_string())?;
             let mut kept = item.clone().into_active_model();
-            kept.tunnel = Set(Some(name.clone()));
+            kept.tunnel_id = Set(Some(id));
             kept.update(&txn).await.map_err(|e| e.to_string())?;
-            audit::record(
-                &txn,
-                &AuditContext::new(
-                    AuditActor::job("import_step", cx.import.created_by),
-                    RequestMeta::default(),
-                ),
-                AuditEntry::new("tunnel.create", "tunnels").key(name.clone()),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+            audit::record(&txn, &job_audit(cx), tunnel_entry("tunnel.create", &name))
+                .await
+                .map_err(|e| e.to_string())?;
             txn.commit().await.map_err(|e| e.to_string())?;
             name
         }
@@ -973,7 +973,26 @@ async fn deploy_tunnel(cx: &Cx<'_>, item: &container_import_item::Model) -> Resu
     ))
     .await
     .map_err(|e| e.to_string())?;
+    audit::record_detached(
+        cx.db(),
+        &job_audit(cx),
+        tunnel_entry("tunnel.enable", &name),
+    )
+    .await;
     set_item(cx, item, |a| a.state = Set("deployed".to_owned())).await
+}
+
+/// Who changes a tunnel from an import: its step, for the admin who started it.
+fn job_audit(cx: &Cx<'_>) -> AuditContext {
+    AuditContext::new(
+        AuditActor::job("import_step", cx.import.created_by),
+        RequestMeta::default(),
+    )
+}
+
+/// As Settings audits a tunnel: by its name, never its token.
+fn tunnel_entry(action: &str, name: &str) -> AuditEntry {
+    AuditEntry::new(action, "tunnels").key(name)
 }
 
 async fn ports_or_domains(cx: &Cx<'_>, service: &service::Model) -> bool {
@@ -1067,19 +1086,41 @@ async fn observing(cx: &Cx<'_>) -> Result<Next, Failure> {
 }
 
 async fn undoing_step(cx: &Cx<'_>) -> Result<Next, Failure> {
-    // The tunnels this import made go before the originals run again.
-    for name in cx.items.iter().filter_map(|i| i.tunnel.as_deref()) {
-        let _changing = crate::services::tunnel_service::exclusive().await;
-        match cx
-            .keeping(crate::services::tunnel_service::remove(
-                cx.app, &cx.docker, name,
-            ))
+    // The tunnels this import made go before the originals run again: their
+    // rows, not a tunnel the admin made since under the same name.
+    for item in cx.items.iter().filter(|i| i.tunnel_id.is_some()) {
+        let row = crate::models::tunnel::Entity::find_by_id(item.tunnel_id.unwrap_or_default())
+            .one(cx.db())
             .await
-        {
-            // Never made (a failure before), or removed already (a retry).
-            Ok(()) | Err(AppError::NotFound) => {}
-            Err(err) => return Err(err.to_string()),
+            .map_err(|e| e.to_string())?;
+        if let Some(row) = &row {
+            let _changing = crate::services::tunnel_service::exclusive().await;
+            match cx
+                .keeping(crate::services::tunnel_service::remove(
+                    cx.app, &cx.docker, &row.name,
+                ))
+                .await
+            {
+                Ok(()) | Err(AppError::NotFound) => {}
+                Err(err) => return Err(err.to_string()),
+            }
         }
+        let txn = rustcms::db::begin_write(cx.db())
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut gone = item.clone().into_active_model();
+        gone.tunnel_id = Set(None);
+        gone.update(&txn).await.map_err(|e| e.to_string())?;
+        if let Some(row) = &row {
+            audit::record(
+                &txn,
+                &job_audit(cx),
+                tunnel_entry("tunnel.remove", &row.name),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        txn.commit().await.map_err(|e| e.to_string())?;
     }
     // An import of an older release turned `default` on.
     if cx.import.has_flag("tunnel") {

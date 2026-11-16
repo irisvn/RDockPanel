@@ -1,5 +1,6 @@
-//! `container_import_items.tunnel`: the tunnel an import made of a cloudflared
-//! (its name in `tunnels`), so that an undo removes that one and no other.
+//! `container_import_items.tunnel_id`: the tunnel an import made of a
+//! cloudflared (its row in `tunnels`, not its name: a name can be made
+//! again), so that an undo removes that one and no other.
 
 use rustcms::async_trait;
 use rustcms::migration::*;
@@ -18,8 +19,8 @@ impl MigrationTrait for Migration {
         add_column(
             manager,
             ContainerImportItems::Table,
-            &mut ColumnDef::new(ContainerImportItems::Tunnel)
-                .string_len(40)
+            &mut ColumnDef::new(ContainerImportItems::TunnelId)
+                .big_integer()
                 .null()
                 .to_owned(),
         )
@@ -28,7 +29,7 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         if !manager
-            .has_column("container_import_items", "tunnel")
+            .has_column("container_import_items", "tunnel_id")
             .await?
         {
             return Ok(());
@@ -37,7 +38,7 @@ impl MigrationTrait for Migration {
             .get_connection()
             .query_one_raw(Statement::from_string(
                 manager.get_database_backend(),
-                "SELECT COUNT(*) AS n FROM container_import_items WHERE tunnel IS NOT NULL"
+                "SELECT COUNT(*) AS n FROM container_import_items WHERE tunnel_id IS NOT NULL"
                     .to_owned(),
             ))
             .await?
@@ -52,7 +53,7 @@ impl MigrationTrait for Migration {
         drop_column(
             manager,
             ContainerImportItems::Table,
-            ContainerImportItems::Tunnel,
+            ContainerImportItems::TunnelId,
         )
         .await
     }
@@ -61,5 +62,5 @@ impl MigrationTrait for Migration {
 #[derive(DeriveIden)]
 enum ContainerImportItems {
     Table,
-    Tunnel,
+    TunnelId,
 }

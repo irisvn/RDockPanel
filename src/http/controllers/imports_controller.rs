@@ -270,19 +270,27 @@ pub async fn change_plan(
                 .iter()
                 .find(|i| i["container_id"] == *container)
                 .ok_or_else(|| invalid("tunnel", "names a container that is not in the plan"))?;
-            if *on {
-                if item["tunnel_token"] != true {
-                    return Err(invalid(
-                        "tunnel",
-                        "is not a Cloudflare tunnel whose token can be read",
-                    ));
-                }
-                let token =
-                    crate::services::import_service::tunnel_token_of_container(&docker, container)
-                        .await
-                        .map_err(|why| invalid("tunnel", &why))?;
-                crate::services::import_service::new_tunnel_token(&app, &token).await?;
+            if *on && item["tunnel_token"] != true {
+                return Err(invalid(
+                    "tunnel",
+                    "is not a Cloudflare tunnel whose token can be read",
+                ));
             }
+        }
+        // The tunnels the plan would have: each its own token.
+        if tunnel.values().any(|on| *on) {
+            let items = plan["items"].as_array().ok_or(AppError::NotFound)?;
+            let chosen: Vec<&str> = items
+                .iter()
+                .filter_map(|i| i["container_id"].as_str())
+                .filter(|id| match tunnel.get(*id) {
+                    Some(on) => *on,
+                    None => items
+                        .iter()
+                        .any(|i| i["container_id"] == *id && i["as_tunnel"] == true),
+                })
+                .collect();
+            crate::services::import_service::new_tunnels(&app, &docker, &chosen).await?;
         }
         let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
         for (container, on) in tunnel {

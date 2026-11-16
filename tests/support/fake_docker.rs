@@ -81,6 +81,8 @@ pub struct FakeDocker {
     /// `delete service` that fails.
     pub deploy_fail_for: Arc<Mutex<Vec<String>>>,
     pub stop_fails: Arc<Mutex<Vec<String>>>,
+    /// Swarm services whose creation fails.
+    pub create_fails: Arc<Mutex<Vec<String>>>,
     pub delete_fail: Arc<Mutex<bool>>,
     /// The exit code of the helpers whose name contains the key.
     pub helper_exits: Arc<Mutex<HashMap<String, i64>>>,
@@ -638,6 +640,9 @@ impl DockerApi for FakeDocker {
                 "create {name} as {}@{}",
                 auth.username, auth.server
             ));
+        }
+        if self.create_fails.lock().unwrap().contains(&name) {
+            return Err(DockerError::Other(format!("{name} cannot be made")));
         }
         let mut services = self.services.lock().unwrap();
         if services.contains_key(&name) {

@@ -689,18 +689,33 @@ fn image_of(doc: &Value) -> String {
         .to_owned()
 }
 
-/// Refuses `token` as a new tunnel's when a tunnel has it already (one
-/// cloudflared per token): the container can still come as a service.
-pub async fn new_tunnel_token(app: &AppState, token: &str) -> AppResult<()> {
-    if crate::services::tunnel_service::holder(app, app.db(), token)
-        .await?
-        .is_some()
-    {
-        return Err(rustcms::ValidationErrors::field(
-            "tunnel",
-            "that tunnel token is already used by another tunnel",
-        )
-        .into());
+/// Refuses the cloudflared `containers` as new tunnels when one's token is
+/// a tunnel's already, or two share one (one cloudflared per token): such
+/// a container can still come as a service.
+pub async fn new_tunnels(app: &AppState, docker: &Docker, containers: &[&str]) -> AppResult<()> {
+    use rustcms::ValidationErrors;
+    let mut seen = std::collections::HashSet::new();
+    for id in containers {
+        let token = tunnel_token_of_container(docker, id)
+            .await
+            .map_err(|why| ValidationErrors::field("tunnel", &why))?;
+        if crate::services::tunnel_service::holder(app, app.db(), &token)
+            .await?
+            .is_some()
+        {
+            return Err(ValidationErrors::field(
+                "tunnel",
+                "that tunnel token is already used by another tunnel",
+            )
+            .into());
+        }
+        if !seen.insert(token) {
+            return Err(ValidationErrors::field(
+                "tunnel",
+                "two containers share one tunnel token: only one can become a tunnel",
+            )
+            .into());
+        }
     }
     Ok(())
 }
@@ -1044,13 +1059,16 @@ pub async fn start(
     let mut made = Vec::new();
     // Containers that become tunnels of the panel: no service.
     let mut tunnels = Vec::new();
+    let as_tunnels: Vec<&str> = brought
+        .iter()
+        .filter(|i| i["as_tunnel"] == true)
+        .map(|i| i["container_id"].as_str().unwrap_or_default())
+        .collect();
+    if !as_tunnels.is_empty() {
+        new_tunnels(app, &*docker(app)?, &as_tunnels).await?;
+    }
     for item in brought.iter().filter(|i| i["as_tunnel"] == true) {
         let id = item["container_id"].as_str().unwrap_or_default().to_owned();
-        let docker = docker(app)?;
-        let token = tunnel_token_of_container(&docker, &id)
-            .await
-            .map_err(|why| ValidationErrors::field("tunnel", &why))?;
-        new_tunnel_token(app, &token).await?;
         tunnels.push((
             id,
             item["name"].as_str().unwrap_or_default().to_owned(),

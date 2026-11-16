@@ -235,13 +235,13 @@ pub async fn holder<C: ConnectionTrait>(
 
 /// Keeps the new tunnel `name` with `token`, off ([`enable`] runs it), in
 /// `db`'s transaction: an import makes the row with its item. Another
-/// tunnel's token is refused.
+/// tunnel's token is refused. Its id.
 pub async fn reserve<C: ConnectionTrait>(
     app: &AppState,
     db: &C,
     name: &str,
     token: &str,
-) -> AppResult<()> {
+) -> AppResult<i64> {
     let token = token.trim();
     if !valid_name(name) || !valid_token(token) {
         return Err(AppError::BadRequest(
@@ -252,7 +252,7 @@ pub async fn reserve<C: ConnectionTrait>(
         return Err(ValidationErrors::field("token", "is already used by another tunnel").into());
     }
     let now = chrono::Utc::now();
-    tunnel::ActiveModel {
+    let made = tunnel::ActiveModel {
         name: Set(name.to_owned()),
         token: Set(Encrypted::seal(
             app.keyring(),
@@ -266,7 +266,7 @@ pub async fn reserve<C: ConnectionTrait>(
     }
     .insert(db)
     .await?;
-    Ok(())
+    Ok(made.id)
 }
 
 /// A tunnel name made of `base` (a container's name), none of `taken`:
