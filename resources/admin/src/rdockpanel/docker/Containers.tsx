@@ -119,6 +119,20 @@ function ContainerList(props: PageProps<unknown> & { perm: Can }) {
       setBusy(null);
     }
   };
+  // Reads it for an import (the plan comes next, on the import's page).
+  const bring = async (c: Container) => {
+    setBusy(c.id);
+    setError(null);
+    try {
+      const made = await props.api.post<{ id: number }>("/imports", { source_kind: "container", source_ref: c.id });
+      props.toast.success(t("Reading queued"));
+      props.navigate(`/p/dashboard/_import/${made.id}`);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(null);
+    }
+  };
   const detail = (c: Container, which: string) => `/p/containers/${encodeURIComponent(c.id)}/${which}`;
   return (
     <Page {...header}>
@@ -189,6 +203,7 @@ function ContainerList(props: PageProps<unknown> & { perm: Can }) {
                       menu.push({ label: t("Pause"), disabled, onSelect: () => void act(c, "pause", "Paused") });
                     }
                     menu.push({ label: t("Inspect"), onSelect: () => props.navigate(detail(c, "inspect")) });
+                    if (can["system.manage"]) menu.push({ label: t("Bring into the panel"), disabled, onSelect: () => void bring(c) });
                     if (manage) menu.push("separator", { label: t("Remove…"), destructive: true, disabled, onSelect: () => void remove(c) });
                     return (
                       <tr key={c.id}>

@@ -334,8 +334,24 @@ pub async fn request<C: ConnectionTrait>(
     user_id: Option<i64>,
     keyring: &Keyring,
 ) -> AppResult<deployment::Model> {
+    request_with(txn, service, trigger, rollback_to, user_id, keyring, None).await
+}
+
+/// [`request`] for the step of the import `by_import`: the only one a
+/// service of that import accepts while it runs.
+pub async fn request_with<C: ConnectionTrait>(
+    txn: &C,
+    service: &service::Model,
+    trigger: Trigger,
+    rollback_to: Option<&deployment::Model>,
+    user_id: Option<i64>,
+    keyring: &Keyring,
+    by_import: Option<i64>,
+) -> AppResult<deployment::Model> {
     // Nothing new while the panel updates (it waits for what runs).
     crate::services::panel_update_service::refuse_while_updating(txn).await?;
+    // Nor while an import holds the service.
+    crate::services::import_service::refuse_while_importing(txn, service.id, by_import).await?;
     let now = Utc::now();
     // The service and its project as they are now, locked until the
     // transaction ends: a rename waits for it, or went first (then the
@@ -683,15 +699,35 @@ pub async fn run(state: &AppState, id: i64, timings: Timings) -> AppResult<()> {
             match (secrets, certificates) {
                 (_, Err(why)) => Err(Outcome::Failed(why)),
                 (Ok(secrets), Ok(())) => {
-                    apply(
-                        &docker,
-                        traefik.as_deref(),
-                        &row,
-                        &secrets,
-                        &mut log,
-                        timings,
-                    )
-                    .await
+                    let links = crate::services::import_service::settings(state).links();
+                    // An imported service's data was copied or is used on this
+                    // machine (a Move too): its tasks stay here.
+                    // Unknown (the database did not answer): not deployed
+                    // rather than deployed anywhere.
+                    let imported = crate::models::container_import_item::Entity::find()
+                        .filter(
+                            crate::models::container_import_item::Column::ServiceId
+                                .eq(row.service_id),
+                        )
+                        .one(state.db())
+                        .await
+                        .map(|item| item.is_some())
+                        .map_err(|e| Outcome::Failed(e.to_string()));
+                    match imported {
+                        Err(failed) => Err(failed),
+                        Ok(imported) => {
+                            apply(
+                                &docker,
+                                traefik.as_deref(),
+                                &row,
+                                &secrets,
+                                &mut log,
+                                timings,
+                                &Place { links, imported },
+                            )
+                            .await
+                        }
+                    }
                 }
                 (Err(outcome), _) => Err(outcome),
             }
@@ -837,6 +873,8 @@ pub fn deploy_options(force_update: u64) -> DeployOptions {
         internal_url: cfg.internal_url.clone(),
         // Set as routes are written (Traefik knows).
         tunnel: false,
+        // Set by the deployment (Docker knows).
+        pin_node: None,
     }
 }
 
@@ -1274,7 +1312,9 @@ async fn apply(
     secrets: &Secrets,
     log: &mut RunLog<'_>,
     timings: Timings,
+    place: &Place,
 ) -> Result<(Outcome, Option<String>), Outcome> {
+    let (links, imported) = (place.links.as_path(), place.imported);
     let fail = |err: DockerError| Outcome::Failed(err.to_string());
     let snapshot: Snapshot =
         serde_json::from_value(row.spec.clone()).map_err(|e| Outcome::Failed(e.to_string()))?;
@@ -1346,6 +1386,26 @@ async fn apply(
         }
     }
 
+    // A folder used in place (an import's `link`): its symlink in the panel's
+    // links folder, pointing to a place the rules still allow.
+    for mount in snapshot.mounts.iter().filter(|m| m.kind == "link") {
+        let inside = std::path::Path::new(&mount.source).starts_with(links)
+            && !mount.source.contains("/../");
+        let allowed = mount.link_target.as_deref().is_some_and(|target| {
+            std::path::Path::new(target).is_absolute()
+                && !crate::services::deploy_rules_service::forbidden_path(
+                    std::path::Path::new(target),
+                    &config().state_dir,
+                )
+        });
+        if !inside || !allowed {
+            return Err(Outcome::Failed(format!(
+                "the folder of {} is no longer allowed",
+                mount.target
+            )));
+        }
+    }
+
     project_network(docker, traefik, &snapshot, log).await?;
 
     let auth = secrets.auth(&snapshot);
@@ -1393,12 +1453,25 @@ async fn apply(
     if let Some(warning) = image.warning() {
         log.line(format!("warning: {warning}")).await;
     }
-    let options =
+    let mut options =
         // Restart and Force rebuild: new tasks even when nothing changed.
         deploy_options(
             force_update_of(existing.as_ref())
                 + u64::from(trigger == Trigger::Restart || row.force_rebuild),
         );
+    // An imported image or folder is on this machine only: the tasks run here.
+    if crate::services::deploy_rules_service::local_image(&snapshot.image)
+        || snapshot.mounts.iter().any(|m| m.kind == "link")
+        || (imported && snapshot.mounts.iter().any(|m| m.kind == "volume"))
+    {
+        let node = docker.info().await.map_err(fail)?.node_id;
+        if node.is_empty() {
+            return Err(Outcome::Failed(
+                "Docker did not say which Swarm node this is".to_owned(),
+            ));
+        }
+        options.pin_node = Some(node);
+    }
     // Placeholders (`$(PROJECT_NAME)`, …) in the environment, as of now.
     let vars = placeholder_vars(&snapshot);
     let env: BTreeMap<String, String> = secrets
@@ -1450,6 +1523,17 @@ async fn apply(
     Ok((outcome, Some(image.reference().to_owned())))
 }
 
+/// The registry of the images an import tags (`rdp.invalid/<project>/<service>:<12 hex>`):
+/// `.invalid` never resolves, so an older panel that tries to pull one fails.
+pub const LOCAL_REGISTRY: &str = "rdp.invalid/";
+
+/// Where an imported service's data is: the links folder of its folders in
+/// place, and whether it came from an import (its volumes are this machine's).
+struct Place {
+    links: std::path::PathBuf,
+    imported: bool,
+}
+
 /// The image a run uses: a rollback's recorded one, the running one for a
 /// start or stop, else a fresh pull of the configured image, pinned.
 async fn image_for(
@@ -1474,6 +1558,15 @@ async fn image_for(
         .and_then(|c| c.image.clone());
     if let (Some(running), Trigger::Start | Trigger::Stop) = (running, trigger) {
         return Ok(pinned_as(&running));
+    }
+    if snapshot.image.starts_with(LOCAL_REGISTRY) {
+        // Tagged by an import: only this machine has it, nothing to pull.
+        let details = docker
+            .engine()
+            .inspect_image(&snapshot.image)
+            .await
+            .map_err(|e| Outcome::Failed(format!("the imported image is gone: {e}")))?;
+        return Ok(pin_image(&snapshot.image, None, &details));
     }
     log.line(format!("pulling {}", snapshot.image)).await;
     let mut progress = docker.pull_image_with(&snapshot.image, auth);

@@ -18,7 +18,7 @@ use crate::models::{project, service, service_domain, service_mount, service_por
 use crate::services::build_service::{inside, valid_git_url, valid_ref};
 use crate::services::database_service::{Credentials, Engine, random_password};
 use crate::services::deploy_rules_service::{
-    MAX_COMMAND, MAX_REPLACEMENT, MAX_REPO_PATH, config, normalize_host, sealable,
+    MAX_COMMAND, MAX_REPLACEMENT, MAX_REPO_PATH, config, normalize_host, reserved_name, sealable,
     valid_container_path, valid_image_reference, valid_name, valid_port, valid_route_path,
     valid_volume_name,
 };
@@ -31,6 +31,29 @@ pub struct DatabaseOptions {
     pub user: Option<String>,
     pub password: Option<String>,
     pub root_password: Option<String>,
+}
+
+/// What a new domain breaks of the panel's rules, without the database
+/// (its certificate is `cert_service::check_domain_tls`'s).
+pub fn domain_problems(domain: &NewDomain) -> Vec<&'static str> {
+    use crate::services::deploy_rules_service::{config, is_panel_host, valid_domain_host};
+    let mut out = Vec::new();
+    if !valid_domain_host(&domain.host) {
+        out.push("is not a hostname");
+    }
+    if is_panel_host(&domain.host) {
+        out.push("is the panel's own domain");
+    }
+    if !valid_route_path(&domain.path) {
+        out.push("the path may hold only letters, digits and / - _ . ~");
+    }
+    if !valid_port(i64::from(domain.port)) {
+        out.push("a port is 1-65535");
+    }
+    if domain.https && domain.host.starts_with("*.") && !config().cert_resolver.is_empty() {
+        out.push("a wildcard's certificate needs a DNS resolver (choose one on the domain after)");
+    }
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -63,8 +86,24 @@ pub struct NewComposeGit {
 
 #[derive(Debug, Clone)]
 pub enum NewMount {
-    Volume { name: String, target: String },
-    File { content: String, target: String },
+    Volume {
+        name: String,
+        target: String,
+        /// Mounted read only (an import keeps what the container had).
+        read_only: bool,
+    },
+    File {
+        content: String,
+        target: String,
+    },
+    /// A host folder an import uses where it is: `source` is the symlink the
+    /// panel made to it, `link_target` the folder.
+    Link {
+        source: String,
+        link_target: String,
+        target: String,
+        read_only: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +125,15 @@ pub struct NewBuild {
     pub builder: String,
     pub dockerfile_path: Option<String>,
     pub dockerfile: Option<String>,
+}
+
+/// The user of a container: a name or a number, optionally `:group`.
+pub fn valid_run_user(user: &str) -> bool {
+    !user.is_empty()
+        && user.len() <= 64
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | ':'))
 }
 
 /// A service to create.
@@ -118,11 +166,19 @@ pub struct NewService {
     pub cap_drop: Vec<String>,
     pub sysctls: BTreeMap<String, String>,
     pub groups: Vec<String>,
+    /// An import's image that only this machine has (`rdp.invalid/…`): no
+    /// other writer may name one.
+    pub local_image: bool,
+    /// The user its container runs as when it is not its image's (an import's).
+    pub user: Option<String>,
     /// Its basic authentication: (user, password); hashed when made.
     pub basic_auth: Vec<(String, String)>,
     /// Their hashes, in that order, when made before the write
     /// ([`hash_passwords`]: bcrypt is slow, a write holds SQLite's lock).
     pub basic_auth_hashes: Vec<String>,
+    /// Users that come with their hash already (an import's Traefik basic
+    /// auth): (user, hash).
+    pub basic_auth_hashed: Vec<(String, String)>,
     pub redirects: Vec<NewRedirect>,
 }
 
@@ -148,11 +204,14 @@ impl NewService {
             compose_git: None,
             basic_auth: vec![],
             basic_auth_hashes: vec![],
+            basic_auth_hashed: vec![],
             redirects: vec![],
             cap_add: vec![],
             cap_drop: vec![],
             sysctls: BTreeMap::new(),
             groups: vec![],
+            local_image: false,
+            user: None,
         }
     }
 
@@ -203,6 +262,8 @@ pub async fn create(
             "name",
             "must be 1-40 lowercase letters, digits and dashes, starting with a letter",
         );
+    } else if reserved_name(&new.name) {
+        errors.add("name", "is reserved for the panel's own services");
     } else if service::Entity::find()
         .filter(service::Column::ProjectId.eq(project.id))
         .filter(service::Column::Name.eq(&new.name))
@@ -211,6 +272,11 @@ pub async fn create(
         > 0
     {
         errors.add("name", "is already taken in this project");
+    }
+    if let Some(user) = &new.user
+        && !valid_run_user(user)
+    {
+        errors.add("user", "is a name or an id, optionally `:group`");
     }
     let engine = match new.kind.as_str() {
         "app" | "compose" => None,
@@ -270,6 +336,7 @@ pub async fn create(
                 NewMount::Volume {
                     name: "data".to_owned(),
                     target: setup.data_path.to_owned(),
+                    read_only: false,
                 },
             );
             setup.image
@@ -326,6 +393,9 @@ pub async fn create(
         None if new.kind == "compose" => {}
         None if !valid_image_reference(&image) => {
             errors.add("image", "is not an image reference (e.g. nginx:1.27)");
+        }
+        None if crate::services::deploy_rules_service::local_image(&image) && !new.local_image => {
+            errors.add("image", "is an image only an import makes");
         }
         Some(_) if engine.is_some() => {
             errors.add("source", "a database runs its engine's image");
@@ -392,37 +462,19 @@ pub async fn create(
         new.replicas.clamp(0, 100)
     };
     for domain in &new.domains {
-        if !crate::services::deploy_rules_service::valid_domain_host(&domain.host) {
-            errors.add("domains", format!("{} is not a hostname", domain.host));
-        }
-        if crate::services::deploy_rules_service::is_panel_host(&domain.host) {
+        for problem in domain_problems(domain) {
             errors.add(
                 "domains",
-                format!("{} is the panel's own domain", domain.host),
-            );
-        }
-        if !valid_route_path(&domain.path) {
-            errors.add("domains", format!("{} is not a path", domain.path));
-        }
-        if !valid_port(i64::from(domain.port)) {
-            errors.add("domains", "a port is 1-65535");
-        }
-        if domain.https
-            && domain.host.starts_with("*.")
-            && !crate::services::deploy_rules_service::config()
-                .cert_resolver
-                .is_empty()
-        {
-            errors.add(
-                "domains",
-                format!("{}: a wildcard's certificate needs a DNS resolver (choose one on the domain after)", domain.host),
+                format!("{}{}: {problem}", domain.host, domain.path),
             );
         }
     }
     let mut targets = std::collections::BTreeSet::new();
     for mount in &mounts {
         let target = match mount {
-            NewMount::Volume { target, .. } | NewMount::File { target, .. } => target,
+            NewMount::Volume { target, .. }
+            | NewMount::File { target, .. }
+            | NewMount::Link { target, .. } => target,
         };
         if !targets.insert(target.clone()) {
             errors.add("mounts", format!("{target} is mounted twice"));
@@ -430,8 +482,9 @@ pub async fn create(
     }
     for mount in &mounts {
         let (target, ok) = match mount {
-            NewMount::Volume { name, target } => (target, valid_volume_name(name)),
+            NewMount::Volume { name, target, .. } => (target, valid_volume_name(name)),
             NewMount::File { content, target } => (target, sealable(content)),
+            NewMount::Link { source, target, .. } => (target, source.starts_with('/')),
         };
         if !ok || !valid_container_path(target) {
             errors.add("mounts", format!("{target} is not a valid mount"));
@@ -442,7 +495,7 @@ pub async fn create(
         .iter()
         .filter_map(|m| match m {
             NewMount::File { content, target } => Some((target.as_str(), content.as_str())),
-            NewMount::Volume { .. } => None,
+            NewMount::Volume { .. } | NewMount::Link { .. } => None,
         })
         .collect();
     if !sealable(&files) {
@@ -488,6 +541,17 @@ pub async fn create(
             errors.add(
                 "basic_auth",
                 format!("{user}: a password is 1-72 characters"),
+            );
+        }
+    }
+    for (user, hash) in &new.basic_auth_hashed {
+        let known = ["$2y$", "$2a$", "$2b$", "$apr1$", "{SHA}"]
+            .iter()
+            .any(|p| hash.starts_with(p));
+        if !crate::services::deploy_service::valid_auth_user(user) || !known || hash.len() > 200 {
+            errors.add(
+                "basic_auth",
+                format!("{user:?}: not a user and hash Traefik takes"),
             );
         }
     }
@@ -550,6 +614,7 @@ pub async fn create(
         dockerfile_path: Set(new.build.as_ref().and_then(|b| b.dockerfile_path.clone())),
         dockerfile: Set(new.build.as_ref().and_then(|b| b.dockerfile.clone())),
         compose: Set(new.compose.clone().filter(|t| !t.trim().is_empty())),
+        user: Set(new.user.clone()),
         cap_add: Set((!new.cap_add.is_empty()).then(|| new.cap_add.join(", "))),
         cap_drop: Set((!new.cap_drop.is_empty()).then(|| new.cap_drop.join(", "))),
         groups: Set((!new.groups.is_empty()).then(|| new.groups.join(", "))),
@@ -612,11 +677,23 @@ pub async fn create(
         .await
         .map_err(|e| taken(e, "domains", format!("{} is already routed", domain.host)))?;
     }
-    for (i, (user, password)) in new.basic_auth.iter().enumerate() {
-        let hash = match new.basic_auth_hashes.get(i) {
-            Some(hash) => hash.clone(),
-            None => bcrypt::hash(password, 10).map_err(AppError::internal)?,
-        };
+    let hashed = new
+        .basic_auth
+        .iter()
+        .enumerate()
+        .map(|(i, (user, password))| {
+            let hash = match new.basic_auth_hashes.get(i) {
+                Some(hash) => Ok(hash.clone()),
+                None => bcrypt::hash(password, 10).map_err(AppError::internal),
+            };
+            (user.clone(), hash)
+        });
+    let given = new
+        .basic_auth_hashed
+        .iter()
+        .map(|(user, hash)| (user.clone(), Ok(hash.clone())));
+    for (user, hash) in hashed.chain(given).collect::<Vec<_>>() {
+        let hash = hash?;
         crate::models::service_basic_auth::ActiveModel {
             service_id: Set(row.id),
             username: Set(user.clone()),
@@ -644,17 +721,52 @@ pub async fn create(
         .await?;
     }
     for mount in &mounts {
-        let (kind, name, content, target) = match mount {
-            NewMount::Volume { name, target } => ("volume", Some(name.clone()), None, target),
-            NewMount::File { content, target } => ("file", None, Some(content.clone()), target),
+        let (kind, name, content, target, source, link_target, read_only) = match mount {
+            NewMount::Volume {
+                name,
+                target,
+                read_only,
+            } => (
+                "volume",
+                Some(name.clone()),
+                None,
+                target,
+                None,
+                None,
+                *read_only,
+            ),
+            NewMount::File { content, target } => (
+                "file",
+                None,
+                Some(content.clone()),
+                target,
+                None,
+                None,
+                true,
+            ),
+            NewMount::Link {
+                source,
+                link_target,
+                target,
+                read_only,
+            } => (
+                "link",
+                None,
+                None,
+                target,
+                Some(source.clone()),
+                Some(link_target.clone()),
+                *read_only,
+            ),
         };
         service_mount::ActiveModel {
             service_id: Set(row.id),
             kind: Set(kind.to_owned()),
             name: Set(name),
-            source: Set(None),
+            source: Set(source),
+            link_target: Set(link_target),
             target: Set(target.clone()),
-            read_only: Set(kind == "file"),
+            read_only: Set(read_only),
             sealed_content: Set(content
                 .map(|c| Encrypted::seal(keyring, &service_mount::content_context(), &c))
                 .transpose()?),

@@ -48,6 +48,9 @@ The resources use the panel's standard permissions, one set per resource
   `backups.restore` (restore one, replacing the database's data; lists a provider's files);
 
 - notifications: `notification_channels.*` (Settings);
+- importing existing containers (the `/imports` routes, "Move all", "Clean the old folder"): `system.manage`;
+  starting also needs `projects.create` and `services.create`; a service made `admin_only` by an import (a
+  folder in place, a local image) is changed, deployed or opened in a terminal by `system.manage` only;
 - certificate resolvers (Settings → Certificates) and their "Apply" (it restarts Traefik): `system.manage`
   only. Choosing a resolver on a domain, and changing or removing a domain that has one, need
   `system.manage` too (a resolver asks for a certificate for any name it is given). No domain may use

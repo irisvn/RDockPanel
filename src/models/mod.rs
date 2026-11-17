@@ -5,6 +5,11 @@ pub mod backup_run;
 pub mod branding_image;
 pub mod cert_resolver;
 pub mod certificate;
+pub mod container_import;
+pub mod container_import_claim;
+pub mod container_import_file;
+pub mod container_import_item;
+pub mod container_import_volume;
 pub mod database_backup;
 pub mod deployment;
 pub mod firewall_blocked;
@@ -24,4 +29,5 @@ pub mod service_port;
 pub mod service_redirect;
 pub mod service_script;
 pub mod storage_provider;
+pub mod tunnel;
 // rustcms:models

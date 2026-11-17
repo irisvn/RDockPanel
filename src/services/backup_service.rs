@@ -238,6 +238,7 @@ pub async fn request(
 ) -> AppResult<backup_run::Model> {
     // Nothing new while the panel updates (it waits for what runs).
     crate::services::panel_update_service::refuse_while_updating(txn).await?;
+    crate::services::import_service::refuse_while_importing(txn, backup.service_id, None).await?;
     let (service, owner) = owner_of(txn, backup.service_id).await?;
     let (ext, _) = match &backup.volume {
         Some(path) => What::Volume(path.clone()).format(),
@@ -299,6 +300,7 @@ pub async fn request_restore(
         elevated,
     } = what;
     crate::services::panel_update_service::refuse_while_updating(txn).await?;
+    crate::services::import_service::refuse_while_importing(txn, service.id, None).await?;
     let now = Utc::now();
     let run = backup_run::ActiveModel {
         service_id: Set(service.id),

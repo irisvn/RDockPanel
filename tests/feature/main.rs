@@ -20,6 +20,7 @@ mod firewall;
 mod git;
 mod health;
 mod home;
+mod imports;
 mod large_values;
 mod live;
 mod members;

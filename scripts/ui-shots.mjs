@@ -84,6 +84,17 @@ const PAGES = [
     await page.getByRole("button", { name: /^Templates$|^Template$/ }).last().click();
     await page.waitForTimeout(6000);
   }],
+  // Importing existing containers: needs a Compose project of that name
+  // (`docker run --label com.docker.compose.project=impdemo …`); the import is
+  // made once and reused by the next pages.
+  ["import-source", "/p/dashboard", (page) => page.getByRole("button", { name: /Import containers|Nhập container/ }).first().click()],
+  ["import", "/p/dashboard", async (page) => {
+    await ensureImport(page);
+  }],
+  ["import-detail", "/p/dashboard", async (page) => {
+    await ensureImport(page);
+    await page.getByRole("button", { name: /^Details$|^Chi tiết$/ }).first().click();
+  }],
   ["service-logs", "/p/dashboard/demo/web/overview", async (page) => {
     await page.getByRole("button", { name: /^Logs$|^Log$/ }).first().click();
     await page.waitForTimeout(3000);
@@ -95,6 +106,23 @@ const PAGES = [
     await page.waitForTimeout(2000);
   }],
 ];
+// The import page of the shots: read once from the dialog (the Compose project
+// `impdemo`), then opened by its path.
+let importPath = null;
+async function ensureImport(page) {
+  if (importPath) {
+    await page.goto(base + importPath);
+  } else {
+    await page.getByRole("button", { name: /Import containers|Nhập container/ }).first().click();
+    const row = page.locator("tr", { hasText: "impdemo" }).first();
+    await row.getByRole("button", { name: /^Read$|^Đọc$/ }).click();
+    await page.waitForURL(/_import\/\d+/, { timeout: 15000 });
+    importPath = new URL(page.url()).pathname.replace(/^.*\/admin/, "");
+  }
+  await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+  await page.getByText(/Containers|Container/).first().waitFor({ timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+}
 const wanted = list("RDP_SHOT_PAGES", PAGES.map(([name]) => name).join(","));
 
 const host = os.hostname();

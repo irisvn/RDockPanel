@@ -24,7 +24,7 @@ export type Overview = { projects: Project[]; services_visible: boolean; can: { 
 
 export type Domain = { id: number; service_id: number; host: string; path: string; port: number; https: boolean; compose_service: string | null; middlewares: string | null; cert_resolver_id: number | null; certificate_id: number | null };
 export type Port = { id: number; published: number; target: number; protocol: string; mode: string };
-export type Mount = { id: number; kind: string; name: string | null; source: string | null; target: string; read_only: boolean };
+export type Mount = { id: number; kind: string; name: string | null; source: string | null; link_target?: string | null; target: string; read_only: boolean };
 
 export type Deployment = {
   id: number;
@@ -71,6 +71,8 @@ export type ServiceDetail = {
     compose: string | null;
     notes: string | null;
     cap_add: string | null;
+    /** Only administrators change or deploy it (an import made it so). */
+    admin_only?: boolean;
     cap_drop: string | null;
     sysctls: string | null;
     groups: string | null;

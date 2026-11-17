@@ -40,6 +40,7 @@ other containers keep running.
 | `PANEL_TEST_TEMPLATES=1` | runs every real template's generator (network; about 15 minutes) and requires 95% to plan |
 | `PANEL_TEST_ALL_DATABASES=1` | with `PANEL_TEST_SWARM=1`, the database test runs MySQL, MariaDB and MongoDB too (large images; CI runs PostgreSQL and Redis) |
 | `PANEL_TEST_DOCKER=1` | also run against the real Docker engine: pulls `alpine:3.20`, runs a container labelled `rdockpanel.test=1`, removes it |
+| `PANEL_TEST_SWARM=1` (import) | `an_import_on_a_real_swarm` imports a real container (`ghcr.io/traefik/whoami`, a volume with a file, a folder and a Compose file under `$HOME`, outside the repository) into a real Swarm with `alpine:3` as the helper image, moves the folder into a volume, undoes both, and removes what it made (`i<pid>` objects, swept by `swarm_lock` if the run dies) |
 
 - Feature tests (`tests/feature/`) drive the app through HTTP with a `FakeDocker`
   (`tests/support/fake_docker.rs`): containers and networks whose ids differ from their names, as on a
@@ -116,6 +117,11 @@ panel's schedules.
   stricter constraint in the same release. Settings → Version's Update rolls a failing release
   back, and the previous version starts on the database as the new one left it (`migrate
   --allow-newer`): it must still be one it can use.
+  Releases before 0.12 know nothing of imports and only the Cloudflare Tunnel `default`. Before going
+  back to one: keep `default` on or remove the other tunnels (the domains reached through them answer 404),
+  and finish or undo the imports under way. An older release ignores `services.admin_only` and
+  `services.run_user`: an imported service that runs as another user would run as its image's, and project
+  members could change it; a folder used in place and an `rdp.invalid/` image do not deploy there.
 - **A release for a big change**: bump `Cargo.toml`, write its `## X.Y.Z` section of
   `CHANGELOG.md` (the GitHub Release's notes), push, let CI and the image build, then push the tag
   `vX.Y.Z` (`release.yml` names the image and publishes the Release). The docs follow the code in

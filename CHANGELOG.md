@@ -3,6 +3,37 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.12.0 — 2026-11-17
+
+Contributed by xuandung38 (pull request #1), reviewed and completed.
+
+- **Import existing containers** (docker run or docker compose) into a project as ordinary services:
+  the panel reads them and the ones they need, shows a plan with what blocks and what is lost, stops
+  the originals, copies their volumes, deploys services of its own and keeps the originals so the
+  whole thing can be undone. Buttons: Import containers (Dashboard and projects), Bring into the panel
+  (Docker → Containers). The guide is docs/import.md.
+- A folder on the machine is used in place; **Move all** (a service's Storage tab) later copies it into a
+  volume, and **Clean the old folder** deletes it. A folder that another container uses, or a place the
+  panel never gives a service (the Docker socket, `/proc`, the panel's own folder), is never imported,
+  moved or deleted. Once its old folder is being cleaned, a move can no longer be undone.
+- The new services keep the domains of the containers' Traefik labels and `VIRTUAL_HOST`. A domain behind
+  Traefik basic auth brings its users along; one behind another protection (forwardAuth, an allow list…)
+  is left out, so a protected site is never served open. A read-only mount stays read only.
+- An imported container keeps the user it ran as, and a password on its command line moves to an
+  environment variable (when its image runs the command it is given). Such a service, and one running an
+  image only this machine has, stays the administrators' and runs on this machine.
+- **Several Cloudflare Tunnels**: one cloudflared per tunnel (one per token), added, switched on or off
+  and deleted in Settings → Cloudflare Tunnel. The tunnel you had becomes `default`. A cloudflared container
+  can become a tunnel of the panel when it is imported.
+- A container's details (Docker → Containers → Inspect) no longer show passwords written in its command
+  line, its health check, its labels or its log options. The container list hides secret labels too.
+- A service with a writable volume or folder no longer rolls with "zero downtime" (two tasks would write
+  the same data at once): it stops the old task first.
+- A service cannot be named `rdockpanel` or `rdp-…`: those are the panel's own.
+- Removing an image or pruning no longer takes an image or a volume that an import still holds.
+- Before going back to an older release, keep the tunnel `default` on (or remove the other tunnels) and
+  finish or undo the imports under way: see docs/development.md.
+
 ## 0.11.0 — 2026-11-12
 
 - The panel installs on a **Mac with Apple silicon** (OrbStack or Docker Desktop): the same

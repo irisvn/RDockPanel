@@ -65,6 +65,10 @@ pub struct PanelConfig {
     /// The installer's own directory on the host (secrets, Traefik's files):
     /// never a service's bind mount, whatever the roots allow.
     pub state_dir: PathBuf,
+    /// An image with `cp` and `sh` the import's helper containers run (a
+    /// panel from source has no image of its own to borrow). Empty: the
+    /// panel's own image.
+    pub helper_image: String,
 }
 
 /// Where an installed panel runs (`[panel] host_os`): `linux` or `macos`,
@@ -131,6 +135,7 @@ impl Default for PanelConfig {
             installed: false,
             host_os: HostOs::Linux,
             state_dir: PathBuf::from("/etc/rdockpanel"),
+            helper_image: String::new(),
         }
     }
 }
@@ -226,6 +231,21 @@ pub fn valid_name(name: &str) -> bool {
         && bytes
             .iter()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
+}
+
+/// An image an import tagged (`rdp.invalid/…`): only this machine has it,
+/// and only an import (or an administrator) names one.
+pub fn local_image(image: &str) -> bool {
+    image
+        .trim()
+        .starts_with(crate::services::deployment_service::LOCAL_REGISTRY)
+}
+
+/// Names of the panel's own Swarm services: Traefik reaches the panel as
+/// `rdockpanel`, and `rdp-*` are the services the installer makes. A service
+/// of a project must not take one: it would answer in their place.
+pub fn reserved_name(name: &str) -> bool {
+    name == "rdockpanel" || name.starts_with("rdp-")
 }
 
 /// A volume's own name (the Docker volume is `rdp_<project>_<service>_<name>`).
@@ -350,6 +370,16 @@ impl BindRefusal {
     }
 }
 
+/// Whether `path` (as written) is a place no service and no import may
+/// read, write or mount: inside or above a forbidden one, the installer's
+/// directory, or `/` itself.
+pub fn forbidden_path(path: &Path, state_dir: &Path) -> bool {
+    let near = |p: &Path, f: &Path| p.starts_with(f) || f.starts_with(p);
+    path == Path::new("/")
+        || FORBIDDEN.iter().any(|f| near(path, Path::new(f)))
+        || (!state_dir.as_os_str().is_empty() && near(path, state_dir))
+}
+
 /// The host directory a bind mount may use, resolved (symlinks followed) and
 /// checked to stay under one of `roots`, outside [`FORBIDDEN`] and not above
 /// any of it (mounting `/run` would expose the Docker socket).
@@ -409,6 +439,16 @@ mod tests {
             .with(path, value)
             .unwrap();
         PanelConfig::from_config(&config).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn reserved_names_are_the_panels() {
+        for name in ["rdockpanel", "rdp-traefik", "rdp-mysql", "rdp-x"] {
+            assert!(reserved_name(name), "{name}");
+        }
+        for name in ["web", "rdp", "rdpanel", "my-rdp-x", "rdockpanel2"] {
+            assert!(!reserved_name(name), "{name}");
+        }
     }
 
     #[test]

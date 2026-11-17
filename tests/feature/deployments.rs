@@ -2220,6 +2220,108 @@ db_test!(
 );
 
 db_test!(
+    an_imported_local_image_is_never_pulled,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        // An import tags an image only this machine has under `rdp.invalid`.
+        let local = "rdp.invalid/shop/web:0123456789ab";
+        service::Entity::update_many()
+            .col_expr(service::Column::Image, local.into())
+            .filter(service::Column::Id.eq(id))
+            .exec(app.state().db())
+            .await
+            .unwrap();
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        assert!(fake.pulled.lock().unwrap().is_empty());
+        assert!(fake.services.lock().unwrap().contains_key("shop_web"));
+    }
+);
+
+db_test!(
+    reserved_names_cannot_name_a_service,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let (admin, id) = shop(&app).await;
+        let project = create(&app, &admin, "projects", json!({"name": "other"})).await;
+        // Traefik reaches the panel at `http://rdockpanel:3000`.
+        for name in ["rdockpanel", "rdp-traefik"] {
+            admin
+                .post_json(
+                    &records(&app, "services"),
+                    &json!({"project_id": project, "name": name, "image": "nginx:1.27", "replicas": 1}),
+                )
+                .await
+                .assert_validation_error("name");
+            admin
+                .send(
+                    rustcms::axum::http::Method::PATCH,
+                    &format!("{}/{id}", records(&app, "services")),
+                    Some(&json!({"name": name})),
+                )
+                .await
+                .assert_validation_error("name");
+        }
+    }
+);
+
+db_test!(
+    an_admin_only_service_is_its_administrators,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        // What an import sets for a service that mounts a host folder.
+        service::Entity::update_many()
+            .col_expr(service::Column::AdminOnly, true.into())
+            .filter(service::Column::Id.eq(id))
+            .exec(app.state().db())
+            .await
+            .unwrap();
+        let url = format!("{}/{id}", records(&app, "services"));
+        let editor =
+            support::user_with(&app, "editor", &["services.view", "services.update"]).await;
+        let editor = app.acting_as(&editor).await;
+        editor
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"image": "evil:1"})),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        editor
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &app.admin_api(&format!("x/apps/services/{id}/env")),
+                Some(&json!({"text": "X=1\n"})),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let deployer = support::user_with(
+            &app,
+            "deployer",
+            &["services.view", "services.deploy", "deployments.view"],
+        )
+        .await;
+        let deployer = app.acting_as(&deployer).await;
+        deployer
+            .post_json(
+                &app.admin_api(&format!("x/apps/services/{id}/trigger")),
+                &json!({}),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        // Its administrators still can.
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+    }
+);
+
+db_test!(
     a_network_made_before_instances_is_still_used,
     migrate = Migrator,
     |db: TestDb| async move {
@@ -2454,5 +2556,46 @@ db_test!(
         assert!(routes.contains("Host(`blog.localhost`)"), "{routes}");
         assert!(routes.contains("http://blog_web:80"), "{routes}");
         assert_eq!(aside(&app, &admin, id).await["pending"], json!(false));
+    }
+);
+
+db_test!(
+    an_imported_local_image_is_the_administrators_only,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        let url = format!("{}/{id}", records(&app, "services"));
+        let editor =
+            support::user_with(&app, "editor", &["services.view", "services.update"]).await;
+        let editor = app.acting_as(&editor).await;
+        // Only this machine has it, and what runs it is the administrators'.
+        editor
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"image": "rdp.invalid/shop/web:abc123abc123"})),
+            )
+            .await
+            .assert_validation_error("image");
+        // Nor can a new service be made from one, by anyone but an import.
+        let project = {
+            use rdockpanel::models::service;
+            use sea_orm::EntityTrait;
+            service::Entity::find_by_id(id)
+                .one(app.state().db())
+                .await
+                .unwrap()
+                .unwrap()
+                .project_id
+        };
+        admin
+            .post_json(
+                &app.admin_api(&format!("x/apps/projects/{project}/services")),
+                &json!({"name": "copy", "image": "rdp.invalid/shop/web:abc123abc123"}),
+            )
+            .await
+            .assert_validation_error("image");
     }
 );

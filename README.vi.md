@@ -17,6 +17,9 @@ Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domai
 - **App trên Docker Swarm:** project và service với rolling deploy, rollback, log trực tiếp; build
   từ Git hoặc Dockerfile; service Compose; **hơn 800 template** và database một cú bấm
   (PostgreSQL, MySQL, MariaDB, MongoDB, Redis).
+- **Đưa cái đang chạy vào panel:** container (hoặc dự án Compose) chạy bằng `docker run` hay
+  `docker compose` trở thành service, có kế hoạch, chép dữ liệu và hoàn tác
+  ([docs/import.md](docs/import.md), bằng tiếng Anh).
 - **Domain và HTTPS** qua Traefik (Let's Encrypt, chứng chỉ riêng, Cloudflare Tunnel), chuyển
   hướng, giới hạn request, basic auth và trang bảo trì, áp dụng ngay khi lưu.
 - **Vận hành:** backup theo lịch (thư mục trên server hoặc S3), thông báo (Discord, Slack, Telegram,
@@ -99,6 +102,7 @@ Test, quy ước và phần giao diện: [docs/development.md](docs/development.
 | [Cài đặt](docs/install.md) | installer, nâng cấp, backup, macOS |
 | [Phát triển](docs/development.md) | môi trường, test, quy ước |
 | [Kiến trúc](docs/architecture.md) | cách xây dựng: RustCMS, bollard, Swarm, Traefik |
+| [Nhập container](docs/import.md) | đưa container có sẵn vào một dự án |
 | [Phân quyền](docs/permissions.md) | ai được xem và làm gì |
 | [Bảo mật](docs/security.md) | Docker socket, object được bảo vệ, terminal, CSP |
 | [Tường lửa](docs/firewall.md) | tường lửa chặn mặc định |

@@ -125,6 +125,14 @@ pub struct Model {
     pub desired_state: String,
     /// `new`, `deploying`, `running`, `stopped`, `failed`.
     pub status: String,
+    /// Only administrators (`system.manage`) change or run commands in it: an
+    /// imported service that mounts a host folder, copies host files or runs a
+    /// local image.
+    pub admin_only: bool,
+    /// The user its container runs as, when it is not its image's (`0:0`, `1000`):
+    /// set by an import only.
+    #[sea_orm(column_name = "run_user")]
+    pub user: Option<String>,
     pub deployed_at: Option<DateTimeUtc>,
     pub deployed_spec_hash: Option<String>,
     /// The deployment holding the service (with `lock_expires_at`).
@@ -139,10 +147,26 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-/// Whether a service runs with added capabilities, sysctls or groups, or is
-/// a Compose service: its administrators' only (`system.manage`).
-pub fn privileged(service: &Model) -> bool {
+/// Whether something of the service itself (not a mark) keeps it its
+/// administrators': a Compose file, an image only this machine has (an
+/// import's, `rdp.invalid/…`) or a user other than its image's.
+pub fn needs_administrator(service: &Model) -> bool {
     service.kind == "compose"
+        || service
+            .image
+            .starts_with(crate::services::deployment_service::LOCAL_REGISTRY)
+        || service
+            .user
+            .as_deref()
+            .is_some_and(|u| !u.trim().is_empty())
+}
+
+/// Whether a service runs with added capabilities, sysctls or groups, a user
+/// or an image of its own, or is a Compose service or marked so: its
+/// administrators' only (`system.manage`).
+pub fn privileged(service: &Model) -> bool {
+    needs_administrator(service)
+        || service.admin_only
         || service
             .cap_add
             .as_deref()

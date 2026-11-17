@@ -20,6 +20,7 @@ import { Networks, Volumes } from "./docker/VolumesNetworks";
 import { ServiceLive } from "./docker/ServiceLive";
 import { Palette } from "./lib/Palette";
 import { Members } from "./apps/Members";
+import { ImportPage, SourceDialog } from "./apps/imports/Imports";
 import type { Overview } from "./apps/types";
 import { ConfirmProvider, EmptyState, Page, Section, useAsk } from "./lib/ui";
 import { bindResources } from "./lib/resources";
@@ -32,6 +33,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
   const [adding, setAdding] = useState(false);
   const [templating, setTemplating] = useState(false);
   const [members, setMembers] = useState(false);
+  const [importing, setImporting] = useState(false);
   const ask = useAsk();
   if (overview.isLoading) return <Loading />;
   if (overview.error) return <ErrorState error={overview.error} />;
@@ -55,6 +57,11 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
               <Button variant="outline" onClick={() => setTemplating(true)}>
                 {t("Templates")}
               </Button>
+              {props.can("system.manage") && (
+                <Button variant="outline" onClick={() => setImporting(true)}>
+                  {t("Import containers")}
+                </Button>
+              )}
               <Button onClick={() => setAdding(true)}>{t("Add service")}</Button>
             </>
           )}
@@ -65,6 +72,7 @@ function ProjectPage(props: PageProps<unknown> & { project: string }) {
         <ServiceCards t={t} navigate={props.navigate} project={project} />
       </Section>
       {members && <Members {...props} project={project} onClose={() => setMembers(false)} />}
+      {importing && <SourceDialog {...props} onClose={() => setImporting(false)} />}
       {templating && (
         <Templates
           {...props}
@@ -117,8 +125,11 @@ function Apps(props: PageProps<{ user?: string | number }>) {
   useEffect(() => {
     if (project) title(null);
   }, [title, project, service, tab]);
+  // `_import/<id>`: an import (a project's name cannot start with `_`).
   const page =
-    project && service ? (
+    project === "_import" && service ? (
+      <ImportPage {...props} id={Number(service)} />
+    ) : project && service ? (
       <ServiceRoute {...props} project={project} service={service} tab={tab ?? "overview"} />
     ) : project ? (
       <ProjectPage {...props} project={project} />

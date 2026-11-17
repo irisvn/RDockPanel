@@ -18,7 +18,32 @@ digits, `_`, `.`, `-`, starting with a letter or digit: no `/` or `%`), resolved
 inspect, and every action then uses the full id, so a crafted name or a rename cannot redirect it to a
 protected object. Images are removed only by an id or a tag exactly as Docker lists it. `inspect` hides env values whose name looks secret
 (`PASSWORD`, `TOKEN`, `KEY`, `SECRET`, `AUTH`, …) and the password in URLs
-(`DATABASE_URL=mysql://user:******@host`).
+(`DATABASE_URL=mysql://user:******@host`). It also hides secrets in a container's command line
+(`Path`, `Args`, `Cmd`, `Entrypoint`: `--requirepass x`, `-p<x>`, `-u user:x`, `NAME=x` inside `sh -c`),
+in its health check, and in labels (Traefik's `basicauth.users`); the container list hides secret labels.
+`services/secret_scan_service.rs` does this, and scans every string of the inspect document for URL passwords and secret values. It matches known forms, so a secret in an unusual form can still show: keep secrets in environment variables.
+
+## Importing containers
+
+Helpers (the copy of a volume, a symlink, the rename of a Compose file) run with `CapDrop ALL` (only
+`CHOWN`, `DAC_OVERRIDE`, `FOWNER` for a copy), no network, a read-only root, `no-new-privileges`, never
+privileged, never auto-removed; they mount exactly what they need, and a Compose file is read from a
+container that is created and never started, with the file mounted read only. The plan, the answers, the
+audit entries and the logs hold names, never values; a secret written in a container's command line
+moves into an environment variable (the command reads it from there); one that cannot be cut out of its
+argument blocks the import. A container that ran as another user than its image's keeps that user, and its
+service is the administrators'. A folder used in place is reached by a
+symlink in the panel's links folder, and the service is `admin_only`; the panel's database, its
+files and the installer's folder are never imported. A container that mounts a place the panel never gives
+a service (`/`, the Docker socket, `/proc`, the installer's folder, the rest of the bind rules' forbidden
+list) is blocked; the folder of a link is checked again when its symlink is made, at every deployment and
+by Move all. A service with a user of its own, a folder in place or an image only this machine has
+(`rdp.invalid/…`, which only `system.manage` may name) is the administrators', and runs on this machine's
+node. A read-only mount stays read only. A domain behind a Traefik protection the panel cannot carry over
+(anything but basic auth defined on the container) is left out and cannot be ticked. While an import runs,
+nothing else touches its services, the originals, their volumes or `prune`; a volume prune leaves the
+volumes an import holds. Clean the old folder never follows a symlink inside the folder and refuses a
+folder that is one; a symlink above it is resolved by Docker (keep those folders root's).
 
 ## Bind mounts
 
@@ -45,7 +70,7 @@ who can replace a directory there with a symlink could point a later start elsew
   `RUST_LOG` asks.
 - Docker holds the values in clear: in the Swarm service's spec and in the containers' environment.
   Anyone who controls Docker on the host (or with `docker.view`, a container's inspect, which hides
-  only secret-looking names) can read them.
+  secret-looking names, command-line values and secret labels, but not every possible secret) can read them.
 - File mounts' contents are sealed the same way (`service_mounts.sealed_content`,
   `deployments.files`), written and replaced, never shown back.
 - A secret written into a service's command or health check is stored as typed: use environment
@@ -58,7 +83,10 @@ who can replace a directory there with a symlink could point a later start elsew
   syntax), and route files are named after checked service names only. The panel owns
   `[panel] traefik_dir`: at boot it removes route files of services it does not have.
 - Docker objects of a service are labelled `rdockpanel.managed=true` with their project and service;
-  the panel refuses to touch a service of that name it did not create.
+  the panel refuses to touch a service of that name it did not create. Importing an existing container
+  never adopts it: the container is recreated as a service of the panel (see [import.md](import.md)); its
+  original is stopped and kept until the import is finished, and nothing else may touch it meanwhile.
+  The names `rdockpanel` and `rdp-*` belong to the panel's own services: a project's service cannot take one.
 
 ## Templates
 

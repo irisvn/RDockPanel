@@ -18,25 +18,13 @@ use rustcms::{AppError, async_trait};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::services::secret_scan_service;
+
 pub use self::bollard::BollardDocker;
 
 /// Label the installer puts on the panel's own services, volumes, networks
 /// and secrets.
 pub const SYSTEM_LABEL: &str = "rdockpanel.system";
-
-/// Env names containing one of these have their value replaced in `inspect`.
-const SECRET_MARKERS: [&str; 9] = [
-    "PASSWORD",
-    "PASSWD",
-    "PASS",
-    "PWD",
-    "SECRET",
-    "TOKEN",
-    "KEY",
-    "CREDENTIAL",
-    "AUTH",
-];
-const REDACTED: &str = "******";
 
 #[derive(Debug, thiserror::Error)]
 pub enum DockerError {
@@ -90,6 +78,8 @@ pub struct DockerInfo {
     pub containers_running: i64,
     pub images: i64,
     pub swarm: SwarmRole,
+    /// This machine's Swarm node id (empty outside a Swarm).
+    pub node_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -475,6 +465,164 @@ pub trait DockerApi: Send + Sync {
             "host commands are not supported".to_owned(),
         ))
     }
+
+    // Reading what a container import needs (docs/import.md). Each
+    // answers `Unavailable` until an engine implements it; documents are
+    // Docker's own JSON, raw: the env of an inspect is NOT redacted here, so
+    // callers keep them on the server and never send them on.
+
+    /// Every container, stopped ones too, with `Mounts`, `NetworkSettings`
+    /// and `HostConfig.NetworkMode` (`GET /containers/json?all=1`).
+    async fn containers_detailed(&self) -> DockerResult<Vec<Value>> {
+        Err(unsupported("listing containers in detail"))
+    }
+    /// A container's inspect document as Docker gives it; `size` adds
+    /// `SizeRw` and `SizeRootFs` (slow).
+    async fn inspect_container_raw(&self, id: &str, size: bool) -> DockerResult<Value> {
+        let _ = (id, size);
+        Err(unsupported("inspecting a container"))
+    }
+    /// The files a container changed, as `(directory two levels deep,
+    /// number of changes)`, biggest first; the count stops at `cap` entries.
+    async fn container_changes_summary(
+        &self,
+        id: &str,
+        cap: usize,
+    ) -> DockerResult<Vec<(String, usize)>> {
+        let _ = (id, cap);
+        Err(unsupported("listing a container's changes"))
+    }
+    /// An image's inspect document: its `Config` (Env, Cmd, Entrypoint, User,
+    /// WorkingDir, Healthcheck, Volumes), `RepoDigests` and labels.
+    async fn image_config(&self, reference: &str) -> DockerResult<Value> {
+        let _ = reference;
+        Err(unsupported("reading an image's configuration"))
+    }
+    /// Each volume's size in bytes (`GET /system/df`).
+    async fn volume_sizes(&self) -> DockerResult<HashMap<String, i64>> {
+        Err(unsupported("measuring volumes"))
+    }
+    async fn inspect_volume(&self, name: &str) -> DockerResult<Value> {
+        let _ = name;
+        Err(unsupported("inspecting a volume"))
+    }
+    async fn inspect_network(&self, id: &str) -> DockerResult<Value> {
+        let _ = id;
+        Err(unsupported("inspecting a network"))
+    }
+    /// A file of a container, as the tar archive Docker returns it, at most
+    /// `max` bytes (more is an error). Nothing runs in the container.
+    async fn read_file(&self, container: &str, path: &str, max: usize) -> DockerResult<Vec<u8>> {
+        let _ = (container, path, max);
+        Err(unsupported("reading a container's file"))
+    }
+    /// Every Swarm service, raw (to refuse the ones the panel did not make).
+    async fn list_services(&self) -> DockerResult<Vec<Value>> {
+        Err(unsupported("listing Swarm services"))
+    }
+    /// Every Swarm node, raw (a cluster of several is out of scope).
+    async fn list_nodes(&self) -> DockerResult<Vec<Value>> {
+        Err(unsupported("listing Swarm nodes"))
+    }
+    /// A volume with `labels` (`create_volume` has none).
+    async fn create_volume_labelled(
+        &self,
+        name: &str,
+        labels: HashMap<String, String>,
+    ) -> DockerResult<VolumeItem> {
+        let _ = (name, labels);
+        Err(unsupported("creating a labelled volume"))
+    }
+    /// Runs a [`HelperSpec`] to its end and removes it: its exit code. Unlike
+    /// `run_on_host` it is not privileged and not auto-removed.
+    async fn run_helper(&self, spec: HelperSpec) -> DockerResult<i64> {
+        let _ = spec;
+        Err(unsupported("running a helper"))
+    }
+    /// A file of the host, as the tar archive Docker returns it: read from a
+    /// helper container of `image` that is created and never started, with
+    /// the file bind-mounted read-only (a Linux host would otherwise create a
+    /// missing path). At most `max` bytes.
+    async fn read_bind_file(
+        &self,
+        image: &str,
+        host_path: &str,
+        max: usize,
+    ) -> DockerResult<Vec<u8>> {
+        let _ = (image, host_path, max);
+        Err(unsupported("reading a host file"))
+    }
+    /// Stops a container, waiting `timeout_s` seconds for it to end before it is
+    /// killed (a database needs time to write what it holds).
+    async fn stop_container(&self, id: &str, timeout_s: u64) -> DockerResult<()> {
+        let _ = timeout_s;
+        self.container_action(id, ContainerAction::Stop).await
+    }
+    /// Gives the image `id` the name `repo:tag` (a second name: nothing is
+    /// copied).
+    async fn tag_image(&self, id: &str, repo: &str, tag: &str) -> DockerResult<()> {
+        let _ = (id, repo, tag);
+        Err(unsupported("tagging an image"))
+    }
+    /// Changes a container's restart policy (`no`, `always`, …).
+    async fn update_container_restart(&self, id: &str, policy: &str) -> DockerResult<()> {
+        let _ = (id, policy);
+        Err(unsupported("changing a restart policy"))
+    }
+}
+
+fn unsupported(what: &str) -> DockerError {
+    DockerError::Unavailable(format!("{what} is not supported"))
+}
+
+/// What a helper container mounts: a volume (by name) or a host directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelperMount {
+    pub source: String,
+    pub target: String,
+    pub read_only: bool,
+    /// `volume` or `bind`.
+    pub kind: String,
+}
+
+/// A short-lived container of the panel's: no network, no capability but
+/// `cap_add`, read-only root, `no-new-privileges`, never privileged and not
+/// auto-removed (its exit code is read first). Its name is fixed, so a run
+/// that lost its lease finds it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelperSpec {
+    pub name: String,
+    pub image: String,
+    pub cmd: Vec<String>,
+    pub mounts: Vec<HelperMount>,
+    /// The import it belongs to (`rdockpanel.import=<id>`).
+    pub import_id: i64,
+    /// Capabilities added back to `CapDrop: ALL` (`CHOWN`, `DAC_OVERRIDE`, `FOWNER` for a copy).
+    pub cap_add: Vec<String>,
+    /// Seconds before the run is given up.
+    pub timeout_s: u64,
+}
+
+/// Groups a container's changed paths (`/a/b/c/file`) by their first two
+/// directories (`/a/b`), most changes first, then by name; it stops counting
+/// after `cap` paths.
+pub fn summarize_changes<'a>(
+    paths: impl IntoIterator<Item = &'a str>,
+    cap: usize,
+) -> Vec<(String, usize)> {
+    let mut groups: HashMap<String, usize> = HashMap::new();
+    for path in paths.into_iter().take(cap) {
+        let mut parts = path.trim_start_matches('/').split('/');
+        let key = match (parts.next(), parts.next()) {
+            (Some(a), Some(b)) if !a.is_empty() => format!("/{a}/{b}"),
+            (Some(a), _) => format!("/{a}"),
+            _ => "/".to_owned(),
+        };
+        *groups.entry(key).or_default() += 1;
+    }
+    let mut out: Vec<_> = groups.into_iter().collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
 }
 
 /// Whether the caller may see and touch the panel's own objects
@@ -511,14 +659,20 @@ impl Docker {
         self.0.info().await
     }
 
+    /// The containers `scope` sees, secret label values replaced.
     pub async fn containers(&self, scope: Scope) -> DockerResult<Vec<ContainerItem>> {
-        Ok(visible(self.0.containers().await?, scope, |c| &c.labels))
+        let mut items = visible(self.0.containers().await?, scope, |c| &c.labels);
+        for item in &mut items {
+            secret_scan_service::redact_labels(&mut item.labels);
+        }
+        Ok(items)
     }
 
-    /// The inspect document with secrets in env values replaced.
+    /// The inspect document with its secrets replaced: env values, command
+    /// lines, health checks and labels ([`secret_scan_service`]).
     pub async fn inspect_container(&self, id: &str, scope: Scope) -> DockerResult<Value> {
         let (_, mut doc) = self.resolve_container(id, scope).await?;
-        redact_env(&mut doc);
+        secret_scan_service::redact_container(&mut doc);
         Ok(doc)
     }
 
@@ -593,6 +747,10 @@ impl Docker {
                     || i.tags.iter().any(|t| t == reference)
             })
             .ok_or(DockerError::NotFound)?;
+        // The only copy of what an imported service runs, whoever asks.
+        if keeps_import_image(&image) {
+            return Err(DockerError::Protected);
+        }
         if scope == Scope::User {
             if force {
                 return Err(DockerError::Protected);
@@ -737,9 +895,11 @@ impl Docker {
 
     /// Removes what `kind` names; never the panel's own objects, nor (for
     /// volumes) data a service of the panel's or a Compose project keeps.
-    pub async fn prune_kind(&self, kind: PruneKind) -> DockerResult<PruneReport> {
+    /// `keep`: volumes an import still holds.
+    pub async fn prune_kind(&self, kind: PruneKind, keep: &[String]) -> DockerResult<PruneReport> {
         match kind {
-            PruneKind::Volumes => self.prune_volumes().await,
+            PruneKind::Volumes => self.prune_volumes(keep).await,
+            PruneKind::Images => self.prune_images().await,
             kind => self.0.prune_kind(kind, SYSTEM_LABEL).await,
         }
     }
@@ -747,10 +907,29 @@ impl Docker {
     /// Unused volumes, but those the panel's services keep (`rdp_<project>_…`,
     /// kept when a service is destroyed), Compose's and Swarm stacks', and
     /// the panel's own.
-    async fn prune_volumes(&self) -> DockerResult<PruneReport> {
+    /// Every image no container uses, one by one (never `prune -a`: it
+    /// would take an imported service's local image). An image whose use
+    /// Docker did not count is left.
+    async fn prune_images(&self) -> DockerResult<PruneReport> {
+        let mut report = PruneReport::default();
+        for image in self.0.images().await? {
+            if image.containers != 0 || keeps_import_image(&image) {
+                continue;
+            }
+            match self.0.remove_image(&image.id, false).await {
+                Ok(()) => report.images_deleted += 1,
+                // Taken meanwhile, or gone: left.
+                Err(DockerError::Conflict(_) | DockerError::NotFound) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(report)
+    }
+
+    async fn prune_volumes(&self, keep: &[String]) -> DockerResult<PruneReport> {
         let mut report = PruneReport::default();
         for volume in self.0.unused_volumes().await? {
-            if !disposable_volume(&volume) {
+            if !disposable_volume(&volume) || keep.contains(&volume.name) {
                 continue;
             }
             match self.0.remove_volume(&volume.name).await {
@@ -958,6 +1137,14 @@ impl Docker {
 
 /// Container, volume and network identifiers as Docker allows them; anything
 /// else (`/`, `..`, `%`) never reaches an Engine API URL.
+/// An image an import tagged `rdp.invalid/…`: only this machine has it.
+fn keeps_import_image(image: &ImageItem) -> bool {
+    image
+        .tags
+        .iter()
+        .any(|t| t.starts_with(crate::services::deployment_service::LOCAL_REGISTRY))
+}
+
 /// Whether an unused volume may go: none a service of the panel's
 /// (`rdp_…`), a Compose project, a Swarm stack or the panel keeps.
 pub fn disposable_volume(volume: &VolumeItem) -> bool {
@@ -1285,42 +1472,6 @@ fn labels_of(doc: &Value) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-/// Replaces secrets in `Config.Env`: the whole value when the name looks
-/// secret, else the password of a URL's userinfo
-/// (`DATABASE_URL=mysql://user:******@host/db`).
-fn redact_env(doc: &mut Value) {
-    let Some(Value::Array(env)) = doc.pointer_mut("/Config/Env") else {
-        return;
-    };
-    for entry in env {
-        let Some(text) = entry.as_str() else { continue };
-        let Some((name, value)) = text.split_once('=') else {
-            continue;
-        };
-        let upper = name.to_ascii_uppercase();
-        let redacted = if SECRET_MARKERS.iter().any(|marker| upper.contains(marker)) {
-            Some(REDACTED.to_owned())
-        } else {
-            redact_userinfo(value)
-        };
-        if let Some(value) = redacted {
-            *entry = Value::String(format!("{name}={value}"));
-        }
-    }
-}
-
-/// `scheme://user:pass@rest` → `scheme://user:******@rest`; `None` when the
-/// value carries no password.
-fn redact_userinfo(value: &str) -> Option<String> {
-    let (scheme, rest) = value.split_once("://")?;
-    let (userinfo, host) = rest.split_once('@')?;
-    if userinfo.contains('/') {
-        return None;
-    }
-    let user = userinfo.split_once(':').map_or(userinfo, |(user, _)| user);
-    Some(format!("{scheme}://{user}:{REDACTED}@{host}"))
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -1328,24 +1479,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn redacts_secret_looking_env() {
-        let mut doc = json!({"Config": {"Env": [
-            "PATH=/bin", "DB_PASSWORD=hunter2", "api_key=x", "NOEQUALS",
-            "DATABASE_URL=mysql://panel:hunter2@db:3306/panel", "REDIS_URL=redis://:pw@cache",
-            "HOME_URL=https://x.io/a@b"
-        ]}});
-        redact_env(&mut doc);
+    fn changes_are_grouped_by_two_directories() {
+        let paths = [
+            "/app/node_modules/a/x.js",
+            "/app/node_modules/b/y.js",
+            "/app/node_modules/c.js",
+            "/tmp/one",
+            "/tmp/two",
+            "/etc",
+            "/var/lib/data/f",
+        ];
         assert_eq!(
-            doc["Config"]["Env"],
-            json!([
-                "PATH=/bin",
-                "DB_PASSWORD=******",
-                "api_key=******",
-                "NOEQUALS",
-                "DATABASE_URL=mysql://panel:******@db:3306/panel",
-                "REDIS_URL=redis://:******@cache",
-                "HOME_URL=https://x.io/a@b"
-            ])
+            summarize_changes(paths, 100),
+            [
+                ("/app/node_modules".to_owned(), 3),
+                ("/etc".to_owned(), 1),
+                ("/tmp/one".to_owned(), 1),
+                ("/tmp/two".to_owned(), 1),
+                ("/var/lib".to_owned(), 1),
+            ]
+        );
+        // Counting stops at the cap.
+        assert_eq!(
+            summarize_changes(paths, 2),
+            [("/app/node_modules".to_owned(), 2)]
         );
     }
 

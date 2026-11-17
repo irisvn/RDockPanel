@@ -67,3 +67,8 @@ host_os = "linux"
 # The installer's directory on the host (its secrets, Traefik's files; the
 # installer sets RUSTCMS_PANEL__STATE_DIR): never a service's bind mount.
 state_dir = "/etc/rdockpanel"
+
+# An image with `cp` and `sh` that the import of existing containers runs its
+# helper containers from (an installed panel uses its own image). Empty: the
+# panel's own image; a panel run from source needs one, pinned by version.
+helper_image = ""

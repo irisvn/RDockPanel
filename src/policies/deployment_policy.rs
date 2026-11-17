@@ -32,7 +32,10 @@ fn privileged(record: &Data) -> bool {
         serde_json::Value::Object(o) => !o.is_empty(),
         _ => false,
     };
-    set("cap_add") || set("sysctls") || set("groups")
+    set("cap_add")
+        || set("sysctls")
+        || set("groups")
+        || spec["admin_only"].as_bool().unwrap_or(false)
 }
 
 /// Viewing needs the permissions; nobody writes through the panel; rolling

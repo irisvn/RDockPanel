@@ -245,6 +245,14 @@ pub async fn prune(
     Path(kind): Path<String>,
 ) -> AppResult<Json<Value>> {
     let kind: PruneKind = serde_json::from_value(json!(kind)).map_err(|_| AppError::NotFound)?;
+    if kind == PruneKind::Containers {
+        crate::services::import_service::guard_prune_containers(app.db()).await?;
+    }
+    let keep = if kind == PruneKind::Volumes {
+        crate::services::import_service::held_volumes(app.db()).await?
+    } else {
+        vec![]
+    };
     let docker = docker(&app)?;
     let by = Initiator::user(auth.principal(), request);
     let name = serde_json::to_value(kind)
@@ -256,7 +264,7 @@ pub async fn prune(
         &by,
         &format!("system.prune.{name}"),
         "docker",
-        docker.prune_kind(kind),
+        docker.prune_kind(kind, &keep),
     )
     .await?;
     crate::services::notify_service::notify(

@@ -15,6 +15,14 @@ Những gì RDockPanel làm được hiện nay. [English](features.md) · quay 
 - **Actions** liệt kê các lần deploy, backup và thao tác Docker; **Settings** có các tab Panel, Version, Traefik, Certificates, Cloudflare Tunnel, Branding, Trang bảo trì, Git, Backups, Notifications và API tokens; **⌘K** tìm nhanh project hoặc service. Mặc định giao diện sáng, mỗi người tự chọn Sáng / Tối / Theo hệ thống; có tiếng Anh và tiếng Việt.
 - Mọi trang theo chung một bộ quy tắc thiết kế ([ui-guidelines.md](ui-guidelines.md)): nút cùng cỡ, thao tác phụ của từng dòng gom vào menu ⋯, trạng thái cùng chữ và màu, hộp thoại của panel thay cho của trình duyệt, bảng dùng được trên điện thoại.
 
+**Đưa container có sẵn vào panel** ([import.md](import.md), bằng tiếng Anh)
+
+- Container (hoặc dự án Compose cùng các container nó cần) chạy ngoài panel trở thành service của một
+  dự án: đọc, lập kế hoạch (cái gì chặn, cái gì mất), dừng, chép dữ liệu, deploy, và giữ bản gốc tới
+  khi kết thúc để hoàn tác được. Thư mục trên máy được dùng tại chỗ, về sau có thể chuyển vào volume. Label Traefik và `VIRTUAL_HOST` thành domain của service; container cloudflared có thể thành
+  một Cloudflare Tunnel của panel (mỗi token một tunnel); mật khẩu trên dòng lệnh được chuyển sang biến môi trường; container
+  chạy bằng user khác image giữ nguyên user đó.
+
 **Server và Docker**
 
 - **Số liệu server** ngay trên Dashboard: CPU, RAM, ổ đĩa, network vào/ra trực tiếp, kèm lịch sử gần đây.
@@ -57,7 +65,7 @@ Những gì RDockPanel làm được hiện nay. [English](features.md) · quay 
 - **Thông báo:** Discord, Slack, Telegram, email (SMTP) và webhook; mỗi kênh tự chọn sự kiện: deploy, backup, ổ đĩa sắp đầy, service lỗi và chạy lại, Traefik ngừng và chạy lại, certificate sắp hết hạn, có bản panel mới, dọn Docker, đăng nhập từ IP mới; có nút "Gửi thử".
 - **Panel trong Settings:** domain panel, email Let's Encrypt và domain cho app được kiểm tra (DNS, tên đang dùng), kèm sẵn lệnh installer để áp dụng.
 - **Traefik trong Settings:** xem trạng thái, khởi động lại, log trực tiếp, và middleware tuỳ chỉnh (`custom-<tên>`: headers, giới hạn tốc độ, danh sách IP…) cho domain, không cần SSH.
-- **Cloudflare Tunnel** (Settings): chạy cloudflared bằng token tunnel của bạn (mã hoá, đưa vào dưới dạng Swarm secret), để vào domain qua Cloudflare mà không cần mở cổng 80 và 443. Domain trỏ về Cloudflare được đánh dấu "qua Cloudflare" (đi qua tunnel thì HTTPS do Cloudflare lo).
+- **Cloudflare Tunnel** (Settings): mỗi tunnel một cloudflared chạy bằng token riêng (mã hoá, đưa vào dưới dạng Swarm secret; thêm, bật/tắt, xoá nhiều tunnel), để vào domain qua Cloudflare mà không cần mở cổng 80 và 443. Domain trỏ về Cloudflare được đánh dấu "qua Cloudflare" (đi qua tunnel thì HTTPS do Cloudflare lo).
 - **Thương hiệu** (Settings): tên, màu chính, logo (sáng và tối) và favicon của panel, trên mọi trang và trang đăng nhập, không cần khởi động lại.
 - **Trang Roles:** quyền chia theo nhóm (Ứng dụng, Docker, Server, Hệ thống) có nhãn và mô tả, ô tìm kiếm, và preset (xem, developer, quản trị ứng dụng; giám sát) để tạo role nhanh.
 - **Từng service:** biểu đồ CPU và RAM, ghi chú cho nhóm, script (lệnh chạy một lần trong container đang chạy, hiện output); quản trị panel còn đặt được capability, sysctl và group bổ sung.

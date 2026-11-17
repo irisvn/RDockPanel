@@ -9,10 +9,11 @@ use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
     branding_controller as branding, capacity_controller as capacity, deploy_controller as deploy,
     docker_controller as docker, domains_controller as domains, firewall_controller as firewall,
-    git_controller as git, home_controller as home, maintenance_controller as maintenance,
-    members_controller as members, notifications_controller as notifications,
-    server_controller as server, system_controller as system, templates_controller as templates,
-    tokens_controller as tokens, traefik_controller as traefik, tunnel_controller as tunnel,
+    git_controller as git, home_controller as home, imports_controller as imports,
+    maintenance_controller as maintenance, members_controller as members,
+    notifications_controller as notifications, server_controller as server,
+    system_controller as system, templates_controller as templates, tokens_controller as tokens,
+    traefik_controller as traefik, tunnel_controller as tunnel,
 };
 use crate::policies::permissions;
 
@@ -225,6 +226,37 @@ pub fn routes() -> AdminRoutes {
                     "/tunnel/disable",
                     AdminAccess::can(permissions::SYSTEM_MANAGE),
                     tunnel::disable,
+                )
+                // Many tunnels, by name.
+                .get(
+                    "/tunnels",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::index,
+                )
+                .post(
+                    "/tunnels",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::create,
+                )
+                .post(
+                    "/tunnels/{name}/enable",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::enable_one,
+                )
+                .post(
+                    "/tunnels/{name}/disable",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::disable_one,
+                )
+                .patch(
+                    "/tunnels/{name}",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::update,
+                )
+                .delete(
+                    "/tunnels/{name}",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    tunnel::destroy,
                 )
                 // Each user's own API tokens.
                 .get("/tokens", member(), tokens::index)
@@ -480,5 +512,96 @@ pub fn routes() -> AdminRoutes {
         .nest(
             "/deploy",
             AdminRoutes::scope().events("/deployments/{id}/log", member(), deploy::log),
+        )
+        // Importing existing containers: the panel's administrators.
+        .get(
+            "/imports/sources",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::sources,
+        )
+        .post(
+            "/imports",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::create,
+        )
+        .get(
+            "/imports/{id}",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::show,
+        )
+        .patch(
+            "/imports/{id}/plan",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::change_plan,
+        )
+        .post(
+            "/imports/{id}/start",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::start,
+        )
+        .post(
+            "/imports/{id}/undo",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::undo,
+        )
+        .post(
+            "/imports/{id}/retry",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::retry,
+        )
+        .post(
+            "/imports/{id}/continue",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::continue_on,
+        )
+        .post(
+            "/imports/{id}/accept",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::accept,
+        )
+        .post(
+            "/imports/{id}/finish",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::finish,
+        )
+        .post(
+            "/imports/{id}/stop-originals",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::stop_originals,
+        )
+        .post(
+            "/imports/{id}/stop-watching",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::stop_watching,
+        )
+        .post(
+            "/imports/{id}/volumes/{vid}/release",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::release_volume,
+        )
+        .post(
+            "/imports/{id}/rescan",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::rescan,
+        )
+        .post(
+            "/services/{id}/move-data",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::move_data,
+        )
+        .post(
+            "/services/{id}/move-data/undo",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::undo_move,
+        )
+        .post(
+            "/services/{id}/clean-old-folder",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::clean_old_folder,
+        )
+        .delete(
+            "/imports/{id}",
+            AdminAccess::can(permissions::SYSTEM_MANAGE),
+            imports::destroy,
         )
 }

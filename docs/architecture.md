@@ -19,9 +19,10 @@ src/
   services/         docker_service (+ bollard), system_stats_service, live_service, action_service;
                     deploy_rules_service (rules, [panel] config), deploy_service (spec and routes),
                     deployment_service (running deployments), traefik_service (route files),
-                    build_service, compose_service, template_service, backup_service, …
+                    build_service, compose_service, template_service, backup_service,
+                    import_* (graph, plan, compose, run, move, service), secret_scan_service, …
   models/           action (the actions log); project, service, service_*, deployment, … (see Data)
-  jobs/             pull_image, run_deployment, publish_routes, run_backup
+  jobs/             pull_image, run_deployment, publish_routes, run_backup, import_discover, import_step
   policies/         who may do what: permissions.rs (the panel's own permission names), one
                     policy per resource (project, service, domain, deployment, …), ChildPolicy
                     for a service's records, and the helpers asking a user's roles and project
@@ -558,6 +559,17 @@ never refused, as proxies and NAT answer otherwise) and gives the installer comm
 The panel never moves itself: its own service, Traefik's `letsencrypt` resolver and its route would
 change at once, with no way back if it did not come up. The installer reads `install.conf` as data.
 
+## Importing existing containers
+
+A container made with `docker run` or `docker compose` becomes a service of the panel by being
+**recreated**: `Docker::managed_service` still refuses a Swarm service the panel did not make, and an
+import never adopts one. The panel reads (`import_graph_service`: the closure, `import_plan_service`: the
+plan and its fingerprint, `import_compose_service`: the Compose files through a helper that never
+starts), and `import_run_service` runs the steps (a job each, under a lease), with its own steps for "Move
+all" in `import_move_service`. A service of an import may be `admin_only` (a folder in place, a local
+image): only `system.manage` changes, deploys or opens a terminal in it. The guide is
+[import.md](import.md).
+
 ## The apps interface
 
 `Dashboard` (`/admin/p/dashboard`, React, RustCMS extension host v2) is the apps interface: server
@@ -591,4 +603,10 @@ sessions, audit log, API tokens, jobs, schedule slots, …), the panel adds `act
 with its configuration snapshot, pinned image, status and log), then `service_redirects`,
 `service_basic_auth`, `service_scripts`, `storage_providers`, `database_backups`, `backup_runs`,
 `notification_channels`, `cert_resolvers`, `certificates`, `panel_settings` (custom middlewares,
-the homepage switch, …), `project_members`, `git_providers` and `branding_images`.
+the homepage switch, …), `project_members`, `git_providers`, `branding_images` and `tunnels` (the Cloudflare Tunnels, one
+cloudflared each, their token sealed; the one of `panel_settings` `tunnel.*` becomes `default` at boot); for the import of existing containers
+`container_imports`, `container_import_items`, `container_import_volumes`, `container_import_claims`
+and `container_import_files`, and the columns `services.admin_only`, `services.user` (the user a container ran as, when it is not its
+image's), `service_mounts.link_target`, `container_imports.flags` (`ingress`, `back`; `tunnel` from older
+releases) and `container_import_items.tunnel_id` (the tunnel row an import made of a cloudflared: an undo
+removes that row, not another tunnel made since under its name).

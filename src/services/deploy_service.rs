@@ -117,6 +117,13 @@ pub struct Snapshot {
     /// Its rate limit on its domains (`None`: off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<crate::services::rate_limit_service::RateLimit>,
+    /// Only administrators change or deploy it (`services.admin_only`): kept
+    /// here so that rolling back to this deployment sees it too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub admin_only: bool,
+    /// The user the container runs as, when it is not its image's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
     /// In maintenance: the addresses (canonical networks) that still reach
     /// the service.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -279,6 +286,10 @@ pub struct Mount {
     /// sealed apart: `deployments.files`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_digest: Option<String>,
+    /// A `link`'s folder on the host (what its symlink points to): checked
+    /// again by each deployment, a rollback's too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_target: Option<String>,
 }
 
 impl Mount {
@@ -386,7 +397,7 @@ impl Snapshot {
             .iter()
             .filter_map(|m| {
                 let source = match m.kind.as_str() {
-                    "bind" => m.source.clone()?,
+                    "bind" | "link" => m.source.clone()?,
                     "file" => String::new(),
                     _ => m.name.clone()?,
                 };
@@ -397,6 +408,11 @@ impl Snapshot {
                     read_only: m.read_only,
                     // Set from the sealed content ([`Snapshot::with_files`]).
                     content_digest: None,
+                    link_target: if m.kind == "link" {
+                        m.link_target.clone()
+                    } else {
+                        None
+                    },
                 })
             })
             .collect();
@@ -427,6 +443,8 @@ impl Snapshot {
             env_digest: None,
             primary_domain,
             maintenance: service.maintenance,
+            admin_only: service.admin_only,
+            user: service.user.clone().filter(|u| !u.is_empty()),
             cap_add: capabilities(service.cap_add.as_deref()),
             cap_drop: capabilities(service.cap_drop.as_deref()),
             sysctls: sysctls(service.sysctls.as_deref()).unwrap_or_default(),
@@ -572,9 +590,13 @@ impl Snapshot {
 
     /// Whether a deployment is rolled without downtime: start-first needs
     /// a health check to know the new task is ready, and a port published
-    /// on the host cannot be held by two tasks at once.
+    /// on the host cannot be held by two tasks at once, and neither can
+    /// writable data (two tasks would write it together). A file is a
+    /// read-only Swarm config.
     pub fn zero_downtime_possible(&self) -> bool {
-        self.healthcheck.is_some() && !self.ports.iter().any(|p| p.mode == "host")
+        self.healthcheck.is_some()
+            && !self.ports.iter().any(|p| p.mode == "host")
+            && !self.mounts.iter().any(|m| m.kind != "file" && !m.read_only)
     }
 }
 
@@ -694,6 +716,9 @@ pub struct DeployOptions {
     /// Cloudflare Tunnel on (Settings): each domain also served on the
     /// tunnel's entrypoint, over plain HTTP (Cloudflare holds TLS).
     pub tunnel: bool,
+    /// The Swarm node the tasks must run on: the one with an imported image
+    /// or folder (only that machine has them). None: anywhere.
+    pub pin_node: Option<String>,
 }
 
 impl Default for DeployOptions {
@@ -704,6 +729,7 @@ impl Default for DeployOptions {
             https_port: 443,
             internal_url: String::new(),
             tunnel: false,
+            pin_node: None,
         }
     }
 }
@@ -794,6 +820,9 @@ pub fn desired(
     if !configs.is_empty() {
         container["Configs"] = json!(configs);
     }
+    if let Some(user) = &snapshot.user {
+        container["User"] = json!(user);
+    }
     if !snapshot.cap_add.is_empty() {
         container["CapabilityAdd"] = json!(snapshot.cap_add);
     }
@@ -838,6 +867,9 @@ pub fn desired(
         "Networks": [{"Target": network_name(&snapshot.project), "Aliases": [snapshot.service]}],
         "ForceUpdate": options.force_update,
     });
+    if let Some(node) = &options.pin_node {
+        template["Placement"] = json!({"Constraints": [format!("node.id=={node}")]});
+    }
     // Tasks tell which template they run (a restart, a new command or mount
     // with the same image are told apart from the previous tasks).
     // The environment counts by its keyed digest: the label never tells
@@ -904,7 +936,8 @@ fn limits(cpu_millis: Option<u32>, mem_mb: Option<u32>) -> Value {
 
 fn mount(snapshot: &Snapshot, mount: &Mount) -> Value {
     match mount.kind.as_str() {
-        "bind" => {
+        // A `link` is the symlink an import made, bound like a folder.
+        "bind" | "link" => {
             json!({"Type": "bind", "Source": mount.source, "Target": mount.target, "ReadOnly": mount.read_only})
         }
         _ => json!({
@@ -1715,6 +1748,7 @@ mod tests {
                 source: "html".to_owned(),
                 read_only: true,
                 content_digest: None,
+                link_target: None,
             }],
             env_names: vec![],
             env_digest: None,
@@ -1731,6 +1765,8 @@ mod tests {
             basic_auth: vec![],
             rate_limit: None,
             maintenance_bypass: vec![],
+            admin_only: false,
+            user: None,
         }
     }
 
@@ -1745,7 +1781,95 @@ mod tests {
             https_port: 443,
             internal_url: String::new(),
             tunnel: false,
+            pin_node: None,
         }
+    }
+
+    #[test]
+    fn a_link_mount_is_a_bind_of_its_symlink_and_older_panels_refuse_it() {
+        let mut snapshot = snapshot();
+        let link = Mount {
+            target: "/data".to_owned(),
+            kind: "link".to_owned(),
+            source: "/Users/me/.rdockpanel/links/p_web/data".to_owned(),
+            read_only: false,
+            content_digest: None,
+            link_target: None,
+        };
+        snapshot.mounts = vec![link];
+        let out = desired(&snapshot, &pinned(), &Runtime::default(), &production());
+        let text = canonical(&out.spec);
+        assert!(text.contains("\"Type\": \"bind\""), "{text}");
+        assert!(
+            text.contains("/Users/me/.rdockpanel/links/p_web/data"),
+            "{text}"
+        );
+        // A volume of that name would hold `/`: Docker refuses it (what an
+        // older panel, which reads an unknown kind as a volume, would send).
+        assert!(volume_name("p", "web", "/Users/me/x").contains('/'));
+    }
+
+    #[test]
+    fn a_writable_mount_rules_out_a_rolling_start_first() {
+        let mut snapshot = snapshot();
+        snapshot.healthcheck = Some(Healthcheck {
+            command: "true".to_owned(),
+            interval_s: 5,
+            retries: 3,
+        });
+        let mount = |kind: &str, read_only: bool| Mount {
+            target: "/data".to_owned(),
+            kind: kind.to_owned(),
+            source: "d".to_owned(),
+            read_only,
+            content_digest: None,
+            link_target: None,
+        };
+        snapshot.mounts = vec![mount("volume", true), mount("file", false)];
+        assert!(snapshot.zero_downtime_possible());
+        // Two tasks would write the same data at once.
+        for kind in ["volume", "bind"] {
+            snapshot.mounts = vec![mount(kind, false)];
+            assert!(!snapshot.zero_downtime_possible(), "{kind}");
+        }
+    }
+
+    #[test]
+    fn a_users_reaches_the_container_and_an_old_snapshot_is_unchanged() {
+        let mut snapshot = snapshot();
+        let before = snapshot.hash();
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("\"user\"")
+        );
+        snapshot.user = Some("0:0".to_owned());
+        assert_ne!(snapshot.hash(), before);
+        let out = desired(&snapshot, &pinned(), &Runtime::default(), &production());
+        assert!(
+            canonical(&out.spec).contains("\"User\": \"0:0\""),
+            "{}",
+            canonical(&out.spec)
+        );
+    }
+
+    #[test]
+    fn admin_only_is_in_the_snapshot_only_when_set() {
+        // A snapshot taken before the field existed hashes the same.
+        let mut snapshot = snapshot();
+        let before = snapshot.hash();
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("admin_only")
+        );
+        snapshot.admin_only = true;
+        assert!(
+            serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("\"admin_only\":true")
+        );
+        assert_ne!(snapshot.hash(), before);
     }
 
     #[test]
@@ -2242,6 +2366,7 @@ mod tests {
                 source: "/srv/shop/data".to_owned(),
                 read_only: false,
                 content_digest: None,
+                link_target: None,
             }],
             cpu_limit_millis: None,
             mem_limit_mb: None,

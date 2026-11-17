@@ -295,6 +295,8 @@ pub async fn service(
             "dockerfile": row.dockerfile,
             "compose": row.compose,
             "notes": row.notes,
+            // Only administrators change or deploy it (an import made it so).
+            "admin_only": row.admin_only,
             "cap_add": row.cap_add,
             "cap_drop": row.cap_drop,
             "sysctls": row.sysctls,

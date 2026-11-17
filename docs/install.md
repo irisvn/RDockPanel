@@ -83,12 +83,17 @@ panel is reached over HTTPS only.
     the database at each start. It reaches itself at `http://rdockpanel:3000` from Traefik
     (maintenance pages).
 
+Importing existing containers ([import.md](import.md)) needs no mount in the panel: its helper
+containers read and write the host through Docker. The symlinks of folders used in place live in
+`/var/lib/rdockpanel/links` (Linux; on a Mac `~/.rdockpanel/links`); the helpers use the panel's own
+image (a panel run from source sets `[panel] helper_image`).
+
 The panel's address (`/`) shows a public homepage: what RDockPanel is, its screens, the install
 command and a link to GitHub, with nothing of this server on it. **Settings → Panel** turns it off
 (`/` then opens the sign-in). The panel itself is at `/admin`.
 
-Settings adds more as they are used: Cloudflare Tunnel's service `rdp-cloudflared`, its network
-`rdp-tunnel` and its token as secrets `rdp_tunnel_*` (labelled `rdockpanel.system=true` too); DNS
+Settings adds more as they are used: Cloudflare Tunnel's services `rdp-cloudflared` (and
+`rdp-cloudflared-<name>`, one per other tunnel), their shared network `rdp-tunnel` and their tokens as secrets `rdp_tunnel_*` (labelled `rdockpanel.system=true` too); DNS
 resolvers' tokens as secrets `rdp-dns-*` (Traefik reads them).
 
 ## Upgrading and changing options
@@ -229,7 +234,7 @@ If the Firewall is on, turn it off first (Firewall → Turn off): Docker waits f
 the panel, `sh /var/lib/rdockpanel/firewall/fw.sh disable` does the same.
 
 Then `docker service rm rdockpanel rdp-traefik rdp-mysql rdp-cloudflared` (`rdp-mysql` with MySQL,
-the last one if the tunnel was on), then (this deletes the panel's data, its backups included):
+the last one if the tunnel was on; and every `rdp-cloudflared-*`), then (this deletes the panel's data, its backups included):
 
 ```sh
 docker volume rm rdp-mysql-data                                         # MySQL

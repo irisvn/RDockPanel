@@ -515,6 +515,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 Some("volume") => new.mounts.push(NewMount::Volume {
                     name: text(mount, "name").unwrap_or_default(),
                     target,
+                    read_only: false,
                 }),
                 Some("file") => new.mounts.push(NewMount::File {
                     content: text(mount, "content").unwrap_or_default(),

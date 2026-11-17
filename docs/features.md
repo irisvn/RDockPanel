@@ -17,6 +17,15 @@ Everything RDockPanel does today. [Tiếng Việt](features.vi.md) · back to th
   same button sizes, extra row actions in a ⋯ menu, the same status words and colors, the panel's own dialogs,
   tables that work on a phone.
 
+**Importing existing containers** ([import.md](import.md))
+
+- A container (or a Compose project, with the containers it needs) started outside the panel becomes
+  a service of a project: read, planned (what blocks, what is lost), stopped, copied, deployed, and the
+  originals kept until the import is finished, so it can be undone. Folders on the machine are used in
+  place and can be moved into volumes later. Traefik labels and `VIRTUAL_HOST` become the service's domains; a cloudflared container can become
+  a Cloudflare Tunnel of the panel (one per token); a password on a command line moves to an environment variable; a container that ran as another
+  user keeps it.
+
 **Server and Docker**
 
 - **Server metrics** on the Dashboard: live CPU, memory, disk and network in/out, with their recent
@@ -99,8 +108,8 @@ Everything RDockPanel does today. [Tiếng Việt](features.vi.md) · back to th
   use) with the installer command that applies them.
 - **Traefik in Settings**: its state, a restart, its live logs, and middlewares of your own
   (`custom-<name>`, headers, rate limits, IP allow lists…) for domains, all without SSH.
-- **Cloudflare Tunnel** (Settings): cloudflared run with your tunnel's token (kept encrypted, given
-  as a Swarm secret), so domains are reached through Cloudflare without opening ports 80 and 443.
+- **Cloudflare Tunnel** (Settings): one cloudflared per tunnel, each run with its own token (kept encrypted,
+  given as a Swarm secret; add, switch on or off, delete several tunnels), so domains are reached through Cloudflare without opening ports 80 and 443.
   A domain leading to Cloudflare is marked "via Cloudflare" (through the tunnel its HTTPS is Cloudflare's).
 - **Branding** (Settings): the panel's name, primary color, logos (light and dark) and favicon,
   on every page and the sign-in page, without a restart.

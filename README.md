@@ -17,6 +17,9 @@ feature is free: no project limits, no paid tiers.
 - **Apps on Docker Swarm**: projects and services with rolling deploys, rollback and live logs;
   builds from Git or a Dockerfile; Compose services; **800+ app templates** and one-click databases
   (PostgreSQL, MySQL, MariaDB, MongoDB, Redis).
+- **Bring in what already runs**: a container (or a Compose project) started with `docker run` or
+  `docker compose` becomes a service, with a plan, a copy of its data and an undo
+  ([docs/import.md](docs/import.md)).
 - **Domains and HTTPS** through Traefik (Let's Encrypt, your own certificates, Cloudflare Tunnel),
   redirects, rate limits, basic auth and a maintenance page, applied when saved.
 - **Operations**: scheduled backups (local or S3), notifications (Discord, Slack, Telegram, email,
@@ -98,6 +101,7 @@ Tests, conventions and the front end: [docs/development.md](docs/development.md)
 | [Install](docs/install.md) | the installer, upgrades, backups, macOS |
 | [Development](docs/development.md) | environment, tests, conventions |
 | [Architecture](docs/architecture.md) | how it is built: RustCMS, bollard, Swarm, Traefik |
+| [Import](docs/import.md) | bringing existing containers into a project |
 | [Permissions](docs/permissions.md) | who can see and do what |
 | [Security](docs/security.md) | the Docker socket, protected objects, the terminal, CSP |
 | [Firewall](docs/firewall.md) | the default-deny firewall |

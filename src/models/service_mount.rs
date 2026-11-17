@@ -12,13 +12,15 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub service_id: i64,
-    /// `volume`, `bind` or `file`.
+    /// `volume`, `bind`, `file` or `link`.
     pub kind: String,
     /// The volume's name (`volume`).
     pub name: Option<String>,
     /// The host directory (`bind`).
     pub source: Option<String>,
     pub target: String,
+    /// Where a `link` mount's symlink points (`source` is the symlink).
+    pub link_target: Option<String>,
     /// The file's content (`file`), sealed (context `service_mounts.sealed_content`).
     #[sea_orm(column_type = "Text", nullable)]
     pub sealed_content: Option<Encrypted<String>>,

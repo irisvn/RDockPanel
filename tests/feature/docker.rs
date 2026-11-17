@@ -5,7 +5,8 @@
 
 use futures_util::StreamExt;
 use rdockpanel::services::docker_service::{
-    BollardDocker, ContainerAction, Docker, DockerError, LogQuery, SYSTEM_LABEL, Scope, TermSize,
+    BollardDocker, ContainerAction, Docker, DockerError, ImageItem, LogQuery, PruneKind,
+    SYSTEM_LABEL, Scope, TermSize,
 };
 
 use crate::support::fake_docker::FakeDocker;
@@ -143,6 +144,64 @@ async fn prune_skips_system_objects_and_inspect_hides_secrets() {
     );
 }
 
+/// Inspect and the container list hide secrets in command lines, health
+/// checks and labels too, not only in env values (0.11.1).
+#[tokio::test]
+async fn inspect_hides_secrets_in_commands_health_checks_and_labels() {
+    let (docker, fake) = docker();
+    fake.containers
+        .lock()
+        .unwrap()
+        .iter_mut()
+        .find(|c| c.name == "web")
+        .unwrap()
+        .labels
+        .insert(
+            "traefik.http.middlewares.a.basicauth.users".to_owned(),
+            "admin:$apr1$LabelHash".to_owned(),
+        );
+    fake.inspected.lock().unwrap().insert(
+        "web".to_owned(),
+        serde_json::json!({
+            "Id": "id-web",
+            "Path": "docker-entrypoint.sh",
+            "Args": ["valkey-server", "--requirepass", "ArgSecret123"],
+            "Config": {
+                "Env": ["REDIS_PASSWORD=EnvSecret456", "PATH=/bin"],
+                "Cmd": ["valkey-server", "--requirepass", "ArgSecret123"],
+                "Entrypoint": ["docker-entrypoint.sh"],
+                "Healthcheck": {"Test": [
+                    "CMD-SHELL",
+                    "mysqladmin ping -uroot -pHealthSecret789 && redis-cli -a EnvSecret456 ping"
+                ]},
+                "Labels": {"traefik.http.middlewares.a.basicauth.users": "admin:$apr1$LabelHash"},
+            },
+        }),
+    );
+
+    let doc = docker.inspect_container("web", Scope::User).await.unwrap();
+    let text = doc.to_string();
+    for secret in [
+        "ArgSecret123",
+        "EnvSecret456",
+        "HealthSecret789",
+        "LabelHash",
+    ] {
+        assert!(!text.contains(secret), "{secret} leaks: {text}");
+    }
+    assert_eq!(
+        doc["Args"],
+        serde_json::json!(["valkey-server", "--requirepass", "******"])
+    );
+    assert_eq!(
+        doc["Config"]["Entrypoint"],
+        serde_json::json!(["docker-entrypoint.sh"])
+    );
+
+    let list = serde_json::to_string(&docker.containers(Scope::User).await.unwrap()).unwrap();
+    assert!(!list.contains("LabelHash"), "{list}");
+}
+
 #[tokio::test]
 async fn identifiers_never_carry_paths_into_docker() {
     let (docker, fake) = docker();
@@ -225,6 +284,36 @@ async fn images_of_the_panel_are_protected() {
             "remove-image panel:old force=false"
         ]
     );
+}
+
+/// An image an import tagged `rdp.invalid/…` is the only copy of what a
+/// service runs: nobody removes it, and a prune leaves it.
+#[tokio::test]
+async fn an_imported_local_image_survives_removal_and_prune() {
+    let (docker, fake) = docker();
+    let image = |id: &str, tag: &str, containers: i64| ImageItem {
+        id: id.to_owned(),
+        tags: vec![tag.to_owned()],
+        size: 1,
+        created: 0,
+        containers,
+        labels: Default::default(),
+    };
+    *fake.images.lock().unwrap() = vec![
+        image("sha256:unused", "old:1", 0),
+        image("sha256:local", "rdp.invalid/shop/web:0123456789ab", 0),
+        image("sha256:inuse", "busy:1", 1),
+        image("sha256:unknown", "maybe:1", -1),
+    ];
+    for scope in [Scope::User, Scope::System] {
+        let refused = docker
+            .remove_image("rdp.invalid/shop/web:0123456789ab", false, scope)
+            .await;
+        assert!(matches!(refused, Err(DockerError::Protected)), "{scope:?}");
+    }
+    let report = docker.prune_kind(PruneKind::Images, &[]).await.unwrap();
+    assert_eq!(report.images_deleted, 1);
+    assert_eq!(fake.calls(), ["remove-image sha256:unused force=false"]);
 }
 
 #[tokio::test]
@@ -675,6 +764,7 @@ async fn desired_specs_run_on_a_real_swarm() {
                 source: "data".to_owned(),
                 read_only: false,
                 content_digest: None,
+                link_target: None,
             },
             Mount {
                 target: "/etc/app/greeting.txt".to_owned(),
@@ -682,6 +772,7 @@ async fn desired_specs_run_on_a_real_swarm() {
                 source: String::new(),
                 read_only: true,
                 content_digest: Some("digest-of-hi".to_owned()),
+                link_target: None,
             },
         ],
         env_names: vec![],
@@ -699,6 +790,8 @@ async fn desired_specs_run_on_a_real_swarm() {
         basic_auth: vec![],
         rate_limit: None,
         maintenance_bypass: vec![],
+        admin_only: false,
+        user: None,
     };
     // An environment, as a deployment opens it.
     let env = std::collections::BTreeMap::from([("GREETING".to_owned(), "hello".to_owned())]);
@@ -873,4 +966,36 @@ async fn a_real_build_uses_buildkit() {
         }
     }
     assert!(failed.is_some_and(|e| e.contains("exit 3") || e.contains("exit code")));
+}
+
+#[tokio::test]
+async fn a_stop_with_a_long_grace_outlasts_the_clients_own_limit() {
+    if std::env::var_os("PANEL_TEST_DOCKER").is_none() {
+        return;
+    }
+    // A container that ignores SIGTERM: Docker waits the whole grace, then kills.
+    let name = format!("rdockpanel-test-stop-{}", std::process::id());
+    let status = std::process::Command::new("docker")
+        .args([
+            "run",
+            "-d",
+            "--name",
+            &name,
+            "--label",
+            "rdockpanel.test=1",
+            "alpine:3.20",
+            "sh",
+            "-c",
+            "trap '' TERM; while :; do sleep 1; done",
+        ])
+        .status()
+        .expect("docker run");
+    assert!(status.success());
+    let docker = Docker::new(BollardDocker::connect().expect("docker client"));
+    // Longer than the client's 120 s request limit: the stop still answers.
+    let stopped = docker.engine().stop_container(&name, 125).await;
+    let _ = std::process::Command::new("docker")
+        .args(["rm", "-f", &name])
+        .status();
+    stopped.expect("the stop outlasts 120 s");
 }

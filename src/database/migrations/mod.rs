@@ -36,6 +36,12 @@ mod m20261022_000000_create_firewall_tables;
 mod m20261023_000000_add_rate_limit_to_services;
 mod m20261024_000000_add_maintenance_page;
 mod m20261025_000000_widen_long_text_columns;
+mod m20261026_000000_create_import_tables;
+mod m20261026_000100_add_import_flags;
+mod m20261026_000200_add_service_user;
+mod m20261115_000000_create_tunnels;
+mod m20261115_000100_add_tunnel_to_import_items;
+mod m20261116_000000_add_cleaning_to_import_volumes;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -78,6 +84,12 @@ impl MigratorTrait for Migrator {
             Box::new(m20261023_000000_add_rate_limit_to_services::Migration),
             Box::new(m20261024_000000_add_maintenance_page::Migration),
             Box::new(m20261025_000000_widen_long_text_columns::Migration),
+            Box::new(m20261026_000000_create_import_tables::Migration),
+            Box::new(m20261026_000100_add_import_flags::Migration),
+            Box::new(m20261026_000200_add_service_user::Migration),
+            Box::new(m20261115_000000_create_tunnels::Migration),
+            Box::new(m20261115_000100_add_tunnel_to_import_items::Migration),
+            Box::new(m20261116_000000_add_cleaning_to_import_volumes::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

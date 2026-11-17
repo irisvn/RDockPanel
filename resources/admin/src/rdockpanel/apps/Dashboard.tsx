@@ -2,6 +2,7 @@
 // services as cards (status, kind, domain). Creating a project or a service
 // asks for a name (and an image), nothing else.
 import { type ReactNode, useState } from "react";
+import { SourceDialog } from "./imports/Imports";
 import { type AdminApi, type PageProps, useEvents } from "@rustcms/admin-sdk";
 import { useAdminQuery } from "../lib/query";
 import { Alert, Button, Dialog, Input, Loading, ErrorState, Textarea } from "@rustcms/admin-sdk/ui";
@@ -296,6 +297,7 @@ function UpdateNotice(props: PageProps<unknown>) {
 export function Dashboard(props: PageProps<unknown>) {
   const t = props.t;
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const canCreateProject = props.can("projects.create");
   return (
     <Page
@@ -303,8 +305,18 @@ export function Dashboard(props: PageProps<unknown>) {
       eyebrow={t("Workspace")}
       heading={t("Dashboard")}
       description={t("Your server and the projects running on it.")}
-      actions={canCreateProject && <Button onClick={() => setCreating(true)}>{t("New project")}</Button>}
+      actions={
+        <>
+          {props.can("system.manage") && canCreateProject && (
+            <Button variant="outline" onClick={() => setImporting(true)}>
+              {t("Import containers")}
+            </Button>
+          )}
+          {canCreateProject && <Button onClick={() => setCreating(true)}>{t("New project")}</Button>}
+        </>
+      }
     >
+      {importing && <SourceDialog {...props} onClose={() => setImporting(false)} />}
       {props.can("system.manage") && <UpdateNotice {...props} />}
       <ServerTiles {...props} />
       <Projects {...props} creating={creating} setCreating={setCreating} />
