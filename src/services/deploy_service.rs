@@ -70,6 +70,9 @@ pub struct Snapshot {
     pub mem_reservation_mb: Option<u32>,
     pub zero_downtime: bool,
     pub healthcheck: Option<Healthcheck>,
+    /// The health check is off (Docker's `NONE`): the image's own does not run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub healthcheck_off: bool,
     pub domains: Vec<Domain>,
     pub ports: Vec<Port>,
     pub mounts: Vec<Mount>,
@@ -218,6 +221,12 @@ pub struct Healthcheck {
     pub command: String,
     pub interval_s: u32,
     pub retries: u32,
+    /// Seconds a check may take (5 when not set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_s: Option<u32>,
+    /// Seconds before failures count (10 when not set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_period_s: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -346,10 +355,16 @@ impl Snapshot {
             .as_deref()
             .map(str::trim)
             .filter(|c| !c.is_empty())
+            .filter(|_| !service.healthcheck_off)
             .map(|command| Healthcheck {
                 command: command.to_owned(),
                 interval_s: positive(service.healthcheck_interval_s).unwrap_or(10),
                 retries: positive(service.healthcheck_retries).unwrap_or(3),
+                timeout_s: positive(service.healthcheck_timeout_s),
+                // 0 is a choice (failures count at once), not "not set".
+                start_period_s: service
+                    .healthcheck_start_period_s
+                    .and_then(|s| u32::try_from(s).ok()),
             });
         // The first added (lowest id) is the primary one.
         let primary_domain = domains.iter().min_by_key(|d| d.id).map(|d| d.host.clone());
@@ -435,6 +450,7 @@ impl Snapshot {
             mem_reservation_mb: positive(service.mem_reservation_mb),
             zero_downtime: service.zero_downtime,
             healthcheck,
+            healthcheck_off: service.healthcheck_off,
             domains,
             ports,
             mounts,
@@ -842,10 +858,13 @@ pub fn desired(
         container["HealthCheck"] = json!({
             "Test": ["CMD-SHELL", check.command],
             "Interval": u64::from(check.interval_s) * NANOS,
-            "Timeout": 5 * NANOS,
+            "Timeout": u64::from(check.timeout_s.unwrap_or(5)) * NANOS,
             "Retries": check.retries,
-            "StartPeriod": 10 * NANOS,
+            "StartPeriod": u64::from(check.start_period_s.unwrap_or(10)) * NANOS,
         });
+    } else if snapshot.healthcheck_off {
+        // Off: the image's own check does not run either.
+        container["HealthCheck"] = json!({"Test": ["NONE"]});
     }
     let mut resources = json!({});
     if snapshot.cpu_limit_millis.is_some() || snapshot.mem_limit_mb.is_some() {
@@ -1708,7 +1727,10 @@ mod tests {
                 command: "wget -qO- http://127.0.0.1/ || exit 1".to_owned(),
                 interval_s: 10,
                 retries: 3,
+                timeout_s: None,
+                start_period_s: None,
             }),
+            healthcheck_off: false,
             domains: vec![
                 Domain {
                     host: "shop.example.com".to_owned(),
@@ -1816,6 +1838,8 @@ mod tests {
             command: "true".to_owned(),
             interval_s: 5,
             retries: 3,
+            timeout_s: None,
+            start_period_s: None,
         });
         let mount = |kind: &str, read_only: bool| Mount {
             target: "/data".to_owned(),

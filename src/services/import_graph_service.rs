@@ -239,6 +239,9 @@ pub struct PanelFacts {
     pub working_dir: Option<String>,
     /// The installer's directory (`[panel] state_dir`): never a service's mount.
     pub state_dir: std::path::PathBuf,
+    /// Host ports the panel keeps (`[panel] reserved_ports`; empty: the
+    /// usual ones).
+    pub reserved_ports: Vec<u16>,
 }
 
 /// Why a container can never be imported, whoever asks.

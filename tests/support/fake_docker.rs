@@ -96,6 +96,10 @@ pub struct FakeDocker {
     pub remove_fails: Arc<Mutex<Vec<String>>>,
     /// How long an inspect of a container takes (a slow Docker), in milliseconds.
     pub inspect_delay_ms: Arc<Mutex<u64>>,
+    /// Images' inspect documents (`Config.Entrypoint`, …), by reference.
+    pub image_configs: Arc<Mutex<HashMap<String, Value>>>,
+    /// What helpers whose name contains the key write (their exit 0).
+    pub helper_output: Arc<Mutex<HashMap<String, String>>>,
 }
 
 pub fn labels(system: bool) -> HashMap<String, String> {
@@ -356,6 +360,14 @@ impl DockerApi for FakeDocker {
     async fn containers_detailed(&self) -> DockerResult<Vec<Value>> {
         Ok(self.detailed.lock().unwrap().clone())
     }
+    async fn image_config(&self, reference: &str) -> DockerResult<Value> {
+        self.image_configs
+            .lock()
+            .unwrap()
+            .get(reference)
+            .cloned()
+            .ok_or(DockerError::NotFound)
+    }
     async fn inspect_container_raw(&self, id: &str, _size: bool) -> DockerResult<Value> {
         let delay = *self.inspect_delay_ms.lock().unwrap();
         if delay > 0 {
@@ -410,6 +422,20 @@ impl DockerApi for FakeDocker {
         };
         self.volumes.lock().unwrap().push(volume.clone());
         Ok(volume)
+    }
+    async fn run_helper_output(&self, spec: HelperSpec) -> DockerResult<(i64, String)> {
+        // Measures only when a test says what they find (else as unsupported).
+        let out = self
+            .helper_output
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(key, _)| spec.name.contains(key.as_str()))
+            .map(|(_, out)| out.clone())
+            .ok_or_else(|| DockerError::Unavailable("measuring is not set".to_owned()))?;
+        self.record(format!("helper {}", spec.name));
+        self.helpers.lock().unwrap().push(spec);
+        Ok((0, out))
     }
     async fn run_helper(&self, spec: HelperSpec) -> DockerResult<i64> {
         self.record(format!("helper {}", spec.name));

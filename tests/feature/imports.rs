@@ -4107,7 +4107,11 @@ db_test!(
         .insert(app.state().db())
         .await
         .unwrap();
-        let undone = Migrator::down(app.state().db(), Some(1)).await;
+        let since = Migrator::migrations()
+            .iter()
+            .filter(|m| m.name() >= "m20261116_000000_add_cleaning_to_import_volumes")
+            .count();
+        let undone = Migrator::down(app.state().db(), Some(since as u32)).await;
         assert!(
             undone
                 .as_ref()
@@ -4331,6 +4335,12 @@ db_test!(
         let mut change = web.into_active_model();
         change.user = Set(Some("0:0".to_owned()));
         change.update(app.state().db()).await.unwrap();
+        // What the import did is not this test's: its table is left empty.
+        app.state()
+            .db()
+            .execute_unprepared("DELETE FROM container_import_events")
+            .await
+            .unwrap();
         let after_user = Migrator::migrations()
             .iter()
             .filter(|m| m.name() > "m20261026_000200_add_service_user")
@@ -4624,5 +4634,488 @@ db_test!(
         );
         run_all(&app).await;
         assert_eq!(import_state(&app, id).await, "active");
+    }
+);
+
+/// `shop`'s `db` with a health check (Docker's form) and its timing.
+fn db_health(fake: &FakeDocker, test: Value) {
+    let mut inspected = fake.inspected.lock().unwrap();
+    let config = &mut inspected.get_mut("shop-db-1").unwrap()["Config"];
+    config["Healthcheck"] = json!({"Test": test, "Interval": 10_000_000_000i64,
+        "Timeout": 7_000_000_000i64, "StartPeriod": 40_000_000_000i64, "Retries": 5});
+    config["Env"] = json!(["MYSQL_ROOT_PASSWORD=RootPw9x"]);
+}
+
+async fn db_service(app: &TestApp) -> rdockpanel::models::service::Model {
+    use rdockpanel::models::service;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    service::Entity::find()
+        .filter(service::Column::Name.eq("db"))
+        .one(app.state().db())
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+db_test!(
+    a_password_in_a_databases_health_check_moves_to_the_environment,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        db_health(
+            &fake,
+            json!([
+                "CMD-SHELL",
+                "mysqladmin ping -h 127.0.0.1 -uroot -pRootPw9x --silent"
+            ]),
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(item["choice"], "bring", "{item}");
+        assert_eq!(
+            findings_of(&item, "healthcheck_secret_moved").len(),
+            1,
+            "{item}"
+        );
+        assert!(!item.to_string().contains("RootPw9x"));
+        start_and_run(&app, &admin, id).await;
+        let db = db_service(&app).await;
+        let check = db.healthcheck_cmd.clone().unwrap();
+        assert_eq!(
+            check,
+            "mysqladmin ping -h 127.0.0.1 -uroot -p\"$RDP_SECRET_HC_1\" --silent"
+        );
+        // Its timing kept.
+        assert_eq!(db.healthcheck_timeout_s, Some(7));
+        assert_eq!(db.healthcheck_start_period_s, Some(40));
+        assert_eq!(db.healthcheck_retries, Some(5));
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{}", db.id)))
+            .await
+            .json();
+        assert!(
+            page["env_names"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|n| n == "RDP_SECRET_HC_1"),
+            "{}",
+            page["env_names"]
+        );
+        let spec = fake.services.lock().unwrap()["shop_db"]
+            .spec
+            .clone()
+            .unwrap();
+        let health = spec
+            .task_template
+            .unwrap()
+            .container_spec
+            .unwrap()
+            .health_check
+            .unwrap();
+        assert_eq!(health.timeout, Some(7_000_000_000));
+        assert_eq!(health.start_period, Some(40_000_000_000));
+    }
+);
+
+db_test!(
+    a_port_or_a_reference_in_a_health_check_is_not_a_secret,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        db_health(
+            &fake,
+            json!([
+                "CMD-SHELL",
+                "pg_isready -U postgres -p 5432 && mysqladmin ping -p$MYSQL_ROOT_PASSWORD"
+            ]),
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(item["choice"], "bring", "{item}");
+        assert!(
+            findings_of(&item, "healthcheck_secret").is_empty(),
+            "{item}"
+        );
+        assert!(
+            findings_of(&item, "healthcheck_secret_moved").is_empty(),
+            "{item}"
+        );
+    }
+);
+
+db_test!(
+    a_health_check_the_panel_cannot_cut_is_dropped_or_replaced_by_the_admin,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        db_health(
+            &fake,
+            json!(["CMD-SHELL", "curl -f http://user:RootPw9x@localhost/health"]),
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(item["choice"], "blocked", "{item}");
+        assert_eq!(findings_of(&item, "healthcheck_secret").len(), 1, "{item}");
+        let url = app.admin_api(&format!("x/imports/{id}/plan"));
+        // A typed command never holds a secret.
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"healthcheck": {"id-db": {"command": "mysqladmin ping -pS3cretPw"}}})),
+            )
+            .await
+            .assert_validation_error("healthcheck");
+        // Nor one of the container's secrets, written out.
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"healthcheck": {"id-db": {"command": "curl -d RootPw9x http://localhost/"}}})),
+            )
+            .await
+            .assert_validation_error("healthcheck");
+        // Kept as the plan keeps it: the command only.
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"healthcheck": {"id-db": {"command": "true", "password": "extra"}}})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(
+            item["healthcheck_choice"],
+            json!({"command": "true"}),
+            "{item}"
+        );
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"healthcheck": {"id-db": "drop"}})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(item["choice"], "bring", "{item}");
+        start_and_run(&app, &admin, id).await;
+        let db = db_service(&app).await;
+        assert!(db.healthcheck_off && db.healthcheck_cmd.is_none());
+        // Off in Swarm: the image's own check does not run either.
+        let spec = fake.services.lock().unwrap()["shop_db"]
+            .spec
+            .clone()
+            .unwrap();
+        let health = spec
+            .task_template
+            .unwrap()
+            .container_spec
+            .unwrap()
+            .health_check
+            .unwrap();
+        assert_eq!(health.test, Some(vec!["NONE".to_owned()]));
+    }
+);
+
+db_test!(
+    what_the_panel_has_comes_along_and_the_rest_is_said,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        {
+            let mut inspected = fake.inspected.lock().unwrap();
+            let doc = inspected.get_mut("shop-db-1").unwrap();
+            doc["HostConfig"]["CapAdd"] = json!(["CAP_SYS_NICE"]);
+            doc["HostConfig"]["Sysctls"] = json!({"net.core.somaxconn": "1024"});
+            doc["HostConfig"]["NanoCpus"] = json!(1_500_000_000i64);
+            doc["HostConfig"]["ShmSize"] = json!(268_435_456i64);
+            doc["HostConfig"]["Ulimits"] =
+                json!([{"Name": "nofile", "Soft": 65536, "Hard": 65536}]);
+        }
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        let lost: Vec<String> = findings_of(&item, "setting_lost")
+            .into_iter()
+            .map(|(f, _)| f)
+            .collect();
+        assert!(
+            lost.iter().any(|f| f.starts_with("shm_size: 256")),
+            "{lost:?}"
+        );
+        assert!(
+            lost.iter().any(|f| f.starts_with("ulimits: nofile")),
+            "{lost:?}"
+        );
+        start_and_run(&app, &admin, id).await;
+        let db = db_service(&app).await;
+        assert_eq!(db.cap_add.as_deref(), Some("SYS_NICE"));
+        assert_eq!(db.cpu_limit_millis, Some(1500));
+        assert!(
+            db.sysctls
+                .as_deref()
+                .unwrap_or_default()
+                .contains("net.core.somaxconn=1024")
+        );
+    }
+);
+
+db_test!(
+    a_container_run_without_its_images_entrypoint_is_blocked,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        fake.inspected.lock().unwrap().get_mut("shop-db-1").unwrap()["Config"]["Entrypoint"] =
+            json!(null);
+        fake.image_configs.lock().unwrap().insert(
+            "sha256:db".to_owned(),
+            json!({"Config": {"Entrypoint": ["docker-entrypoint.sh"]}, "RepoDigests": []}),
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(findings_of(&item, "entrypoint_cleared").len(), 1, "{item}");
+    }
+);
+
+db_test!(
+    a_plan_says_the_data_to_copy_and_refuses_what_does_not_fit,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        fake.volume_sizes.lock().unwrap().extend([
+            ("webdata".to_owned(), 3 * 1024 * 1024 * 1024i64),
+            ("dbdata".to_owned(), 1024),
+        ]);
+        // 1 GiB free where Docker keeps volumes.
+        fake.helper_output
+            .lock()
+            .unwrap()
+            .insert("-free".to_owned(), "1048576\n".to_owned());
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let got = admin
+            .get(&app.admin_api(&format!("x/imports/{id}")))
+            .await
+            .json();
+        assert_eq!(got["plan"]["free_bytes"], 1024 * 1024 * 1024i64, "{got}");
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert_eq!(web["copy_bytes"], 3 * 1024 * 1024 * 1024i64);
+        assert_eq!(web["writes"], true);
+        let start = admin
+            .post_json(
+                &app.admin_api(&format!("x/imports/{id}/start")),
+                &json!({"confirm": "shop"}),
+            )
+            .await;
+        assert_eq!(start.status, StatusCode::CONFLICT, "{}", start.text());
+        assert!(start.text().contains("no_room"), "{}", start.text());
+    }
+);
+
+db_test!(
+    an_import_page_tells_what_each_step_did,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let (app, _fake, id) = started_shop(db).await;
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "active");
+        // A step run again records nothing twice.
+        rdockpanel::services::import_run_service::tick(app.state())
+            .await
+            .unwrap();
+        run_all(&app).await;
+        let admin = ops(&app).await;
+        let got = admin
+            .get(&app.admin_api(&format!("x/imports/{id}")))
+            .await
+            .json();
+        let events: Vec<(String, String)> = got["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                (
+                    e["text"].as_str().unwrap().to_owned(),
+                    e["subject"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect();
+        for wanted in [
+            ("Stopped {name}", "shop-web-1"),
+            ("Copied {name}", "webdata"),
+            ("Deployed {name}", "db"),
+            ("The new services run", ""),
+        ] {
+            assert!(
+                events.iter().any(|(t, s)| t == wanted.0 && s == wanted.1),
+                "{wanted:?} in {events:?}"
+            );
+        }
+        // Newest first; each once.
+        assert_eq!(events[0].0, "The new services run");
+        assert_eq!(
+            events.iter().filter(|(t, _)| t == "Copying {name}").count(),
+            2
+        );
+        assert!(!got["events"].to_string().contains("hunter2"));
+    }
+);
+
+db_test!(
+    a_partial_import_of_a_compose_project_says_compose_up_would_start_it_again,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop_with_compose(&fake);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        // Everything comes: the file is renamed, nothing to say.
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert!(findings_of(&web, "compose_partial").is_empty(), "{web}");
+        // `web` stays behind: `db` would be started again by `compose up`.
+        admin
+            .send(
+                Method::PATCH,
+                &app.admin_api(&format!("x/imports/{id}/plan")),
+                Some(&json!({"choices": {"id-web": "leave"}, "confirm": true})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let db_item = plan_item(&app, &admin, id, "id-db").await;
+        let said = findings_of(&db_item, "compose_partial");
+        assert_eq!(said.len(), 1, "{db_item}");
+        assert!(said[0].1.contains("old data"), "{said:?}");
+    }
+);
+
+db_test!(
+    a_port_the_panel_keeps_can_be_published_on_another,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        fake.inspected
+            .lock()
+            .unwrap()
+            .get_mut("shop-web-1")
+            .unwrap()["NetworkSettings"]["Ports"] =
+            json!({"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "80"}]});
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert_eq!(findings_of(&web, "port_reserved").len(), 1, "{web}");
+        let url = app.admin_api(&format!("x/imports/{id}/plan"));
+        // A port the panel keeps is refused as the new one.
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"ports": {"id-web": {"80/tcp": 443}}})),
+            )
+            .await
+            .assert_validation_error("ports");
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"ports": {"id-web": {"80/tcp": 8081}}})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        start_and_run(&app, &admin, id).await;
+        let ports: Vec<(i32, i32)> = {
+            use rdockpanel::models::service_port;
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            service_port::Entity::find()
+                .filter(service_port::Column::ServiceId.eq(web_service(&app).await.id))
+                .all(app.state().db())
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|p| (p.published, p.target))
+                .collect()
+        };
+        assert_eq!(ports, [(8081, 80)]);
+    }
+);
+
+db_test!(
+    a_typed_health_check_never_holds_a_short_secret_and_a_long_one_is_chosen,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        let long = format!("curl -f http://localhost/health?{}", "x".repeat(520));
+        db_health(&fake, json!(["CMD-SHELL", long]));
+        fake.inspected.lock().unwrap().get_mut("shop-db-1").unwrap()["Config"]["Env"] =
+            json!(["DB_PASSWORD=abc"]);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        // Longer than the service keeps: the admin's to choose.
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(item["choice"], "blocked", "{item}");
+        assert_eq!(findings_of(&item, "healthcheck_long").len(), 1, "{item}");
+        let url = app.admin_api(&format!("x/imports/{id}/plan"));
+        // In a line the panel does not follow, none at all, however short.
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"healthcheck": {"id-db": {"command": "curl -d abc http://localhost/; : $(true)"}}})),
+            )
+            .await
+            .assert_validation_error("healthcheck");
+        // A short secret of the container, as a word of its own: refused.
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"healthcheck": {"id-db": {"command": "curl -d abc http://localhost/"}}})),
+            )
+            .await
+            .assert_validation_error("healthcheck");
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"healthcheck": {"id-db": {"command": "curl -f http://localhost/health"}}})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(item["choice"], "bring", "{item}");
+        // Chosen again: still the long one's.
+        admin
+            .send(
+                Method::PATCH,
+                &url,
+                Some(&json!({"healthcheck": {"id-db": null}})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(findings_of(&item, "healthcheck_long").len(), 1, "{item}");
     }
 );

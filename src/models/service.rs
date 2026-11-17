@@ -112,6 +112,12 @@ pub struct Model {
     pub healthcheck_cmd: Option<String>,
     pub healthcheck_interval_s: Option<i32>,
     pub healthcheck_retries: Option<i32>,
+    /// Seconds a check may take, and before failures count (deployment defaults when empty).
+    pub healthcheck_timeout_s: Option<i32>,
+    pub healthcheck_start_period_s: Option<i32>,
+    /// The check is off: the image's own does not run either (an import of a
+    /// container whose check was `NONE`, or dropped).
+    pub healthcheck_off: bool,
     /// Environment variables, sealed with `APP_KEY` (context `services.env`).
     #[sea_orm(column_type = "Text", nullable)]
     pub env: Option<Encrypted<BTreeMap<String, String>>>,

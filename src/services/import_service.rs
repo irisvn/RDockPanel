@@ -357,6 +357,7 @@ pub fn panel_facts() -> PanelFacts {
         database_ports,
         working_dir,
         state_dir: config().state_dir.clone(),
+        reserved_ports: config().reserved_ports.clone(),
     }
 }
 
@@ -584,10 +585,157 @@ async fn read(state: &AppState, row: &container_import::Model) -> Result<(Value,
     );
     let mut plan = serde_json::to_value(&plan).map_err(|e| e.to_string())?;
     plan["compose"] = compose_info;
+    estimate(state, &docker, row.id, &gathered, &mut plan).await;
+    check_compose(&mut plan);
     check_domains(state.db(), &mut plan)
         .await
         .map_err(|e| e.to_string())?;
     Ok((plan, gathered.fingerprint))
+}
+
+/// Says, on each brought container of a Compose project whose file the
+/// import will not rename (some of its containers stay, or the file could
+/// not be read), that `docker compose up` would start it again. Run when the
+/// plan is read and when its choices change.
+pub fn check_compose(plan: &mut Value) {
+    let whole = plan["items"]
+        .as_array()
+        .is_some_and(|items| items.iter().all(|i| i["choice"] == "bring"));
+    let mut kept_files: Vec<String> = Vec::new();
+    for info in plan["compose"].as_array().into_iter().flatten() {
+        let project = info["project"].as_str().unwrap_or_default().to_owned();
+        let renamed = whole
+            && info["containers"] == info["taken"]
+            && info["files"]
+                .as_array()
+                .is_some_and(|f| !f.is_empty() && f.iter().all(|f| f["read"] == true));
+        if !renamed {
+            kept_files.push(project);
+        }
+    }
+    for item in plan["items"].as_array_mut().into_iter().flatten() {
+        let project = item["compose_project"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let brought = item["choice"] == "bring";
+        let writes = item["writes"] == true;
+        let Some(findings) = item["findings"].as_array_mut() else {
+            continue;
+        };
+        findings.retain(|f| f["code"] != "compose_partial");
+        if !brought || project.is_empty() || !kept_files.contains(&project) {
+            continue;
+        }
+        findings.push(json!({
+            "code": "compose_partial",
+            "level": "CONFIRM",
+            "field": project,
+            "text": if writes {
+                "its Compose file stays: `docker compose up` would start the original again on its old data (the panel stops it again, after a while): do not run it"
+            } else {
+                "its Compose file stays: `docker compose up` would start the original again (the panel stops it again, after a while): do not run it"
+            },
+            "how_to_unblock": "Confirm; bring every container of the project to have its file renamed.",
+        }));
+    }
+}
+
+/// The ports an admin moved, of a plan item (`port_remap`: `"80/tcp": 8081`).
+pub fn ports_moved_of(item: &Value) -> std::collections::BTreeMap<(u16, String), u16> {
+    item["port_remap"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, to)| {
+            let (port, protocol) = key.split_once('/')?;
+            Some((
+                (port.parse().ok()?, protocol.to_owned()),
+                u16::try_from(to.as_u64()?).ok()?,
+            ))
+        })
+        .collect()
+}
+
+/// The room a copy needs (its size and a margin: 10%, at least 2 GiB).
+pub fn room_needed(bytes: i64) -> i64 {
+    bytes + (bytes / 10).max(2 * 1024 * 1024 * 1024)
+}
+
+/// What the plan says of the move before it starts: each container's data to
+/// copy (`copy_bytes`, null when Docker did not say), whether it writes data
+/// (`writes`), and the free room where Docker keeps volumes (`free_bytes`, a
+/// helper's `df` of a volume to copy; null when it could not be measured).
+async fn estimate(
+    state: &AppState,
+    docker: &Docker,
+    import_id: i64,
+    gathered: &Gathered,
+    plan: &mut Value,
+) {
+    let engine = docker.engine();
+    let sizes = engine.volume_sizes().await.unwrap_or_default();
+    let mut probe: Option<String> = None;
+    if let Some(items) = plan["items"].as_array_mut() {
+        for item in items {
+            let Some(detail) = gathered
+                .details
+                .iter()
+                .find(|d| item["container_id"] == d.member.id.as_str())
+            else {
+                continue;
+            };
+            let mut bytes = Some(0i64);
+            for mount in detail.member.mounts.iter().filter(|m| m.kind == "volume") {
+                probe.get_or_insert_with(|| mount.source.clone());
+                bytes = match (bytes, sizes.get(&mount.source).copied().filter(|s| *s >= 0)) {
+                    (Some(total), Some(size)) => Some(total + size),
+                    _ => None,
+                };
+            }
+            item["copy_bytes"] = json!(bytes);
+            item["writes"] = json!(detail.member.mounts.iter().any(|m| m.writable));
+        }
+    }
+    let mut free = None;
+    if let (Some(volume), Some(image)) = (probe, helper_image(state, docker).await) {
+        let spec = crate::services::docker_service::HelperSpec {
+            name: format!("rdp-import-{import_id}-free"),
+            image,
+            cmd: vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "df -Pk /v | awk 'NR==2{print $4}'".to_owned(),
+            ],
+            mounts: vec![crate::services::docker_service::HelperMount {
+                source: volume,
+                target: "/v".to_owned(),
+                read_only: true,
+                kind: "volume".to_owned(),
+            }],
+            import_id,
+            cap_add: vec![],
+            timeout_s: 60,
+        };
+        let _ = engine.remove_container(&spec.name, true).await;
+        if let Ok((0, out)) = engine.run_helper_output(spec).await {
+            free = out.trim().parse::<i64>().ok().map(|kb| kb * 1024);
+        }
+    }
+    plan["free_bytes"] = json!(free);
+}
+
+/// The data the brought containers copy, and the room it needs, of a saved
+/// plan: refused when it does not fit (unknown sizes are not counted).
+pub fn room_problem(plan: &Value) -> Option<(i64, i64)> {
+    let free = plan["free_bytes"].as_i64()?;
+    let copy: i64 = plan["items"]
+        .as_array()?
+        .iter()
+        .filter(|i| i["choice"] == "bring" && i["as_tunnel"] != true)
+        .filter_map(|i| i["copy_bytes"].as_i64())
+        .sum();
+    (copy > 0 && room_needed(copy) > free).then_some((copy, free))
 }
 
 /// What the Compose files of the members' projects say. Read through a
@@ -819,7 +967,42 @@ pub struct Made {
     pub service: crate::services::creation_service::NewService,
     pub moved: Vec<Moved>,
     pub local_image: Option<String>,
-    pub healthcheck: Option<(String, i32, i32)>,
+    pub healthcheck: Health,
+}
+
+/// The health check a service gets from its container.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Health {
+    /// The command (a shell line), its secrets read from the environment.
+    pub command: Option<String>,
+    pub interval_s: i32,
+    pub retries: i32,
+    pub timeout_s: Option<i32>,
+    pub start_period_s: Option<i32>,
+    /// Off: the container's was `NONE`, or the admin dropped it.
+    pub off: bool,
+}
+
+/// What the admin chose for a health check the panel could not cut: drop
+/// it, or a command of theirs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HealthChoice {
+    Drop,
+    Command(String),
+}
+
+impl HealthChoice {
+    /// From a plan item's `healthcheck_choice` (`"drop"`, `{"command": …}`).
+    pub fn of(value: &Value) -> Option<Self> {
+        match value {
+            Value::String(s) if s == "drop" => Some(Self::Drop),
+            Value::Object(o) => o
+                .get("command")
+                .and_then(Value::as_str)
+                .map(|c| Self::Command(c.trim().to_owned())),
+            _ => None,
+        }
+    }
 }
 
 /// A word of a shell script: as it is when it is plain, else quoted.
@@ -841,17 +1024,8 @@ fn script_word(word: &str) -> String {
 /// command becomes `sh -c 'exec <entrypoint> <command> "$RDP_SECRET_<n>"'`: the
 /// image's entrypoint runs it, which runs the original entrypoint and command.
 fn command_of(detail: &Detail, env: &mut std::collections::BTreeMap<String, String>) -> String {
-    use crate::services::secret_scan_service::{ArgPart, secret_env_name, split_secret_args};
-    let known: Vec<String> = detail
-        .member
-        .env
-        .iter()
-        .filter(|(name, value)| secret_env_name(name) && !value.is_empty())
-        .map(|(_, value)| value.clone())
-        .collect();
-    let Some(parts) = split_secret_args(&detail.cmd, &known)
-        .filter(|parts| parts.iter().any(|p| matches!(p, ArgPart::Secret { .. })))
-    else {
+    use crate::services::secret_scan_service::{ArgPart, Cut};
+    let Cut::Parts(parts) = crate::services::import_plan_service::command_cut(detail) else {
         return shell_words::join(&detail.cmd);
     };
     let mut script = String::from("exec");
@@ -865,8 +1039,13 @@ fn command_of(detail: &Detail, env: &mut std::collections::BTreeMap<String, Stri
         match part {
             ArgPart::Plain(arg) => script.push_str(&script_word(&arg)),
             ArgPart::Secret { prefix, value } => {
-                n += 1;
-                let name = format!("RDP_SECRET_{n}");
+                let name = loop {
+                    n += 1;
+                    let name = format!("RDP_SECRET_{n}");
+                    if !env.contains_key(&name) {
+                        break name;
+                    }
+                };
                 script.push_str(&format!(
                     "{}\"${name}\"",
                     if prefix.is_empty() {
@@ -882,11 +1061,124 @@ fn command_of(detail: &Detail, env: &mut std::collections::BTreeMap<String, Stri
     shell_words::join(["sh", "-c", script.as_str()])
 }
 
+/// The health check of a container as a service has it: a shell line whose
+/// secrets move to `RDP_SECRET_HC_<n>` (the check reads them), its timing
+/// kept; off when it was `NONE` or the admin dropped it; the admin's own
+/// command when the panel could not cut it.
+pub fn health_of(
+    detail: &Detail,
+    env: &mut std::collections::BTreeMap<String, String>,
+    choice: Option<&HealthChoice>,
+) -> Result<Health, String> {
+    let seconds = |ns: i64| i32::try_from(ns / 1_000_000_000).ok().filter(|s| *s > 0);
+    let mut health = Health {
+        command: None,
+        interval_s: seconds(detail.health_interval_ns).unwrap_or(30),
+        retries: i32::try_from(detail.health_retries.max(1)).unwrap_or(3),
+        timeout_s: seconds(detail.health_timeout_ns),
+        // Docker's 0 is the container's start period too (failures count at once).
+        start_period_s: i32::try_from(detail.health_start_period_ns.max(0) / 1_000_000_000).ok(),
+        off: false,
+    };
+    match choice {
+        Some(HealthChoice::Drop) => {
+            health.off = true;
+            return Ok(health);
+        }
+        Some(HealthChoice::Command(command)) => {
+            health.command = Some(command.clone());
+            return Ok(health);
+        }
+        None => {}
+    }
+    match health_line(detail, &|name: &str| env.contains_key(name)) {
+        HealthLine::Off => health.off = true,
+        HealthLine::None => {}
+        HealthLine::Stuck => {
+            return Err(
+                "its health check holds a secret: choose to drop it or type a new one".into(),
+            );
+        }
+        HealthLine::Line(line, moved) => {
+            env.extend(moved);
+            health.command = Some(line);
+        }
+    }
+    if health
+        .command
+        .as_deref()
+        .is_some_and(|c| c.len() > HEALTH_MAX)
+    {
+        return Err(format!(
+            "its health check is longer than {HEALTH_MAX} characters: choose to drop it or type a shorter one"
+        ));
+    }
+    Ok(health)
+}
+
+/// A container's health check as a service's: a shell line, its secrets
+/// moved to `RDP_SECRET_HC_<n>` (names `taken` or the container's own are
+/// skipped), with them; off (`NONE`); none; or stuck (the admin chooses).
+pub enum HealthLine {
+    Off,
+    None,
+    Stuck,
+    Line(String, Vec<(String, String)>),
+}
+
+/// The one rewrite of a health check: the plan measures it, the import
+/// writes it.
+pub fn health_line(detail: &Detail, taken: &dyn Fn(&str) -> bool) -> HealthLine {
+    use crate::services::secret_scan_service::{ArgPart, Cut, rewrite_shell};
+    let mut n = 0;
+    let mut name = || loop {
+        n += 1;
+        let name = format!("RDP_SECRET_HC_{n}");
+        if !taken(&name) && !detail.member.env.iter().any(|(k, _)| *k == name) {
+            break name;
+        }
+    };
+    match (
+        detail.health_test.as_slice(),
+        crate::services::import_plan_service::health_cut(detail),
+    ) {
+        ([kind, ..], _) if kind == "NONE" => HealthLine::Off,
+        ([], _) => HealthLine::None,
+        (_, Cut::Stuck) => HealthLine::Stuck,
+        ([kind, line], Cut::Clean) if kind == "CMD-SHELL" => HealthLine::Line(line.clone(), vec![]),
+        ([kind, _], Cut::Parts(parts)) if kind == "CMD-SHELL" => {
+            let (line, moved) = rewrite_shell(&parts, &mut name);
+            HealthLine::Line(line, moved)
+        }
+        ([_, args @ ..], Cut::Clean) if !args.is_empty() => {
+            HealthLine::Line(shell_words::join(args), vec![])
+        }
+        ([_, args @ ..], Cut::Parts(parts)) if !args.is_empty() => {
+            // An argv: each plain word quoted for the shell the check runs in.
+            let quoted: Vec<ArgPart> = parts
+                .into_iter()
+                .map(|p| match p {
+                    ArgPart::Plain(w) => ArgPart::Plain(script_word(&w)),
+                    secret => secret,
+                })
+                .collect();
+            let (line, moved) = rewrite_shell(&quoted, &mut name);
+            HealthLine::Line(line, moved)
+        }
+        _ => HealthLine::None,
+    }
+}
+
+/// A service's health check (`services.healthcheck_cmd`, a 500-character column).
+pub const HEALTH_MAX: usize = 500;
+
 /// The service a container becomes (an app: databases map to apps for now).
 pub fn new_service_of(
     detail: &Detail,
     project: &str,
     links: &std::path::Path,
+    health_choice: Option<&HealthChoice>,
+    ports_moved: &std::collections::BTreeMap<(u16, String), u16>,
 ) -> Result<Made, String> {
     use crate::services::creation_service::{NewMount, NewPort, NewService};
     let m = &detail.member;
@@ -928,6 +1220,18 @@ pub fn new_service_of(
     if detail.user != detail.image_user && !detail.user.is_empty() {
         new.user = Some(detail.user.clone());
     }
+    // What the panel has for them: capabilities (`NET_ADMIN`, without the
+    // `CAP_` Docker may add), sysctls, groups, CPUs (thousandths of a core,
+    // within the form's bounds).
+    let cap = |c: &String| c.trim().trim_start_matches("CAP_").to_ascii_uppercase();
+    new.cap_add = detail.cap_add.iter().map(cap).collect();
+    new.cap_drop = detail.cap_drop.iter().map(cap).collect();
+    new.sysctls = detail.sysctls.clone();
+    new.groups = detail.group_add.clone();
+    if detail.nano_cpus > 0 {
+        new.cpu_limit_millis =
+            u32::try_from((detail.nano_cpus / 1_000_000).clamp(10, 256_000)).ok();
+    }
     if detail.memory > 0 {
         new.mem_limit_mb = u32::try_from(detail.memory / (1024 * 1024)).ok();
     }
@@ -936,12 +1240,17 @@ pub fn new_service_of(
     let mut published = std::collections::BTreeSet::new();
     for port in &detail.ports {
         let loopback = matches!(port.host_ip.as_str(), "127.0.0.1" | "::1");
-        if !loopback
-            && !reserved.contains(&port.host_port)
-            && published.insert((port.host_port, port.protocol.clone()))
+        // Published on another port, as the admin chose (a port the panel
+        // keeps, or one on the loopback).
+        let moved = ports_moved
+            .get(&(port.host_port, port.protocol.clone()))
+            .copied();
+        let host_port = moved.unwrap_or(port.host_port);
+        if (moved.is_some() || (!loopback && !reserved.contains(&port.host_port)))
+            && published.insert((host_port, port.protocol.clone()))
         {
             new.ports.push(NewPort {
-                published: port.host_port,
+                published: host_port,
                 target: port.container_port,
                 protocol: port.protocol.clone(),
             });
@@ -1003,20 +1312,7 @@ pub fn new_service_of(
     }
     // Two tasks must not write the same data (also checked when it deploys).
     new.zero_downtime = m.mounts.iter().all(|mount| !mount.writable);
-    let healthcheck = match detail.health_test.as_slice() {
-        [kind, rest @ ..] if !rest.is_empty() => {
-            let command = if kind == "CMD-SHELL" {
-                rest.join(" ")
-            } else {
-                shell_words::join(rest)
-            };
-            let interval =
-                i32::try_from((detail.health_interval_ns / 1_000_000_000).max(1)).unwrap_or(30);
-            let retries = i32::try_from(detail.health_retries.max(1)).unwrap_or(3);
-            Some((command, interval, retries))
-        }
-        _ => None,
-    };
+    let healthcheck = health_of(detail, &mut new.env, health_choice)?;
     Ok(Made {
         service: new,
         moved,
@@ -1066,6 +1362,14 @@ pub async fn start(
         return Err(
             ValidationErrors::field("plan", "something in the plan blocks the import").into(),
         );
+    }
+    if let Some((copy, free)) = room_problem(&plan) {
+        tracing::info!(copy, free, "an import does not fit");
+        return Err(AppError::Conflict {
+            code: "no_room",
+            reason: "room",
+            message: "There is not enough free room for the data to copy: free some, then read the plan again",
+        });
     }
     let brought: Vec<&Value> = items.iter().filter(|i| i["choice"] == "bring").collect();
     // The ticked domains of each container that becomes a service.
@@ -1130,8 +1434,15 @@ pub async fn start(
             .iter()
             .find(|d| d.member.id == id)
             .ok_or_else(|| AppError::BadRequest("a container of the plan is gone".into()))?;
-        let mut one = new_service_of(detail, &row.project_name, &settings(app).links())
-            .map_err(AppError::BadRequest)?;
+        let choice = HealthChoice::of(&item["healthcheck_choice"]);
+        let mut one = new_service_of(
+            detail,
+            &row.project_name,
+            &settings(app).links(),
+            choice.as_ref(),
+            &ports_moved_of(item),
+        )
+        .map_err(AppError::BadRequest)?;
         // Written with the service, by its rules (`creation_service::create`).
         one.service.domains = kept_domains(item);
         // The basic auth that guarded its domains guards the service: its
@@ -1248,11 +1559,15 @@ pub async fn start(
             || one.service.user.is_some()
             || one.moved.iter().any(|m| m.mode == "link");
         let mut change = created.clone().into_active_model();
-        if let Some((command, interval, retries)) = &one.healthcheck {
+        let check = &one.healthcheck;
+        if let Some(command) = &check.command {
             change.healthcheck_cmd = Set(Some(command.clone()));
-            change.healthcheck_interval_s = Set(Some(*interval));
-            change.healthcheck_retries = Set(Some(*retries));
+            change.healthcheck_interval_s = Set(Some(check.interval_s));
+            change.healthcheck_retries = Set(Some(check.retries));
+            change.healthcheck_timeout_s = Set(check.timeout_s);
+            change.healthcheck_start_period_s = Set(check.start_period_s);
         }
+        change.healthcheck_off = Set(check.off);
         change.admin_only = Set(admin_only);
         change.update(&txn).await?;
         container_import_item::ActiveModel {
@@ -1384,7 +1699,14 @@ mod tests {
             "s3cr3t value".to_owned(),
             "--auth=tok3n".to_owned(),
         ];
-        let made = new_service_of(&detail, "p", std::path::Path::new("/links")).unwrap();
+        let made = new_service_of(
+            &detail,
+            "p",
+            std::path::Path::new("/links"),
+            None,
+            &Default::default(),
+        )
+        .unwrap();
         let command = made.service.command.clone().unwrap();
         // The panel's command is `sh -c '…'`: the image's entrypoint runs it, which runs the
         // original entrypoint and command, with the secrets read from the environment.
@@ -1423,7 +1745,14 @@ mod tests {
             protocol: "tcp".to_owned(),
         };
         detail.ports = vec![port("0.0.0.0"), port("::")];
-        let made = new_service_of(&detail, "p", std::path::Path::new("/links")).unwrap();
+        let made = new_service_of(
+            &detail,
+            "p",
+            std::path::Path::new("/links"),
+            None,
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(made.service.ports.len(), 1, "{:?}", made.service.ports);
     }
 }

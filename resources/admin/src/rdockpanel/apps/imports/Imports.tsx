@@ -6,6 +6,7 @@ import type { PageProps } from "@rustcms/admin-sdk";
 import { Alert, Button, Checkbox, Dialog, ErrorState, Input, Loading } from "@rustcms/admin-sdk/ui";
 import { Fragment, useRef, useState } from "react";
 import { Icon } from "../../lib/icons";
+import { dateTime, size } from "../../lib/format";
 import { useAdminQuery } from "../../lib/query";
 import { EmptyState, Field, Metric, type MenuItem, Pager, Page, RowActions, Section, Status, StatusBadge, TableScroll, useAsk, usePaged } from "../../lib/ui";
 
@@ -25,6 +26,14 @@ type PlanItem = {
   ports: Array<{ host_ip: string; host_port: number; container_port: number; protocol: string }>;
   domains: Array<{ host: string; path: string; port: number | null; https: boolean; skip: boolean; auth?: string; guard?: string; lost?: string[] }>;
   findings: Finding[];
+  /** Bytes of its volumes to copy (null: Docker did not say). */
+  copy_bytes?: number | null;
+  /** It writes data (a volume or folder not read only). */
+  writes?: boolean;
+  /** Ports published on another, as the admin chose (`"80/tcp": 8081`). */
+  port_remap?: Record<string, number>;
+  /** The admin's choice for a health check the panel could not cut. */
+  healthcheck_choice?: "drop" | { command: string } | null;
 };
 type Edge = { from: string; to: string; kind: string; signal: string; hardness: string };
 type Plan = {
@@ -33,6 +42,8 @@ type Plan = {
   edges: Edge[];
   levels: string[][];
   truncated: boolean;
+  /** Free room where Docker keeps volumes (null: not measured). */
+  free_bytes?: number | null;
   compose?: Array<{ project: string; without_container: string[]; notes: string[] }>;
 };
 type ImportVolume = { id: number; original_name: string; mode: string; panel_volume: string | null; copied_at: string | null; released_at: string | null };
@@ -45,6 +56,8 @@ type ImportView = {
   error: string | null;
   plan: Plan | null;
   volumes: ImportVolume[];
+  /** What it did, newest first (names only). */
+  events?: Array<{ text: string; subject: string | null; at: string }>;
 };
 
 /** The states in which a step runs: the page looks again every 2 seconds. */
@@ -225,6 +238,16 @@ export function ImportPage(props: PageProps<unknown> & { id: number }) {
   const isMove = imp.source_kind === "move";
   const items = plan?.items ?? [];
   const blocked = items.filter((i) => i.choice === "blocked").length;
+  // What the brought containers copy, and how long they may be down: the
+  // stops, the copy (~100 MB/s), each level's deployment (~30 s), the watch (60 s).
+  const brought = items.filter((i) => i.choice === "bring" && !i.as_tunnel);
+  const toCopy = brought.some((i) => i.copy_bytes == null) ? null : brought.reduce((n, i) => n + (i.copy_bytes ?? 0), 0);
+  // The stops run one after the other: one that writes data gets up to 120 s,
+  // another up to 30 s (most stop in seconds: the estimate is the most).
+  const stopS = brought.reduce((n, i) => n + (i.writes ? 120 : 30), 0);
+  const downtimeS = stopS + (toCopy ?? 0) / 100_000_000 + (plan?.levels.length ?? 1) * 30 + 60;
+  const downtimeMin = Math.max(1, Math.ceil(downtimeS / 60));
+  const noRoom = plan?.free_bytes != null && toCopy !== null && toCopy > 0 && toCopy + Math.max(toCopy / 10, 2 * 1024 ** 3) > plan.free_bytes;
   const confirms = items.filter((i) => i.choice !== "blocked" && i.findings.some((f) => f.level === "CONFIRM")).length;
   const run = async (key: string, path: string, body: unknown, done: string, method: "post" | "delete" = "post") => {
     setBusy(key);
@@ -394,7 +417,11 @@ export function ImportPage(props: PageProps<unknown> & { id: number }) {
               <Metric plain label={t("Read")} value={items.length} />
               <Metric plain label={t("To bring")} value={items.filter((i) => i.choice === "bring").length} />
               <Metric plain label={t("Blocked")} value={blocked} />
+              <Metric plain label={t("Data to copy")} value={toCopy === null ? t("unknown") : size(toCopy, props.locale)} />
+              <Metric plain label={t("Free room")} value={plan.free_bytes == null ? t("unknown") : size(plan.free_bytes, props.locale)} />
+              <Metric plain label={t("Downtime (estimate)")} value={t("up to {n} min").replace("{n}", String(downtimeMin))} />
             </div>
+            {noRoom && <Alert variant="destructive">{t("There is not enough free room for the data to copy: free some, then read the plan again.")}</Alert>}
             {plan.truncated && <Alert>{t("More than 50 containers are tied together: the rest is left out.")}</Alert>}
             {blocked > 0 ? (
               <Alert variant="destructive">{t("Something blocks the import: see the containers below.")}</Alert>
@@ -453,6 +480,7 @@ export function ImportPage(props: PageProps<unknown> & { id: number }) {
           <Lost t={t} plan={plan} />
         </>
       )}
+      {(imp.events?.length ?? 0) > 0 && <Progress t={t} locale={props.locale} events={imp.events ?? []} />}
       {imp.volumes.length > 0 && <Volumes {...props} imp={imp} run={run} busy={busy} />}
       {detail && plan && (
         <Detail {...props} imp={imp} plan={plan} id={detail} onClose={() => setDetail(null)} onSaved={() => void view.refetch()} />
@@ -571,6 +599,35 @@ function Lost(props: { t: T; plan: Plan }) {
   );
 }
 
+/** What the import did, newest first, 25 a page. */
+function Progress(props: { t: T; locale: string; events: NonNullable<ImportView["events"]> }) {
+  const { t, events } = props;
+  const paged = usePaged(events);
+  return (
+    <Section title={t("Progress")} flush>
+      <TableScroll>
+        <table className="rdp2-table">
+          <thead>
+            <tr>
+              <th>{t("Step")}</th>
+              <th className="rdp2-right">{t("When")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paged.page.map((e, n) => (
+              <tr key={n}>
+                <td>{t(e.text).replace("{name}", e.subject ?? "")}</td>
+                <td className="rdp2-right rdp2-muted rdp2-small">{dateTime(e.at, props.locale)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
+      <Pager total={events.length} at={paged.at} onPage={paged.set} t={t} />
+    </Section>
+  );
+}
+
 /** The volumes an import copied: released by typing their name; a move's old folders cleaned. */
 function Volumes(props: PageProps<unknown> & { imp: ImportView; run: (key: string, path: string, body: unknown, done: string) => Promise<boolean>; busy: string | null }) {
   const { t, imp } = props;
@@ -656,6 +713,11 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
   const ask = useAsk();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const chosen = item?.healthcheck_choice;
+  const [portDraft, setPortDraft] = useState<Record<string, string>>({});
+  const [portError, setPortError] = useState<string[] | undefined>(undefined);
+  const [healthCommand, setHealthCommand] = useState(typeof chosen === "object" && chosen ? chosen.command : "");
+  const [healthError, setHealthError] = useState<string[] | undefined>(undefined);
   if (!item) return null;
   const editable = props.imp.state === "planned" && item.choice !== "blocked";
   // The container becomes the panel's own tunnel, or a service again.
@@ -683,6 +745,47 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
       props.onSaved();
     } catch (err) {
       setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Ports the panel keeps, or on the loopback: they may go on another port.
+  const movable = item.ports.filter(
+    (p, n, all) =>
+      all.findIndex((q) => q.host_port === p.host_port && q.protocol === p.protocol) === n &&
+      item.findings.some((f) => (f.code === "port_reserved" || f.code === "port_loopback") && f.field === `port ${p.host_port}`),
+  );
+  const movePort = async (key: string, to: number | null) => {
+    setBusy(true);
+    setError(null);
+    setPortError(undefined);
+    try {
+      await props.api.patch(`/imports/${props.imp.id}/plan`, { ports: { [item.container_id]: { [key]: to } } });
+      props.toast.success(t("Saved"));
+      setPortDraft({});
+      props.onSaved();
+    } catch (err) {
+      const fields = (err as { fieldErrors?: Record<string, string[]> } | null)?.fieldErrors;
+      if (fields?.ports) setPortError(fields.ports.map((m) => t(m)));
+      else setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // A health check the panel could not cut: dropped, or the admin's command.
+  const healthStuck = item.findings.some((f) => f.code === "healthcheck_secret" || f.code === "healthcheck_long" || f.code === "healthcheck_chosen");
+  const setHealth = async (choice: "drop" | { command: string } | null) => {
+    setBusy(true);
+    setError(null);
+    setHealthError(undefined);
+    try {
+      await props.api.patch(`/imports/${props.imp.id}/plan`, { healthcheck: { [item.container_id]: choice } });
+      props.toast.success(t("Saved"));
+      props.onSaved();
+    } catch (err) {
+      const fields = (err as { fieldErrors?: Record<string, string[]> } | null)?.fieldErrors;
+      if (fields?.healthcheck) setHealthError(fields.healthcheck.map((m) => t(m)));
+      else setError(err);
     } finally {
       setBusy(false);
     }
@@ -753,18 +856,77 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
             )}
           </Field>
         )}
-        <Field label={t("Ports")}>
+        {healthStuck && (
+          <Field
+            label={t("Health check")}
+            help={t("Its health check holds a secret the panel cannot set apart. Drop it, or type a command that reads the secret from a variable (\"$NAME\").")}
+            error={healthError}
+          >
+            {item.healthcheck_choice === "drop" ? (
+              <span>{t("Dropped")}</span>
+            ) : null}
+            {props.imp.state === "planned" && (
+              <div className="rdp2-form">
+                <Input
+                  className="rdp2-mono"
+                  aria-label={t("Health check")}
+                  value={healthCommand}
+                  aria-invalid={healthError ? true : undefined}
+                  onChange={(e) => setHealthCommand(e.target.value)}
+                  placeholder={'mysqladmin ping -h 127.0.0.1 -p"$MYSQL_ROOT_PASSWORD"'}
+                />
+                <div className="rdp2-actions">
+                  <Button type="button" size="sm" variant="outline" disabled={busy || healthCommand.trim() === ""} onClick={() => setHealth({ command: healthCommand.trim() })}>
+                    {busy ? t("Saving…") : t("Use this command")}
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" disabled={busy || item.healthcheck_choice === "drop"} onClick={() => setHealth("drop")}>
+                    {t("Drop the health check")}
+                  </Button>
+                  {item.healthcheck_choice ? (
+                    <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setHealth(null)}>
+                      {t("Choose again")}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            )}
+          </Field>
+        )}
+        <Field label={t("Ports")} help={movable.length > 0 ? t("A port the panel keeps, or one on the loopback, can be published on another.") : undefined} error={portError}>
           <span className="rdp2-mono rdp2-small">
             {item.ports.length === 0
               ? "–"
               : item.ports.map((p, n) => (
                   <span key={n} className="rdp2-levels">
-                    <span>{`${p.host_ip || "*"}:${p.host_port}`}</span>
+                    <span>{`${p.host_ip || "*"}:${item.port_remap?.[`${p.host_port}/${p.protocol}`] ?? p.host_port}`}</span>
                     <Icon name="arrowRight" className="rdp2-muted" />
                     <span>{`${p.container_port}/${p.protocol}`}</span>
                   </span>
                 ))}
           </span>
+          {props.imp.state === "planned" &&
+            movable.map((p) => {
+              const key = `${p.host_port}/${p.protocol}`;
+              return (
+                <div key={key} className="rdp2-actions">
+                  <Input
+                    type="number"
+                    aria-label={t("Publish {port} on").replace("{port}", key)}
+                    placeholder={t("Publish {port} on").replace("{port}", key)}
+                    value={portDraft[key] ?? String(item.port_remap?.[key] ?? "")}
+                    onChange={(e) => setPortDraft({ ...portDraft, [key]: e.target.value })}
+                  />
+                  <Button type="button" size="sm" variant="outline" disabled={busy || !(portDraft[key] ?? "").trim()} onClick={() => movePort(key, Number(portDraft[key]))}>
+                    {busy ? t("Saving…") : t("Publish")}
+                  </Button>
+                  {item.port_remap?.[key] ? (
+                    <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => movePort(key, null)}>
+                      {t("Not published")}
+                    </Button>
+                  ) : null}
+                </div>
+              );
+            })}
         </Field>
         {item.domains.length > 0 && (
           <Field label={t("Domains")} help={t("Ticked domains are added to the service when it deploys.")}>

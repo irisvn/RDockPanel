@@ -210,7 +210,7 @@ async fn find(app: &AppState, id: i64) -> AppResult<container_import::Model> {
 
 pub async fn show(State(app): State<AppState>, Path(id): Path<i64>) -> AppResult<Json<Value>> {
     use crate::models::container_import_volume;
-    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
     let row = find(&app, id).await?;
     let volumes = container_import_volume::Entity::find()
         .filter(container_import_volume::Column::ImportId.eq(id))
@@ -218,6 +218,19 @@ pub async fn show(State(app): State<AppState>, Path(id): Path<i64>) -> AppResult
         .all(app.db())
         .await?;
     let mut shown = view(&row);
+    // What it did, newest first (names only).
+    let events = crate::models::container_import_event::Entity::find()
+        .filter(crate::models::container_import_event::Column::ImportId.eq(id))
+        .order_by_desc(crate::models::container_import_event::Column::Id)
+        .limit(200)
+        .all(app.db())
+        .await?;
+    shown["events"] = json!(
+        events
+            .iter()
+            .map(|e| json!({"text": e.text, "subject": e.subject, "at": e.at}))
+            .collect::<Vec<_>>()
+    );
     shown["volumes"] = json!(
         volumes
             .iter()
@@ -244,8 +257,164 @@ pub struct PlanChange {
     tunnel: Option<BTreeMap<String, bool>>,
     /// Container id → the hosts of its domains left out (the others are added).
     domains: Option<BTreeMap<String, Vec<String>>>,
+    /// Container id → `{"<host port>/<protocol>": another port, or null}`:
+    /// publish a port the panel keeps (or one on the loopback) on another.
+    ports: Option<BTreeMap<String, BTreeMap<String, Option<u16>>>>,
+    /// Container id → what to do with a health check the panel could not
+    /// cut: `"drop"`, `{"command": "…"}`, or `null` (choose again).
+    healthcheck: Option<BTreeMap<String, Value>>,
     /// Leaving a container behind breaks calls to it: said, and confirmed.
     confirm: Option<bool>,
+}
+
+/// Ports the plan publishes, kept or moved, but `except` (a container and
+/// its `port/protocol`): another port may not take one of them.
+fn plan_ports(plan: &Value, reserved: &[u16], except: (&str, &str)) -> Vec<(u16, String)> {
+    let mut out = Vec::new();
+    for item in plan["items"].as_array().into_iter().flatten() {
+        if item["choice"] != "bring" {
+            continue;
+        }
+        let moved = crate::services::import_service::ports_moved_of(item);
+        for port in item["ports"].as_array().into_iter().flatten() {
+            let (Some(host), Some(proto)) = (
+                port["host_port"]
+                    .as_u64()
+                    .and_then(|p| u16::try_from(p).ok()),
+                port["protocol"].as_str(),
+            ) else {
+                continue;
+            };
+            if item["container_id"] == except.0 && format!("{host}/{proto}") == except.1 {
+                continue;
+            }
+            let loopback = matches!(port["host_ip"].as_str(), Some("127.0.0.1" | "::1"));
+            if let Some(to) = moved.get(&(host, proto.to_owned())) {
+                out.push((*to, proto.to_owned()));
+            } else if !loopback && !reserved.contains(&host) {
+                out.push((host, proto.to_owned()));
+            }
+        }
+    }
+    out
+}
+
+/// Publishes ports of the plan on others the admin chose (one the panel
+/// keeps, one on the loopback): valid, not kept, not the plan's nor another
+/// service's (checked again by the start, when the services are made).
+async fn move_ports(
+    txn: &sea_orm::DatabaseTransaction,
+    plan: &mut Value,
+    moves: &BTreeMap<String, BTreeMap<String, Option<u16>>>,
+) -> AppResult<()> {
+    use crate::models::service_port;
+    use sea_orm::{ColumnTrait, QueryFilter};
+    let reserved = crate::services::deploy_rules_service::config()
+        .reserved_ports
+        .clone();
+    for (container, ports) in moves {
+        for (key, to) in ports {
+            let (host, proto) = key
+                .split_once('/')
+                .ok_or_else(|| invalid("ports", "a port is written 80/tcp"))?;
+            let item = plan["items"]
+                .as_array()
+                .and_then(|items| items.iter().find(|i| i["container_id"] == *container))
+                .ok_or_else(|| invalid("ports", "names a container that is not in the plan"))?;
+            let known = item["ports"].as_array().into_iter().flatten().any(|p| {
+                p["host_port"].as_u64().map(|p| p.to_string()).as_deref() == Some(host)
+                    && p["protocol"] == proto
+            });
+            if !known {
+                return Err(invalid(
+                    "ports",
+                    "names a port the container does not publish",
+                ));
+            }
+            if let Some(to) = to {
+                let used = service_port::Entity::find()
+                    .filter(service_port::Column::Published.eq(i32::from(*to)))
+                    .filter(service_port::Column::Protocol.eq(proto))
+                    .one(txn)
+                    .await?
+                    .is_some();
+                if *to == 0
+                    || reserved.contains(to)
+                    || used
+                    || plan_ports(plan, &reserved, (container, key))
+                        .contains(&(*to, proto.to_owned()))
+                {
+                    return Err(invalid("ports", "this port is taken or kept by the panel"));
+                }
+            }
+            let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
+            let item = items
+                .iter_mut()
+                .find(|i| i["container_id"] == *container)
+                .ok_or(AppError::NotFound)?;
+            if !item["port_remap"].is_object() {
+                item["port_remap"] = json!({});
+            }
+            match to {
+                Some(to) => item["port_remap"][key.as_str()] = json!(to),
+                None => {
+                    if let Some(map) = item["port_remap"].as_object_mut() {
+                        map.remove(key.as_str());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// An admin's health check command: one line, of the form's length, no
+/// secret written in it (one is read from a variable: `-p"$DB_PASSWORD"`).
+/// The choice as the plan keeps it: `"drop"`, `{"command": …}` (nothing else
+/// the request held), or null.
+fn check_health_choice(value: &Value, known: &[String]) -> AppResult<Value> {
+    use crate::services::import_service::{HEALTH_MAX, HealthChoice};
+    use crate::services::secret_scan_service::{Cut, cut_shell};
+    match HealthChoice::of(value) {
+        Some(HealthChoice::Drop) => Ok(json!("drop")),
+        Some(HealthChoice::Command(command)) => {
+            if command.is_empty() || command.len() > HEALTH_MAX || command.contains(['\n', '\r']) {
+                return Err(invalid(
+                    "healthcheck",
+                    "is one line of at most 500 characters",
+                ));
+            }
+            // Nor a value of the container's secrets, written out: as a word
+            // of its own (a short one too), or inside one when long enough.
+            // A line the panel does not follow: no secret of the container
+            // in it at all, however short.
+            let words: Option<Vec<String>> =
+                crate::services::secret_scan_service::shell_words_of(&command)
+                    .map(|w| w.into_iter().map(|w| w.word).collect());
+            if !matches!(cut_shell(&command, known, None), Cut::Clean)
+                || known.iter().any(|k| {
+                    !k.is_empty()
+                        && match &words {
+                            Some(words) => {
+                                words
+                                    .iter()
+                                    .any(|w| w == k || w.ends_with(&format!("={k}")))
+                                    || (k.len() >= 4 && command.contains(k.as_str()))
+                            }
+                            None => command.contains(k.as_str()),
+                        }
+                })
+            {
+                return Err(invalid(
+                    "healthcheck",
+                    "holds a secret: read it from an environment variable (\"$NAME\")",
+                ));
+            }
+            Ok(json!({ "command": command }))
+        }
+        None if value.is_null() => Ok(Value::Null),
+        None => Err(invalid("healthcheck", "is \"drop\" or {\"command\": …}")),
+    }
 }
 
 /// The admin's choices in the plan: which containers to bring, the
@@ -293,6 +462,32 @@ pub async fn change_plan(
             .any(|id| tunnel.get(id).is_some_and(|on| *on))
         {
             crate::services::import_service::new_tunnels(&app, &*docker(&app)?, &chosen).await?;
+        }
+    }
+    // The secrets of the containers whose health check is typed: a command
+    // must not write one out (read before the write: Docker).
+    let mut known: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    if let Some(checks) = &change.healthcheck {
+        for (container, value) in checks {
+            if value.get("command").is_none() {
+                continue;
+            }
+            let doc = docker(&app)?
+                .engine()
+                .inspect_container_raw(container, false)
+                .await
+                .map_err(|e| AppError::BadRequest(e.to_string()))?;
+            let values = doc["Config"]["Env"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str()?.split_once('='))
+                .filter(|(name, value)| {
+                    crate::services::secret_scan_service::secret_env_name(name) && !value.is_empty()
+                })
+                .map(|(_, value)| value.to_owned())
+                .collect();
+            known.insert(container.clone(), values);
         }
     }
     let txn = rustcms::db::begin_write(app.db()).await?;
@@ -390,6 +585,78 @@ pub async fn change_plan(
             }
         }
     }
+    if let Some(moves) = &change.ports {
+        move_ports(&txn, &mut plan, moves).await?;
+    }
+    if let Some(checks) = &change.healthcheck {
+        let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
+        for (container, value) in checks {
+            let value =
+                &check_health_choice(value, known.get(container).map_or(&[][..], Vec::as_slice))?;
+            let item = items
+                .iter_mut()
+                .find(|i| i["container_id"] == *container)
+                .ok_or_else(|| {
+                    invalid("healthcheck", "names a container that is not in the plan")
+                })?;
+            let findings = item["findings"].as_array_mut().ok_or(AppError::NotFound)?;
+            let stuck = findings.iter().any(|f| {
+                matches!(
+                    f["code"].as_str(),
+                    Some("healthcheck_secret" | "healthcheck_long" | "healthcheck_chosen")
+                )
+            });
+            // Which finding made it the admin's: said again when chosen again.
+            let long = findings.iter().any(|f| {
+                f["code"] == "healthcheck_long"
+                    || (f["code"] == "healthcheck_chosen" && f["field"] == "healthcheck_long")
+            });
+            if !stuck {
+                return Err(invalid(
+                    "healthcheck",
+                    "only a health check the panel could not cut is chosen",
+                ));
+            }
+            findings.retain(|f| {
+                !matches!(
+                    f["code"].as_str(),
+                    Some("healthcheck_secret" | "healthcheck_long" | "healthcheck_chosen")
+                )
+            });
+            if value.is_null() && long {
+                findings.push(json!({
+                    "code": "healthcheck_long",
+                    "level": "BLOCK",
+                    "field": "healthcheck",
+                    "text": "its health check is longer than the panel keeps (500 characters)",
+                    "how_to_unblock": "In its details, drop the health check or type a shorter one."
+                }));
+            } else if value.is_null() {
+                findings.push(json!({
+                    "code": "healthcheck_secret",
+                    "level": "BLOCK",
+                    "field": "healthcheck",
+                    "text": "its health check holds a secret the panel cannot set apart",
+                    "how_to_unblock": "In its details, drop the health check or type a new one."
+                }));
+            } else {
+                findings.push(json!({
+                    "code": "healthcheck_chosen",
+                    "level": "CONFIRM",
+                    // Remembers why it was the admin's (chosen again: said again).
+                    "field": if long { "healthcheck_long" } else { "healthcheck" },
+                    "text": if value == "drop" {
+                        "its health check is dropped (the image's own does not run either)"
+                    } else {
+                        "its health check is the one you typed"
+                    },
+                    "how_to_unblock": null
+                }));
+            }
+            item["healthcheck_choice"] = value.clone();
+        }
+        crate::services::import_plan_service::regroup(&mut plan);
+    }
     if let Some(domains) = &change.domains {
         let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
         for (container, skipped) in domains {
@@ -417,6 +684,7 @@ pub async fn change_plan(
     }
     // Checked again: what the panel serves now, what the choices changed.
     crate::services::import_service::check_domains(&txn, &mut plan).await?;
+    crate::services::import_service::check_compose(&mut plan);
     if cut_soft && change.confirm != Some(true) {
         return Err(invalid(
             "confirm",
@@ -437,6 +705,12 @@ pub async fn change_plan(
             "choices": change.choices,
             "project_name": change.project_name,
             "domains": change.domains,
+            "ports": change.ports,
+            // What was chosen, never a command's text.
+            "healthcheck": change.healthcheck.as_ref().map(|c| c
+                .iter()
+                .map(|(k, v)| (k.clone(), if v.is_null() { "again" } else if v == "drop" { "drop" } else { "command" }))
+                .collect::<BTreeMap<_, _>>()),
         }));
     audit::record(
         &txn,

@@ -119,6 +119,63 @@ async fn release<C: ConnectionTrait>(db: &C, id: i64, token: &str) {
         .await;
 }
 
+/// Records what a step did, for the import's page: once per `key` (a step
+/// run again does not repeat it), at most 500 per import, best effort (the
+/// import goes on without it). `text` is English with `{name}` for `subject`.
+pub(crate) async fn event(
+    db: &sea_orm::DatabaseConnection,
+    import_id: i64,
+    key: &str,
+    text: &str,
+    subject: Option<&str>,
+) {
+    use crate::models::container_import_event as ev;
+    let count = ev::Entity::find()
+        .filter(ev::Column::ImportId.eq(import_id))
+        .count(db)
+        .await
+        .unwrap_or(0);
+    // Recorded already (a step run again): nothing to add, nothing to drop.
+    let key: String = key.chars().take(191).collect();
+    if ev::Entity::find()
+        .filter(ev::Column::ImportId.eq(import_id))
+        .filter(ev::Column::EventKey.eq(key.clone()))
+        .one(db)
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return;
+    }
+    // The newest 500: the oldest goes for a new one.
+    if count >= 500
+        && let Ok(Some(oldest)) = ev::Entity::find()
+            .filter(ev::Column::ImportId.eq(import_id))
+            .order_by_asc(ev::Column::Id)
+            .one(db)
+            .await
+    {
+        let _ = ev::Entity::delete_by_id(oldest.id).exec(db).await;
+    }
+    let _ = ev::Entity::insert(ev::ActiveModel {
+        import_id: Set(import_id),
+        event_key: Set(key),
+        text: Set(text.to_owned()),
+        subject: Set(subject.map(|s| s.chars().take(255).collect())),
+        at: Set(Utc::now()),
+        ..Default::default()
+    })
+    .on_conflict(
+        // Recorded already (MySQL has no `DO NOTHING`).
+        sea_orm::sea_query::OnConflict::columns([ev::Column::ImportId, ev::Column::EventKey])
+            .update_column(ev::Column::EventKey)
+            .to_owned(),
+    )
+    .exec(db)
+    .await;
+}
+
 /// What a step works with.
 pub(crate) struct Cx<'a> {
     pub(crate) app: &'a AppState,
@@ -570,6 +627,14 @@ async fn stopping(cx: &Cx<'_>) -> Result<Next, Failure> {
             a.state = Set("stopped".to_owned());
         })
         .await?;
+        event(
+            cx.db(),
+            cx.import.id,
+            &format!("stop:{}", item.id),
+            "Stopped {name}",
+            Some(&item.container_name),
+        )
+        .await;
         // Killed with data it was writing: the admin decides. Without, nothing is lost.
         if code == 137 && writes {
             // On: the stops that remain, then the rest.
@@ -635,6 +700,18 @@ async fn copying(cx: &Cx<'_>) -> Result<Next, Failure> {
     let engine = cx.docker.engine();
     for volume in volumes.iter().filter(|v| v.copied_at.is_none()) {
         cx.alive().await?;
+        event(
+            cx.db(),
+            cx.import.id,
+            &format!("copy:{}:start", volume.id),
+            if volume.mode == "copy" {
+                "Copying {name}"
+            } else {
+                "Linking {name}"
+            },
+            Some(&volume.original_name),
+        )
+        .await;
         match volume.mode.as_str() {
             "copy" => {
                 let target = volume.panel_volume.clone().ok_or("a copy has no target")?;
@@ -730,6 +807,18 @@ async fn copying(cx: &Cx<'_>) -> Result<Next, Failure> {
         let mut done = volume.clone().into_active_model();
         done.copied_at = Set(Some(Utc::now()));
         done.update(cx.db()).await.map_err(|e| e.to_string())?;
+        event(
+            cx.db(),
+            cx.import.id,
+            &format!("copy:{}:done", volume.id),
+            if volume.mode == "copy" {
+                "Copied {name}"
+            } else {
+                "Linked {name}"
+            },
+            Some(&volume.original_name),
+        )
+        .await;
     }
     // Nothing started again meanwhile: a copy of data that moved is not one.
     for item in &cx.items {
@@ -963,7 +1052,23 @@ async fn deploying(cx: &Cx<'_>) -> Result<Next, Failure> {
                 mark.update(cx.db()).await.map_err(|e| e.to_string())?;
             }
         }
+        event(
+            cx.db(),
+            cx.import.id,
+            &format!("deploy:{}:start", service.id),
+            "Deploying {name}",
+            Some(&service.name),
+        )
+        .await;
         let deployed = deploy_service(cx, &service, Trigger::Deploy).await?;
+        event(
+            cx.db(),
+            cx.import.id,
+            &format!("deploy:{}:done", service.id),
+            "Deployed {name}",
+            Some(&service.name),
+        )
+        .await;
         set_item(cx, item, |a| {
             a.state = Set("deployed".to_owned());
             a.deployment_id = Set(Some(deployed));
@@ -1138,6 +1243,14 @@ pub(crate) async fn deploy_service(
 
 async fn observing(cx: &Cx<'_>) -> Result<Next, Failure> {
     let project = cx.project().await?;
+    event(
+        cx.db(),
+        cx.import.id,
+        "observe",
+        "Watching the new services",
+        None,
+    )
+    .await;
     let until = std::time::Instant::now() + cx.settings.observe;
     // Only what fails while it is watched: Swarm keeps the failures of the
     // start (a database that was not ready yet), which the deployment accepted.
@@ -1159,6 +1272,14 @@ async fn observing(cx: &Cx<'_>) -> Result<Next, Failure> {
             }
         }
         if std::time::Instant::now() >= until {
+            event(
+                cx.db(),
+                cx.import.id,
+                "active",
+                "The new services run",
+                None,
+            )
+            .await;
             return Ok(Next::Go("active"));
         }
         tokio::time::sleep(cx.settings.poll).await;
@@ -1166,6 +1287,7 @@ async fn observing(cx: &Cx<'_>) -> Result<Next, Failure> {
 }
 
 async fn undoing_step(cx: &Cx<'_>) -> Result<Next, Failure> {
+    event(cx.db(), cx.import.id, "undo", "Undoing", None).await;
     // The tunnels this import made go before the originals run again: their
     // rows, not a tunnel the admin made since under the same name.
     for item in cx.items.iter().filter(|i| i.tunnel_id.is_some()) {
@@ -1372,6 +1494,14 @@ mv "$b" "$o""#;
             }
         }
         set_item(cx, item, |a| a.state = Set("restored".to_owned())).await?;
+        event(
+            cx.db(),
+            cx.import.id,
+            &format!("restore:{}", item.id),
+            "Started {name} again",
+            Some(&item.container_name),
+        )
+        .await;
     }
     // The services of the import go from the panel, with what made them.
     let txn = rustcms::db::begin_write(cx.db())

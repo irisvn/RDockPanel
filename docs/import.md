@@ -62,6 +62,9 @@ hold what was written since).
 | environment | names and values sealed like any service's; pairs equal to the image's own are left out |
 | named volume | a volume of the panel's, `rdp_<project>_<service>_<name>`, copied |
 | host folder | used in place through a symlink the panel makes (`link` mount); the service is `admin_only` until the folder is moved |
+| health check | its command (a shell line), interval, retries, timeout and start period; a password in it moves to `RDP_SECRET_HC_<n>` (sealed) and the check reads `"$RDP_SECRET_HC_<n>"`. Secrets are told by the program: `-p<value>` is a password for mysql/mysqladmin/mariadb/mongo(sh) only (a port elsewhere), `--password`, `--requirepass`, `-a` of redis-cli, `-u user:pass`, `PGPASSWORD=…`; `$NAME` is a reference, never a secret. One that cannot be cut (inside a URL, a nested script) blocks the container until the admin drops the check or types one (without a secret: `-p"$NAME"`). `NONE` or a dropped check: off (the image's own does not run either) |
+| capabilities, sysctls, groups, CPUs | carried (`cap_add`, `cap_drop`, `sysctls`, `groups`, `cpu_limit_millis`) |
+| shared memory, ulimits, tmpfs, devices, extra hosts, DNS, security options, read-only root, stop signal and grace, working directory, log driver, `init: false` | said in the plan (`setting_lost`), not carried |
 | command | as it was; a secret in it (`--requirepass x`, `--password=x`) moves to an environment variable `RDP_SECRET_<n>` and the command becomes `sh -c 'exec <entrypoint> <command> "$RDP_SECRET_<n>"'` (confirmed: the image needs a `/bin/sh`). Only when the image's entrypoint runs the command it is given (none, `docker-entrypoint.sh`, `tini --`, `dumb-init --`); with a program as entrypoint the import is blocked. A secret env name is told by its words (`DB_PASSWORD`, `GITHUB_TOKEN`), not by a part of a word (`PASSENGER_APP_ENV`, the shell's `PWD`) |
 | user | a container that ran as another user than its image's (a tunnel as root) keeps it: `services.user`, shown on the service, and the service is `admin_only` |
 | Cloudflare tunnel (`cloudflared` with a token in `TUNNEL_TOKEN` or `--token`) | a service, or, chosen in its details, **a tunnel of the panel** (Settings → Cloudflare Tunnel), named after the container (`tunnel`, `tunnel-2` when the name is taken): no service is made, the panel runs `rdp-cloudflared-<name>` with that token when it comes to this container's level, and an undo removes that tunnel (only the ones the import made). Several cloudflared (several accounts) become several tunnels. A token that a tunnel of the panel has already, or that two containers share, is refused (one cloudflared per token): the container can still come as a service. Every public hostname must then point to Traefik (Settings shows where) and each service needs a domain: said in the confirmation |
@@ -100,6 +103,20 @@ written to the volume stays there); **Clean the old folder** (the folder's name 
   be undone, while the service uses the folder again (a link or a bind), and while another service or
   container uses it or a folder inside it. A symlink in a folder *above* it is resolved by Docker: keep the
   folders above it writable by root only.
+
+## Before it starts
+
+The plan says the data to copy (the named volumes' sizes, Docker's `/system/df`), the free room where Docker
+keeps volumes (a helper's `df` of a volume to copy) and the downtime at most: the stops one after the other (up
+to 120 s for a container that writes data, 30 s for another), the copy at ~100 MB/s, ~30 s a level to deploy, 60 s
+watched. An import whose data and margin (10%, at least 2 GiB) do not
+fit is refused (`409 no_room`); the copy checks again. A port the panel keeps (`[panel] reserved_ports`) or one
+on the loopback can be published on another (`PATCH plan {"ports": {container: {"80/tcp": 8081}}}`: valid, not
+kept, not another service's nor the plan's). A Compose project not renamed (some of its containers stay) says on
+its brought containers that `docker compose up` would start the originals again.
+
+The page shows what each step did (`container_import_events`: stopped, copied, linked, deployed, watched,
+undone; names only, once per step, at most 500).
 
 ## Safety
 

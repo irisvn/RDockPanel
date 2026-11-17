@@ -31,6 +31,8 @@ const CPU_MILLIS: std::ops::RangeInclusive<i64> = 10..=256_000;
 const MEM_MB: std::ops::RangeInclusive<i64> = 4..=1_048_576;
 const HEALTH_INTERVAL_S: std::ops::RangeInclusive<i64> = 1..=3600;
 const HEALTH_RETRIES: std::ops::RangeInclusive<i64> = 1..=20;
+const HEALTH_TIMEOUT_S: std::ops::RangeInclusive<i64> = 1..=600;
+const HEALTH_START_S: std::ops::RangeInclusive<i64> = 0..=3600;
 /// A rate limit's average and burst.
 const RATE: std::ops::RangeInclusive<i64> = 1..=rate_limit_service::MAX as i64;
 
@@ -109,6 +111,9 @@ impl Resource for ServiceResource {
             Field::column(service::Column::HealthcheckCmd).max_length(500),
             Field::column(service::Column::HealthcheckIntervalS),
             Field::column(service::Column::HealthcheckRetries),
+            Field::column(service::Column::HealthcheckTimeoutS),
+            Field::column(service::Column::HealthcheckStartPeriodS),
+            Field::column(service::Column::HealthcheckOff),
             // Sealed with APP_KEY; names shown, values never.
             Field::column(service::Column::Env)
                 .encrypted_map()
@@ -163,6 +168,11 @@ impl Resource for ServiceResource {
                 .help("Run in the container, e.g. wget -qO- http://127.0.0.1/health"),
             NumberInput::make("healthcheck_interval_s"),
             NumberInput::make("healthcheck_retries"),
+            NumberInput::make("healthcheck_timeout_s").help("Seconds a check may take (5 when empty)"),
+            NumberInput::make("healthcheck_start_period_s")
+                .help("Seconds after a start before failures count (10 when empty)"),
+            Toggle::make("healthcheck_off")
+                .help("No health check, not even the image's own"),
             SecretMapInput::make("env")
                 .column_span(2)
                 .help("Environment variables: names are letters, digits and _; values are never shown again"),
@@ -611,6 +621,8 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
     range("mem_reservation_mb", MEM_MB, &mut errors);
     range("healthcheck_interval_s", HEALTH_INTERVAL_S, &mut errors);
     range("healthcheck_retries", HEALTH_RETRIES, &mut errors);
+    range("healthcheck_timeout_s", HEALTH_TIMEOUT_S, &mut errors);
+    range("healthcheck_start_period_s", HEALTH_START_S, &mut errors);
     range("rate_limit_average", RATE, &mut errors);
     range("rate_limit_burst", RATE, &mut errors);
     if let Some(period) = text(data, "rate_limit_period")

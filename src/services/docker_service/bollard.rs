@@ -1349,6 +1349,56 @@ end HUP; sleep 2; end KILL; true"#
         code
     }
 
+    async fn run_helper_output(&self, spec: HelperSpec) -> DockerResult<(i64, String)> {
+        let body = helper_body(&spec);
+        let created = self
+            .client
+            .create_container(
+                Some(
+                    ::bollard::query_parameters::CreateContainerOptionsBuilder::new()
+                        .name(&spec.name)
+                        .build(),
+                ),
+                body,
+            )
+            .await
+            .map_err(map_err)?;
+        let run = async {
+            self.client
+                .start_container(&created.id, None::<StartContainerOptions>)
+                .await
+                .map_err(map_err)?;
+            let mut waiting = self.client.wait_container(
+                &created.id,
+                None::<::bollard::query_parameters::WaitContainerOptions>,
+            );
+            let code = match waiting.next().await {
+                Some(Ok(done)) => done.status_code,
+                Some(Err(Error::DockerContainerWaitError { code, .. })) => code,
+                Some(Err(e)) => return Err(map_err(e)),
+                None => return Err(DockerError::Other("the helper's wait ended".to_owned())),
+            };
+            let options = LogsOptionsBuilder::new().stdout(true).tail("20").build();
+            let mut lines = self.client.logs(&created.id, Some(options));
+            let mut out = String::new();
+            while let Some(Ok(item)) = lines.next().await {
+                if let LogOutput::StdOut { message } | LogOutput::Console { message } = item {
+                    out.push_str(&String::from_utf8_lossy(&message));
+                }
+                if out.len() > 4096 {
+                    out.truncate(4096);
+                    break;
+                }
+            }
+            Ok((code, out))
+        };
+        let done = tokio::time::timeout(std::time::Duration::from_secs(spec.timeout_s), run)
+            .await
+            .unwrap_or_else(|_| Err(DockerError::Other("the helper timed out".to_owned())));
+        let _ = self.remove_container(&created.id, true).await;
+        done
+    }
+
     async fn read_bind_file(
         &self,
         image: &str,

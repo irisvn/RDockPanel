@@ -1454,6 +1454,74 @@ window.rustcms?.registerTranslations?.("vi", {
   "Fixed address": "Địa chỉ cố định",
   "Network mode": "Chế độ mạng",
   "Volumes from": "Dùng volume của container khác",
+  // 0.12.1.
+  "its health check is longer than the panel keeps (500 characters)": "health check dài hơn mức panel lưu (500 ký tự)",
+  "In its details, drop the health check or type a shorter one.": "Trong phần chi tiết, bỏ health check hoặc nhập lệnh ngắn hơn.",
+  "A port the panel keeps, or one on the loopback, can be published on another.":
+    "Cổng panel đang giữ, hoặc cổng chỉ mở trên loopback, có thể mở ra ngoài qua cổng khác.",
+  "Publish {port} on": "Mở {port} qua cổng",
+  Publish: "Mở cổng",
+  "Not published": "Không mở",
+  "this port is taken or kept by the panel": "cổng này đã có service dùng hoặc panel đang giữ",
+  "a port is written 80/tcp": "cổng viết dạng 80/tcp",
+  "names a port the container does not publish": "container không mở cổng này",
+  "the panel keeps this port: it is not published; reach the service by a domain, or publish it on another port (its details)":
+    "panel giữ cổng này nên không mở nó; truy cập service qua domain, hoặc mở qua cổng khác (trong phần chi tiết)",
+  "Confirm, or choose another port in its details.": "Xác nhận, hoặc chọn cổng khác trong phần chi tiết.",
+  "its Compose file stays: `docker compose up` would start the original again on its old data (the panel stops it again, after a while): do not run it":
+    "file Compose được giữ nguyên: `docker compose up` sẽ chạy lại container gốc trên dữ liệu cũ (panel sẽ dừng nó lại sau một lúc): đừng chạy lệnh đó",
+  "its Compose file stays: `docker compose up` would start the original again (the panel stops it again, after a while): do not run it":
+    "file Compose được giữ nguyên: `docker compose up` sẽ chạy lại container gốc (panel sẽ dừng nó lại sau một lúc): đừng chạy lệnh đó",
+  "Confirm; bring every container of the project to have its file renamed.":
+    "Xác nhận; mang toàn bộ container của project sang để file được đổi tên.",
+  "a setting of the container the panel does not carry over": "thiết lập của container mà panel không mang sang",
+  "it runs without its image's entrypoint: the panel cannot clear an entrypoint":
+    "container chạy không có entrypoint của image: panel không bỏ entrypoint được",
+  "Leave this container outside the panel.": "Để container này ở ngoài panel.",
+  "Seconds a check may take (5 when empty)": "Số giây một lần kiểm tra được chạy (5 nếu để trống)",
+  "Seconds after a start before failures count (10 when empty)": "Số giây sau khi khởi động mới tính lỗi (10 nếu để trống)",
+  Progress: "Tiến trình",
+  Step: "Bước",
+  "Stopped {name}": "Đã dừng {name}",
+  "Copying {name}": "Đang copy {name}",
+  "Copied {name}": "Đã copy {name}",
+  "Linking {name}": "Đang nối {name}",
+  "Linked {name}": "Đã nối {name}",
+  "Deploying {name}": "Đang deploy {name}",
+  "Deployed {name}": "Đã deploy {name}",
+  "Watching the new services": "Đang theo dõi các service mới",
+  "The new services run": "Các service mới đang chạy",
+  "Started {name} again": "Đã chạy lại {name}",
+  "Data to copy": "Dữ liệu sẽ copy",
+  "Free room": "Dung lượng trống",
+  "Downtime (estimate)": "Thời gian dừng (ước tính)",
+  "up to {n} min": "tối đa {n} phút",
+  "There is not enough free room for the data to copy: free some, then read the plan again.":
+    "Không đủ dung lượng trống cho dữ liệu cần copy: hãy giải phóng bớt rồi đọc lại kế hoạch.",
+  "There is not enough free room for the data to copy: free some, then read the plan again":
+    "Không đủ dung lượng trống cho dữ liệu cần copy: hãy giải phóng bớt rồi đọc lại kế hoạch",
+  "Its health check holds a secret the panel cannot set apart. Drop it, or type a command that reads the secret from a variable (\"$NAME\").":
+    "Health check chứa secret mà panel không tách ra được. Bỏ nó, hoặc nhập lệnh đọc secret từ biến môi trường (\"$NAME\").",
+  Dropped: "Đã bỏ",
+  "Use this command": "Dùng lệnh này",
+  "Drop the health check": "Bỏ health check",
+  "Choose again": "Chọn lại",
+  "Timeout (seconds)": "Thời gian chờ (giây)",
+  "Start period (seconds)": "Thời gian khởi động (giây)",
+  "No health check, not even the image's own": "Không health check, kể cả health check sẵn có của image",
+  "its health check holds a password: it moves to an environment variable the check reads":
+    "health check chứa mật khẩu: mật khẩu chuyển sang biến môi trường, health check đọc từ đó",
+  "its health check holds a secret the panel cannot set apart":
+    "health check chứa secret mà panel không tách ra được",
+  "In its details, drop the health check or type a new one.":
+    "Trong phần chi tiết, bỏ health check hoặc nhập health check mới.",
+  "its health check is dropped (the image's own does not run either)":
+    "health check bị bỏ (health check sẵn có của image cũng không chạy)",
+  "its health check is the one you typed": "health check là lệnh anh/chị đã nhập",
+  "holds a secret: read it from an environment variable (\"$NAME\")":
+    "chứa secret: hãy đọc nó từ biến môi trường (\"$NAME\")",
+  "is one line of at most 500 characters": "là một dòng, tối đa 500 ký tự",
+  "only a health check the panel could not cut is chosen": "chỉ chọn cho health check panel không tách được",
   // Import fixes (0.12.0).
   "Original container": "Container gốc",
   "A single container": "Một container",

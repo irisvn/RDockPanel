@@ -1409,6 +1409,9 @@ function AdvancedTab(props: {
   const [check, setCheck] = useState(s.healthcheck_cmd ?? "");
   const [interval, setInterval] = useState(str(s.healthcheck_interval_s));
   const [retries, setRetries] = useState(str(s.healthcheck_retries));
+  const [timeout, setTimeoutS] = useState(str(s.healthcheck_timeout_s));
+  const [startPeriod, setStartPeriod] = useState(str(s.healthcheck_start_period_s));
+  const [checkOff, setCheckOff] = useState(s.healthcheck_off);
   const [cpu, setCpu] = useState(str(s.cpu_limit_millis));
   const [mem, setMem] = useState(str(s.mem_limit_mb));
   const [cpuR, setCpuR] = useState(str(s.cpu_reservation_millis));
@@ -1439,6 +1442,9 @@ function AdvancedTab(props: {
               healthcheck_cmd: check.trim() || null,
               healthcheck_interval_s: num(interval),
               healthcheck_retries: num(retries),
+              healthcheck_timeout_s: num(timeout),
+              healthcheck_start_period_s: num(startPeriod),
+              healthcheck_off: checkOff,
               cpu_limit_millis: num(cpu),
               mem_limit_mb: num(mem),
               cpu_reservation_millis: num(cpuR),
@@ -1478,7 +1484,16 @@ function AdvancedTab(props: {
             <Field label={t("Retries")} error={fields.healthcheck_retries}>
               <Input type="number" value={retries} onChange={(e) => setRetries(e.target.value)} disabled={disabled} placeholder="3" />
             </Field>
+            <Field label={t("Timeout (seconds)")} error={fields.healthcheck_timeout_s}>
+              <Input type="number" value={timeout} onChange={(e) => setTimeoutS(e.target.value)} disabled={disabled} placeholder="5" />
+            </Field>
+            <Field label={t("Start period (seconds)")} error={fields.healthcheck_start_period_s}>
+              <Input type="number" value={startPeriod} onChange={(e) => setStartPeriod(e.target.value)} disabled={disabled} placeholder="10" />
+            </Field>
           </div>
+          <label className="rdp2-row">
+            <Switch checked={checkOff} onCheckedChange={setCheckOff} disabled={disabled} /> {t("No health check, not even the image's own")}
+          </label>
           <h3 className="rdp2-subtitle">{t("Resources")}</h3>
           <div className="rdp2-grid2">
             <Field label={t("CPU limit (1000 = one core)")} error={fields.cpu_limit_millis}>

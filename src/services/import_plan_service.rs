@@ -82,6 +82,16 @@ pub struct Detail {
     pub health_test: Vec<String>,
     pub health_interval_ns: i64,
     pub health_retries: i64,
+    pub health_timeout_ns: i64,
+    pub health_start_period_ns: i64,
+    /// What the panel carries over: capabilities, sysctls, groups, CPUs.
+    pub cap_add: Vec<String>,
+    pub cap_drop: Vec<String>,
+    pub sysctls: BTreeMap<String, String>,
+    pub group_add: Vec<String>,
+    pub nano_cpus: i64,
+    /// What it cannot (said in the plan): `(setting, value as said)`.
+    pub uncarried: Vec<(String, String)>,
     /// `HostConfig.Memory` (bytes, 0: none).
     pub memory: i64,
     /// The image the container runs (`sha256:…`) and its `RepoDigests`.
@@ -95,6 +105,98 @@ pub struct Detail {
     pub size_rw: Option<i64>,
     /// Named volumes: name → (driver, has options).
     pub volume_drivers: BTreeMap<String, (String, bool)>,
+}
+
+/// The settings of a container the panel does not carry over, as the plan
+/// says them (`ShmSize`, ulimits, …): names and short values, never env.
+fn uncarried(doc: &Value, image_doc: &Value) -> Vec<(String, String)> {
+    let host = &doc["HostConfig"];
+    let config = &doc["Config"];
+    let mut out = Vec::new();
+    let list = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| {
+                x.as_str()
+                    .map(str::to_owned)
+                    .or_else(|| x["Name"].as_str().map(str::to_owned))
+            })
+            .collect()
+    };
+    if let Some(shm) = host["ShmSize"]
+        .as_i64()
+        .filter(|s| *s > 0 && *s != 64 * 1024 * 1024)
+    {
+        out.push((
+            "shm_size".to_owned(),
+            format!("{} MiB", shm / (1024 * 1024)),
+        ));
+    }
+    let ulimits = list(&host["Ulimits"]);
+    if !ulimits.is_empty() {
+        out.push(("ulimits".to_owned(), ulimits.join(", ")));
+    }
+    if let Some(tmpfs) = host["Tmpfs"].as_object().filter(|t| !t.is_empty()) {
+        out.push((
+            "tmpfs".to_owned(),
+            tmpfs.keys().cloned().collect::<Vec<_>>().join(", "),
+        ));
+    }
+    let devices: Vec<String> = host["Devices"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|d| d["PathOnHost"].as_str().map(str::to_owned))
+        .collect();
+    if !devices.is_empty() {
+        out.push(("devices".to_owned(), devices.join(", ")));
+    }
+    for (key, name) in [
+        ("ExtraHosts", "extra_hosts"),
+        ("Dns", "dns"),
+        ("SecurityOpt", "security_opt"),
+    ] {
+        let values = list(&host[key]);
+        if !values.is_empty() {
+            out.push((name.to_owned(), values.join(", ")));
+        }
+    }
+    if host["ReadonlyRootfs"].as_bool() == Some(true) {
+        out.push(("read_only".to_owned(), "true".to_owned()));
+    }
+    if let Some(signal) = config["StopSignal"].as_str().filter(|s| {
+        !s.is_empty()
+            && *s != "SIGTERM"
+            && *s
+                != image_doc["Config"]["StopSignal"]
+                    .as_str()
+                    .unwrap_or("SIGTERM")
+    }) {
+        out.push(("stop_signal".to_owned(), signal.to_owned()));
+    }
+    if let Some(timeout) = config["StopTimeout"].as_i64() {
+        out.push(("stop_grace_period".to_owned(), format!("{timeout}s")));
+    }
+    let workdir = config["WorkingDir"].as_str().unwrap_or_default();
+    if !workdir.is_empty()
+        && workdir
+            != image_doc["Config"]["WorkingDir"]
+                .as_str()
+                .unwrap_or_default()
+    {
+        out.push(("working_dir".to_owned(), workdir.to_owned()));
+    }
+    if let Some(driver) = host["LogConfig"]["Type"]
+        .as_str()
+        .filter(|t| !t.is_empty() && *t != "json-file")
+    {
+        out.push(("logging".to_owned(), driver.to_owned()));
+    }
+    if host["Init"].as_bool() == Some(false) {
+        out.push(("init".to_owned(), "off (the panel runs tini)".to_owned()));
+    }
+    out
 }
 
 impl Detail {
@@ -165,7 +267,26 @@ impl Detail {
             health_retries: doc["Config"]["Healthcheck"]["Retries"]
                 .as_i64()
                 .unwrap_or(0),
+            health_timeout_ns: doc["Config"]["Healthcheck"]["Timeout"]
+                .as_i64()
+                .unwrap_or(0),
+            health_start_period_ns: doc["Config"]["Healthcheck"]["StartPeriod"]
+                .as_i64()
+                .unwrap_or(0),
             memory: doc["HostConfig"]["Memory"].as_i64().unwrap_or(0),
+            cap_add: strings(&doc["HostConfig"]["CapAdd"]),
+            cap_drop: strings(&doc["HostConfig"]["CapDrop"]),
+            sysctls: doc["HostConfig"]["Sysctls"]
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            group_add: strings(&doc["HostConfig"]["GroupAdd"]),
+            nano_cpus: doc["HostConfig"]["NanoCpus"].as_i64().unwrap_or(0),
+            uncarried: uncarried(doc, image_doc),
             image_id: doc["Image"].as_str().unwrap_or_default().to_owned(),
             repo_digests: strings(&image_doc["RepoDigests"]),
             image_env,
@@ -569,25 +690,51 @@ pub fn tunnel_option(detail: &Detail) -> bool {
         && tunnel_token(&detail.member.env, &detail.cmd).is_some()
 }
 
-/// How many secrets of the command line move to the environment (their
-/// variables are `RDP_SECRET_<n>`, made when the services are).
-pub fn command_secrets(detail: &Detail) -> usize {
-    use crate::services::secret_scan_service::{ArgPart, secret_env_name, split_secret_args};
-    let known: Vec<String> = detail
+/// The values of the container's secret environment variables: a word equal
+/// to one is a secret wherever it is.
+pub fn known_secrets(detail: &Detail) -> Vec<String> {
+    use crate::services::secret_scan_service::secret_env_name;
+    detail
         .member
         .env
         .iter()
         .filter(|(name, value)| secret_env_name(name) && !value.is_empty())
         .map(|(_, value)| value.clone())
-        .collect();
-    split_secret_args(&detail.cmd, &known)
-        .map(|parts| {
-            parts
-                .iter()
-                .filter(|p| matches!(p, ArgPart::Secret { .. }))
-                .count()
-        })
-        .unwrap_or(0)
+        .collect()
+}
+
+/// The secrets of the command line, as an import cuts them.
+pub fn command_cut(detail: &Detail) -> crate::services::secret_scan_service::Cut {
+    crate::services::secret_scan_service::cut_argv(
+        &detail.cmd,
+        &known_secrets(detail),
+        &detail.image_entrypoint,
+    )
+}
+
+/// The secrets of the health check, as an import cuts them: `CMD-SHELL` is a
+/// shell line, `CMD` an argv (none: `NONE`, or no check).
+pub fn health_cut(detail: &Detail) -> crate::services::secret_scan_service::Cut {
+    use crate::services::secret_scan_service::{Cut, cut_argv, cut_shell};
+    let known = known_secrets(detail);
+    match detail.health_test.as_slice() {
+        [kind, line] if kind == "CMD-SHELL" => cut_shell(line, &known, None),
+        [kind, args @ ..] if kind == "CMD" && !args.is_empty() => cut_argv(args, &known, &[]),
+        _ => Cut::Clean,
+    }
+}
+
+/// How many secrets of the command line move to the environment (their
+/// variables are `RDP_SECRET_<n>`, made when the services are).
+pub fn command_secrets(detail: &Detail) -> usize {
+    use crate::services::secret_scan_service::{ArgPart, Cut};
+    match command_cut(detail) {
+        Cut::Parts(parts) => parts
+            .iter()
+            .filter(|p| matches!(p, ArgPart::Secret { .. }))
+            .count(),
+        _ => 0,
+    }
 }
 
 /// Whether an image's entrypoint runs the command it is given (so that a
@@ -685,32 +832,48 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
             ));
         }
     }
-    // A secret in the command line moves to the environment: the panel does
-    // not rewrite a command yet, so it is the admin's to do.
-    let known: Vec<String> = m
-        .env
-        .iter()
-        .filter(|(name, value)| {
-            crate::services::secret_scan_service::secret_env_name(name) && !value.is_empty()
-        })
-        .map(|(_, value)| value.clone())
-        .collect();
-    let health = detail.health_test.get(1..).unwrap_or_default();
-    if !health.is_empty()
-        && crate::services::secret_scan_service::redact_args(health, &known) != health
-    {
+    // A secret of the command line or the health check moves to the
+    // environment (the command reads it there); one that cannot be set apart
+    // blocks the command, and asks the admin for the health check.
+    use crate::services::secret_scan_service::Cut;
+    // Longer than the service keeps, as it is or once rewritten: the admin
+    // drops it or types a shorter one.
+    // Measured on the very line the import writes.
+    let health_len = match crate::services::import_service::health_line(detail, &|_| false) {
+        crate::services::import_service::HealthLine::Line(line, _) => line.len(),
+        _ => 0,
+    };
+    let too_long = health_len > crate::services::import_service::HEALTH_MAX;
+    if too_long {
         out.push(finding(
-            "argv_secret",
+            "healthcheck_long",
             Level::Block,
             "healthcheck",
-            "its health check holds a secret",
-            Some("Make it read the secret from an environment variable, then read again."),
+            "its health check is longer than the panel keeps (500 characters)",
+            Some("In its details, drop the health check or type a shorter one."),
         ));
     }
-    if crate::services::secret_scan_service::redact_args(&detail.cmd, &known) != detail.cmd {
-        if crate::services::secret_scan_service::split_secret_args(&detail.cmd, &known).is_some()
-            && runs_its_arguments(&detail.image_entrypoint)
-        {
+    match health_cut(detail) {
+        _ if too_long => {}
+        Cut::Clean => {}
+        Cut::Parts(_) => out.push(finding(
+            "healthcheck_secret_moved",
+            Level::Confirm,
+            "healthcheck",
+            "its health check holds a password: it moves to an environment variable the check reads",
+            Some("Confirm."),
+        )),
+        Cut::Stuck => out.push(finding(
+            "healthcheck_secret",
+            Level::Block,
+            "healthcheck",
+            "its health check holds a secret the panel cannot set apart",
+            Some("In its details, drop the health check or type a new one."),
+        )),
+    }
+    match command_cut(detail) {
+        Cut::Clean => {}
+        Cut::Parts(_) if runs_its_arguments(&detail.image_entrypoint) => {
             // The panel moves it: into an environment variable the command reads.
             out.push(finding(
                 "argv_secret_moved",
@@ -719,15 +882,14 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
                 "its command line holds a secret: it moves to an environment variable and the command runs through `sh -c`",
                 Some("Confirm; the image needs a `/bin/sh`."),
             ));
-        } else {
-            out.push(finding(
-                "argv_secret",
-                Level::Block,
-                "command",
-                "its command line holds a secret",
-                Some("Make it read the secret from an environment variable, then read again."),
-            ));
         }
+        _ => out.push(finding(
+            "argv_secret",
+            Level::Block,
+            "command",
+            "its command line holds a secret",
+            Some("Make it read the secret from an environment variable, then read again."),
+        )),
     }
     if detail.user != detail.image_user {
         // Kept: the service runs as that user (root is said as such).
@@ -737,6 +899,26 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
             "user",
             "it runs as another user than its image's: the service keeps that user",
             Some("Confirm, or change the image's user and read again."),
+        ));
+    }
+    // Run with `--entrypoint ""` over an image entrypoint: the panel cannot
+    // clear it, the program would differ.
+    if detail.entrypoint.is_empty() && !detail.image_entrypoint.is_empty() {
+        out.push(finding(
+            "entrypoint_cleared",
+            Level::Block,
+            "entrypoint",
+            "it runs without its image's entrypoint: the panel cannot clear an entrypoint",
+            Some("Leave this container outside the panel."),
+        ));
+    }
+    for (setting, value) in &detail.uncarried {
+        out.push(finding(
+            "setting_lost",
+            Level::Warn,
+            &format!("{setting}: {value}"),
+            "a setting of the container the panel does not carry over",
+            None,
         ));
     }
     if !detail.entrypoint.is_empty() && detail.entrypoint != detail.image_entrypoint {
@@ -797,13 +979,17 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
                 "published on one address only: the panel publishes it on every address",
                 Some("Confirm, or leave the port out and use a domain."),
             ));
-        } else if RESERVED_PORTS.contains(&port.host_port) {
+        } else if if panel.reserved_ports.is_empty() {
+            RESERVED_PORTS.contains(&port.host_port)
+        } else {
+            panel.reserved_ports.contains(&port.host_port)
+        } {
             out.push(finding(
                 "port_reserved",
                 Level::Confirm,
                 &format!("port {}", port.host_port),
-                "the panel keeps this port: it is not published; reach the service by a domain, or give it another port afterwards",
-                Some("Confirm: add a domain or another port to the service after the import."),
+                "the panel keeps this port: it is not published; reach the service by a domain, or publish it on another port (its details)",
+                Some("Confirm, or choose another port in its details."),
             ));
         }
     }
@@ -892,6 +1078,52 @@ impl Plan {
     /// admin must still confirm.
     pub fn blocked(&self) -> bool {
         self.items.iter().any(|i| i.choice == Choice::Blocked)
+    }
+}
+
+/// Blocks again, in a saved plan (JSON), the hard groups of the members a
+/// finding blocks, after a choice changed them: a group is blocked by any
+/// member it cannot take, and taken again once none is left.
+pub fn regroup(plan: &mut serde_json::Value) {
+    use serde_json::json;
+    let Some(items) = plan["items"].as_array_mut() else {
+        return;
+    };
+    for item in items.iter_mut() {
+        if let Some(findings) = item["findings"].as_array_mut() {
+            findings.retain(|f| f["code"] != "group_blocked");
+        }
+        let own_block = item["findings"]
+            .as_array()
+            .is_some_and(|f| f.iter().any(|f| f["level"] == "BLOCK"));
+        if item["choice"] == "blocked" && !own_block {
+            item["choice"] = json!("bring");
+        }
+        if own_block {
+            item["choice"] = json!("blocked");
+        }
+    }
+    let blocked: BTreeSet<u64> = items
+        .iter()
+        .filter(|i| i["choice"] == "blocked")
+        .filter_map(|i| i["hard_group"].as_u64())
+        .collect();
+    for item in items.iter_mut() {
+        let in_blocked = item["hard_group"]
+            .as_u64()
+            .is_some_and(|g| blocked.contains(&g));
+        if in_blocked && item["choice"] != "blocked" {
+            item["choice"] = json!("blocked");
+            if let Some(findings) = item["findings"].as_array_mut() {
+                findings.push(json!({
+                    "code": "group_blocked",
+                    "level": "BLOCK",
+                    "field": "group",
+                    "text": "it shares writable data or a network with a container that cannot be imported",
+                    "how_to_unblock": null
+                }));
+            }
+        }
     }
 }
 
@@ -1417,7 +1649,7 @@ mod tests {
     }
 
     #[test]
-    fn a_secret_in_the_health_check_blocks_too() {
+    fn a_secret_in_the_health_check_moves_or_waits_for_the_admin() {
         let panel = PanelFacts::default();
         let mut d = detail("a", "cache");
         d.member.env = vec![("REDIS_PASSWORD".to_owned(), "hunter22".to_owned())];
@@ -1426,9 +1658,21 @@ mod tests {
             "redis-cli -a hunter22 ping".to_owned(),
         ];
         let found = findings(&d, &panel);
-        let f = found.iter().find(|f| f.code == "argv_secret").unwrap();
-        assert_eq!(f.field, "healthcheck");
+        // `redis-cli -a <password>`: moved to the environment, confirmed.
+        let f = found
+            .iter()
+            .find(|f| f.code == "healthcheck_secret_moved")
+            .unwrap();
+        assert_eq!(f.level, Level::Confirm);
         assert!(!format!("{found:?}").contains("hunter22"));
+        // One the panel cannot set apart blocks until the admin chooses.
+        d.health_test[1] = "curl -f http://u:hunter22@localhost/".to_owned();
+        let found = findings(&d, &panel);
+        let f = found
+            .iter()
+            .find(|f| f.code == "healthcheck_secret")
+            .unwrap();
+        assert_eq!(f.level, Level::Block);
     }
 
     #[test]

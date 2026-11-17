@@ -754,7 +754,10 @@ async fn desired_specs_run_on_a_real_swarm() {
             command: "test -f /data/ready && grep -q hi /etc/app/greeting.txt".to_owned(),
             interval_s: 1,
             retries: 3,
+            timeout_s: None,
+            start_period_s: None,
         }),
+        healthcheck_off: false,
         domains: vec![],
         ports: vec![],
         mounts: vec![

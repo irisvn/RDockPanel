@@ -58,6 +58,9 @@ export type ServiceDetail = {
     healthcheck_cmd: string | null;
     healthcheck_interval_s: number | null;
     healthcheck_retries: number | null;
+    healthcheck_timeout_s: number | null;
+    healthcheck_start_period_s: number | null;
+    healthcheck_off: boolean;
     registry_username: string | null;
     source: "image" | "git" | "dockerfile";
     git_url: string | null;

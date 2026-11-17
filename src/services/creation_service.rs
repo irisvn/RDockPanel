@@ -149,6 +149,8 @@ pub struct NewService {
     pub replicas: i32,
     /// Its memory limit and reservation (MB): a template's `resources`.
     pub mem_limit_mb: Option<u32>,
+    /// Thousandths of a core (an import's `NanoCpus`).
+    pub cpu_limit_millis: Option<u32>,
     pub mem_reservation_mb: Option<u32>,
     pub zero_downtime: bool,
     pub domains: Vec<NewDomain>,
@@ -193,6 +195,7 @@ impl NewService {
             command: None,
             replicas: 1,
             mem_limit_mb: None,
+            cpu_limit_millis: None,
             mem_reservation_mb: None,
             zero_downtime: true,
             domains: vec![],
@@ -629,6 +632,7 @@ pub async fn create(
         command: Set(command),
         replicas: Set(replicas),
         mem_limit_mb: Set(new.mem_limit_mb.and_then(|m| i32::try_from(m).ok())),
+        cpu_limit_millis: Set(new.cpu_limit_millis.and_then(|m| i32::try_from(m).ok())),
         mem_reservation_mb: Set(new.mem_reservation_mb.and_then(|m| i32::try_from(m).ok())),
         zero_downtime: Set(new.zero_downtime && engine.is_none()),
         healthcheck_cmd: Set(healthcheck),

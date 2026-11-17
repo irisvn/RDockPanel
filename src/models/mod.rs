@@ -7,6 +7,7 @@ pub mod cert_resolver;
 pub mod certificate;
 pub mod container_import;
 pub mod container_import_claim;
+pub mod container_import_event;
 pub mod container_import_file;
 pub mod container_import_item;
 pub mod container_import_volume;

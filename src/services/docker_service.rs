@@ -539,6 +539,12 @@ pub trait DockerApi: Send + Sync {
         let _ = spec;
         Err(unsupported("running a helper"))
     }
+    /// [`run_helper`](Self::run_helper), with what it wrote to its standard
+    /// output (the last lines, at most 4 KiB): a measure it took.
+    async fn run_helper_output(&self, spec: HelperSpec) -> DockerResult<(i64, String)> {
+        let _ = spec;
+        Err(unsupported("running a helper"))
+    }
     /// A file of the host, as the tar archive Docker returns it: read from a
     /// helper container of `image` that is created and never started, with
     /// the file bind-mounted read-only (a Linux host would otherwise create a

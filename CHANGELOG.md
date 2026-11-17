@@ -3,6 +3,24 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.12.1 — 2026-11-17
+
+- Importing a database no longer stops at its health check: a password written in it (`mysqladmin ping
+  -p…`, `redis-cli -a …`) moves to an environment variable the check reads. A port (`pg_isready -p 5432`),
+  a database name or a `$VARIABLE` is no longer taken for a password. A check the panel cannot rewrite can be
+  dropped or replaced in the container's details.
+- A health check keeps its timeout and start period; a service's health check can be turned off (the
+  image's own does not run either). Both are in the service's Advanced tab.
+- An imported container keeps its capabilities, sysctls, groups and CPU limit; the settings the panel does
+  not carry (shared memory, ulimits, tmpfs, devices, DNS, working directory…) are said in the plan, and a
+  container run without its image's entrypoint is not imported.
+- The plan says how much data it copies, the free room and about how long the services are down, and an
+  import that does not fit is refused before it starts.
+- The import page shows what each step did (stopped, copied, deployed…).
+- A partial import of a Compose project says that `docker compose up` would start the original again.
+- A port the panel keeps (80, 443…) or one on the loopback can be published on another port, chosen in the
+  plan.
+
 ## 0.12.0 — 2026-11-17
 
 Contributed by xuandung38 (pull request #1), reviewed and completed.
