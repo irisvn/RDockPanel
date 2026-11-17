@@ -3,6 +3,11 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.13.1 — 2026-11-17
+
+- RustCMS 0.13.1: a record's page (Admin → its record) is drawn from its form, and an encrypted field no
+  longer says whether it is set there.
+
 ## 0.13.0 — 2026-11-17
 
 - An imported PostgreSQL, MySQL, MariaDB or MongoDB container can become a database service of the panel
