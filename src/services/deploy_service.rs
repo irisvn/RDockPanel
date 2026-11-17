@@ -1329,7 +1329,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
     // one, or its plain one: never the redirect), on the tunnel's
     // entrypoint without TLS (Cloudflare's).
     if options.tunnel {
-        for index in 0..snapshot.domains.len() {
+        for (index, domain) in snapshot.domains.iter().enumerate() {
             let serving = [format!("{base}-{index}"), format!("{base}-{index}-http")]
                 .into_iter()
                 .find_map(|name| http.routers.get(&name).cloned());
@@ -1345,7 +1345,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                 http.middlewares.entry(proto.clone()).or_insert_with(
                     || json!({"headers": {"customRequestHeaders": {"X-Forwarded-Proto": "https"}}}),
                 );
-                if !snapshot.domains[index].https {
+                if !domain.https {
                     // An HTTP domain (Cloudflare holds TLS: no certificate
                     // here): its HTTPS visitors told so, the others not.
                     let mut secure = router.clone();
@@ -1358,7 +1358,7 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
                     http.routers
                         .insert(format!("{base}-{index}-tunnel-secure"), secure);
                 }
-                if snapshot.domains[index].https {
+                if domain.https {
                     router.middlewares.insert(0, proto);
                     let redirect = format!("{base}-tunnel-https");
                     http.middlewares
@@ -1992,7 +1992,7 @@ mod tests {
         );
         assert_eq!(m(&direct)["rateLimit"]["period"], "1m");
         let r = |name: String| file.http.routers[&name].clone();
-        for index in 0..limited.domains.len() {
+        for (index, domain) in limited.domains.iter().enumerate() {
             let name = format!("{base}-{index}");
             let serving = r(name.clone());
             // Limited first: before the redirects and the authentication.
@@ -2040,12 +2040,7 @@ mod tests {
             }
             // Redirects to HTTPS: not limited.
             for redirect in [format!("{name}-http"), format!("{name}-tunnel-http")] {
-                if let Some(router) = file
-                    .http
-                    .routers
-                    .get(&redirect)
-                    .filter(|_| limited.domains[index].https)
-                {
+                if let Some(router) = file.http.routers.get(&redirect).filter(|_| domain.https) {
                     assert!(
                         !router.middlewares.iter().any(|m| m.contains("ratelimit")),
                         "{redirect}"
