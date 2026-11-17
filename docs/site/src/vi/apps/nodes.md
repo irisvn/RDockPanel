@@ -2,6 +2,8 @@
 
 Khi Swarm có nhiều server (node), bạn chọn được node nào chạy một service. Với một server duy nhất thì không có gì để chọn: mọi thứ chạy ở đó.
 
+Các node là server trong Swarm của bạn: thêm node ở [Docker → Node](/vi/server/nodes) (chạy một lệnh trên server mới). Sau đó chúng tự hiện trong danh sách này.
+
 ## Chọn node
 
 1. Mở tab **Nâng cao** (Advanced) của service.

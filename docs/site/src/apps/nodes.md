@@ -2,6 +2,8 @@
 
 On a Swarm with several servers (nodes), choose which one runs a service. On a single server there is nothing to choose: everything runs there.
 
+The nodes are the servers of your Swarm: add one on [Docker → Nodes](/server/nodes) (a command to run on the new server). They then appear in this list by themselves.
+
 ## Choose the node
 
 1. Open the service's **Advanced** tab.
