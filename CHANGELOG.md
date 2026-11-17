@@ -3,6 +3,10 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## Unreleased
+
+- A user guide in English and Vietnamese, with screenshots: https://irisvn.github.io/RDockPanel/
+
 ## 0.13.1 — 2026-11-17
 
 - RustCMS 0.13.1: a record's page (Admin → its record) is drawn from its form, and an encrypted field no

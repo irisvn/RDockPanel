@@ -4,7 +4,7 @@
 Watch your server, manage Docker, and deploy apps to Docker Swarm with domains and HTTPS. Every
 feature is free: no project limits, no paid tiers.
 
-[Tiếng Việt](README.vi.md) · [Features](docs/features.md) · [Docs](#documentation) · [Roadmap](docs/roadmap.md)
+[Tiếng Việt](README.vi.md) · [**User guide**](https://irisvn.github.io/RDockPanel/) · [Features](docs/features.md) · [Docs](#documentation) · [Roadmap](docs/roadmap.md)
 
 > **Status: early development.** Try it on a test server first.
 

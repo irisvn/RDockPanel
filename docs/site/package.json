@@ -1,0 +1,14 @@
+{
+  "name": "rdockpanel-docs",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.12", "npm": ">=10" },
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

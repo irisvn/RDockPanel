@@ -4,7 +4,7 @@
 Theo dõi server, quản lý Docker, và deploy app lên Docker Swarm kèm domain và HTTPS. Mọi tính năng
 đều miễn phí: không giới hạn số project, không có gói trả phí.
 
-[English](README.md) · [Tính năng](docs/features.vi.md) · [Tài liệu](#tài-liệu-tiếng-anh) · [Lộ trình](docs/roadmap.md)
+[English](README.md) · [**Hướng dẫn sử dụng**](https://irisvn.github.io/RDockPanel/vi/) · [Tính năng](docs/features.vi.md) · [Tài liệu](#tài-liệu-tiếng-anh) · [Lộ trình](docs/roadmap.md)
 
 > **Trạng thái: giai đoạn đầu phát triển.** Hãy thử trên một server test trước.
 

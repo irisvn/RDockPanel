@@ -1,0 +1,48 @@
+# The user guide (docs/site, VitePress) on GitHub Pages:
+#   https://irisvn.github.io/RDockPanel/
+# Built on every push to main that changes it, or by hand. No secret: the
+# publish job uses the Pages token GitHub gives it.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/site/**", "Cargo.toml", ".github/workflows/docs.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: docs/site
+      - run: npm run build
+        working-directory: docs/site
+        env:
+          DOCS_BASE: /RDockPanel/
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: docs/site/.vitepress/dist }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
