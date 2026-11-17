@@ -70,9 +70,9 @@ These are replaced in the values at each deployment:
 | `$(PROJECT_NAME)` | the project's name |
 | `$(SERVICE_NAME)` | the service's name |
 | `$(PRIMARY_DOMAIN)` | the service's first domain (else its generated one) |
-| `$(EASYPANEL_DOMAIN)` | the service's generated domain |
-| `$(EASYPANEL_HOST)` | the apps' domain set at install |
-| `$(EASYPANEL_HOST_IP)` | the server's public address |
+| `$(RDP_DOMAIN)` | the service's generated domain |
+| `$(RDP_HOST)` | the apps' domain set at install |
+| `$(RDP_HOST_IP)` | the server's public address |
 
 An unknown or unset placeholder is left as written. Templates use them; you can too.
 

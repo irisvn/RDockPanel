@@ -47,6 +47,7 @@ pub fn provider() -> AdminProvider {
         .page::<crate::admin::pages::images_page::ImagesPage>()
         .page::<crate::admin::pages::volumes_page::VolumesPage>()
         .page::<crate::admin::pages::networks_page::NetworksPage>()
+        .page::<crate::admin::pages::nodes_page::NodesPage>()
         // rustcms:pages
         .slot::<crate::admin::slots::service_live_slot::ServiceLiveSlot>()
         // The terminal's xterm.js, its CSP shim first (resources/admin/js/rdockpanel/vendor/README.md).

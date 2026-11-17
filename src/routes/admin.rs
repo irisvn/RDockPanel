@@ -11,9 +11,9 @@ use crate::http::controllers::{
     docker_controller as docker, domains_controller as domains, firewall_controller as firewall,
     git_controller as git, home_controller as home, imports_controller as imports,
     maintenance_controller as maintenance, members_controller as members,
-    notifications_controller as notifications, server_controller as server,
-    system_controller as system, templates_controller as templates, tokens_controller as tokens,
-    traefik_controller as traefik, tunnel_controller as tunnel,
+    nodes_controller as nodes, notifications_controller as notifications,
+    server_controller as server, system_controller as system, templates_controller as templates,
+    tokens_controller as tokens, traefik_controller as traefik, tunnel_controller as tunnel,
 };
 use crate::policies::permissions;
 
@@ -68,6 +68,34 @@ pub fn routes() -> AdminRoutes {
                 .get("/volumes", view(), docker::volumes)
                 .post("/volumes", manage(), docker::create_volume)
                 .delete("/volumes/{name}", manage(), docker::remove_volume)
+                // The Swarm's nodes: listed for docker.view; joining, changing
+                // and removing one are the panel's administrators'.
+                .get("/nodes", view(), nodes::index)
+                .post(
+                    "/nodes/join-command",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    nodes::join_command,
+                )
+                .post(
+                    "/nodes/rotate-token",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    nodes::rotate_token,
+                )
+                .get(
+                    "/nodes/{id}/impact",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    nodes::impact,
+                )
+                .patch(
+                    "/nodes/{id}",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    nodes::update,
+                )
+                .delete(
+                    "/nodes/{id}",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    nodes::remove,
+                )
                 .get("/networks", view(), docker::networks)
                 .post("/networks", manage(), docker::create_network)
                 .delete("/networks/{id}", manage(), docker::remove_network),

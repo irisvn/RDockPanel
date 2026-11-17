@@ -11,11 +11,11 @@ unsaved selection: nothing is granted until the role is saved.
 | Permission | Allows |
 |---|---|
 | `server.view` | the Dashboard's server metrics: live CPU, memory, network and disk |
-| `docker.view` | the Containers, Images, Volumes and Networks pages; container inspect and live stats; an action's progress (own actions only) |
+| `docker.view` | the Containers, Images, Volumes, Networks and Nodes pages (Nodes: the list; the panel's own tasks not counted); container inspect and live stats; an action's progress (own actions only) |
 | `docker.logs` | container logs (snapshot and live follow) |
 | `docker.manage` | start, stop, restart, pause, unpause, kill and remove containers; pull and remove images; prune; create and remove volumes and networks |
 | `docker.exec` | the container terminal (a root shell in most images: grant carefully) |
-| `system.manage` | the panel's own objects (labelled `rdockpanel.system=true`): see them, inspect them, read their logs, open a terminal in them, act on them; force-remove images in use; read every user's actions |
+| `system.manage` | the Swarm's nodes: the join command (an audited read), rotating its token, pausing, draining, activating and removing a node, what draining one does; the panel's own objects (labelled `rdockpanel.system=true`): see them, inspect them, read their logs, open a terminal in them, act on them; force-remove images in use; read every user's actions |
 
 ## Projects and services (Phase 2)
 

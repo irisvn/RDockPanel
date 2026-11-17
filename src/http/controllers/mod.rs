@@ -15,6 +15,7 @@ pub mod home_controller;
 pub mod imports_controller;
 pub mod maintenance_controller;
 pub mod members_controller;
+pub mod nodes_controller;
 pub mod notifications_controller;
 pub mod server_controller;
 pub mod system_controller;

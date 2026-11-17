@@ -63,7 +63,7 @@ use crate::services::docker_service::{Docker, DockerError, NetworkRequest, SYSTE
 use crate::services::traefik_service::Traefik;
 
 /// cloudflared, pinned (it reads `--token-file`).
-pub const IMAGE: &str = "cloudflare/cloudflared:2026.10.2";
+pub const IMAGE: &str = "cloudflare/cloudflared:2026.11.1";
 /// The service of the tunnel `default` (the panel's first, of one token).
 pub const SERVICE: &str = "rdp-cloudflared";
 /// The first tunnel's name (the one Settings had before many).

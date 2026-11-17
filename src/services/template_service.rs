@@ -241,10 +241,16 @@ pub struct Plan {
     pub blocking: Vec<String>,
 }
 
-/// An EasyPanel environment: `.env` text, as EasyPanel reads it (quoted
-/// values unquoted, several lines when quoted); refused when malformed.
+/// A template's environment: `.env` text (quoted values unquoted, several
+/// lines when quoted), the catalog's placeholders written with the panel's
+/// names; refused when malformed.
 fn env_lines(name: &str, text: &str) -> Result<BTreeMap<String, String>, String> {
     crate::services::dotenv::parse(text)
+        .map(|env| {
+            env.into_iter()
+                .map(|(k, v)| (k, placeholders::rename_legacy(&v)))
+                .collect()
+        })
         .map_err(|e| format!("{name}: its environment, line {}: {}", e.line, e.message))
 }
 
@@ -381,7 +387,7 @@ fn template_compose(
         .into_iter()
         .flatten()
     {
-        let raw = text(domain, "host").unwrap_or_default();
+        let raw = placeholders::rename_legacy(&text(domain, "host").unwrap_or_default());
         let expanded = placeholders::expand(&raw, &vars);
         if expanded.contains("$(") {
             plan.warnings.push(format!(
@@ -484,7 +490,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
             .into_iter()
             .flatten()
         {
-            let raw = text(domain, "host").unwrap_or_default();
+            let raw = placeholders::rename_legacy(&text(domain, "host").unwrap_or_default());
             // As stored (the wildcard check reads it so too).
             let host = crate::services::deploy_rules_service::normalize_host(
                 &placeholders::expand(&raw, &vars),
@@ -634,7 +640,7 @@ mod tests {
                     {"type": "file", "content": "a=1\n", "mountPath": "/etc/x.ini"},
                     {"type": "bind", "hostPath": "/var/run/docker.sock", "mountPath": "/var/run/docker.sock"}
                 ],
-                "env": "url=https://$(PRIMARY_DOMAIN)\ndb=$(PROJECT_NAME)_ghost-db\nquoted=\"x\"",
+                "env": "url=https://$(PRIMARY_DOMAIN)\ndb=$(PROJECT_NAME)_ghost-db\nquoted=\"x\"\nhost=$(EASYPANEL_HOST_IP):$(EASYPANEL_DOMAIN)",
                 "deploy": {"command": "node index.js", "zeroDowntime": false}
             }},
             {"type": "mysql", "data": {"serviceName": "ghost-db", "password": "pw"}}
@@ -650,7 +656,9 @@ mod tests {
             app.env["url"], "https://$(PRIMARY_DOMAIN)",
             "expanded at deploy"
         );
-        assert_eq!(app.env["quoted"], "x", "unquoted, as EasyPanel reads .env");
+        assert_eq!(app.env["quoted"], "x", "unquoted, as a .env file reads");
+        // The catalog's placeholders, saved with the panel's names.
+        assert_eq!(app.env["host"], "$(RDP_HOST_IP):$(RDP_DOMAIN)");
         assert_eq!(app.mounts.len(), 2);
         assert_eq!(app.command.as_deref(), Some("node index.js"));
         assert!(!app.zero_downtime);

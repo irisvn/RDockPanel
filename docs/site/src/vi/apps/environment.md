@@ -68,9 +68,9 @@ Các placeholder sau được thay trong giá trị mỗi lần deploy:
 | `$(PROJECT_NAME)` | tên project |
 | `$(SERVICE_NAME)` | tên service |
 | `$(PRIMARY_DOMAIN)` | domain đầu tiên của service (nếu không có thì domain tự sinh) |
-| `$(EASYPANEL_DOMAIN)` | domain tự sinh của service |
-| `$(EASYPANEL_HOST)` | domain cho app đặt lúc cài |
-| `$(EASYPANEL_HOST_IP)` | địa chỉ public của server |
+| `$(RDP_DOMAIN)` | domain tự sinh của service |
+| `$(RDP_HOST)` | domain cho app đặt lúc cài |
+| `$(RDP_HOST_IP)` | địa chỉ public của server |
 
 Placeholder không biết hoặc chưa có giá trị thì giữ nguyên như đã viết. Template dùng chúng; bạn cũng dùng được.
 

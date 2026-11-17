@@ -1292,6 +1292,77 @@ end HUP; sleep 2; end KILL; true"#
             .collect()
     }
 
+    async fn inspect_node(&self, id: &str) -> DockerResult<Option<Value>> {
+        match self.client.inspect_node(id).await {
+            Ok(node) => serde_json::to_value(node)
+                .map(Some)
+                .map_err(|e| DockerError::Other(e.to_string())),
+            Err(Error::DockerResponseServerError {
+                status_code: 404, ..
+            }) => Ok(None),
+            Err(e) => Err(map_err(e)),
+        }
+    }
+
+    async fn update_node(&self, id: &str, version: i64, spec: Value) -> DockerResult<()> {
+        // The spec as read (labels, role kept): never one rebuilt field by field.
+        let spec: ::bollard::models::NodeSpec =
+            serde_json::from_value(spec).map_err(|e| DockerError::Other(e.to_string()))?;
+        let options = ::bollard::query_parameters::UpdateNodeOptionsBuilder::new()
+            .version(version)
+            .build();
+        self.client
+            .update_node(id, spec, options)
+            .await
+            .map_err(map_err)
+    }
+
+    async fn remove_node(&self, id: &str) -> DockerResult<()> {
+        let options = ::bollard::query_parameters::DeleteNodeOptionsBuilder::new()
+            .force(false)
+            .build();
+        self.client
+            .delete_node(id, Some(options))
+            .await
+            .map_err(map_err)
+    }
+
+    async fn worker_join_token(&self) -> DockerResult<String> {
+        let swarm = self.client.inspect_swarm().await.map_err(map_err)?;
+        swarm
+            .join_tokens
+            .and_then(|t| t.worker)
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| DockerError::Other("the Swarm has no worker token".to_owned()))
+    }
+
+    async fn rotate_worker_token(&self) -> DockerResult<()> {
+        let swarm = self.client.inspect_swarm().await.map_err(map_err)?;
+        let version = swarm
+            .version
+            .and_then(|v| v.index)
+            .ok_or_else(|| DockerError::Other("the Swarm's version is unknown".to_owned()))?;
+        let spec = swarm
+            .spec
+            .ok_or_else(|| DockerError::Other("the Swarm's spec is unknown".to_owned()))?;
+        let options = ::bollard::query_parameters::UpdateSwarmOptionsBuilder::new()
+            .version(i64::try_from(version).map_err(|e| DockerError::Other(e.to_string()))?)
+            .rotate_worker_token(true)
+            .build();
+        self.client
+            .update_swarm(spec, options)
+            .await
+            .map_err(map_err)
+    }
+
+    async fn node_tasks(&self, node: &str) -> DockerResult<Vec<SwarmTask>> {
+        let filters = HashMap::from([("node", vec![node.to_owned()])]);
+        let options = ::bollard::query_parameters::ListTasksOptionsBuilder::new()
+            .filters(&filters)
+            .build();
+        self.client.list_tasks(Some(options)).await.map_err(map_err)
+    }
+
     async fn create_volume_labelled(
         &self,
         name: &str,

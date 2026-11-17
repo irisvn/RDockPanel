@@ -17,6 +17,7 @@ import { Firewall } from "./firewall/Firewall";
 import { Containers } from "./docker/Containers";
 import { Images } from "./docker/Images";
 import { Networks, Volumes } from "./docker/VolumesNetworks";
+import { Nodes } from "./docker/Nodes";
 import { ServiceLive } from "./docker/ServiceLive";
 import { Palette } from "./lib/Palette";
 import { Members } from "./apps/Members";
@@ -211,4 +212,5 @@ registerPage("rdockpanel/containers", dockerRoute(Containers as never) as (p: Pa
 registerPage("rdockpanel/images", dockerRoute(Images as never) as (p: PageProps<unknown>) => ReturnType<typeof Containers>);
 registerPage("rdockpanel/volumes", dockerRoute(Volumes as never) as (p: PageProps<unknown>) => ReturnType<typeof Containers>);
 registerPage("rdockpanel/networks", dockerRoute(Networks as never) as (p: PageProps<unknown>) => ReturnType<typeof Containers>);
+registerPage("rdockpanel/nodes", dockerRoute(Nodes as never) as (p: PageProps<unknown>) => ReturnType<typeof Containers>);
 registerSlot("rdockpanel/service-live", ServiceLive as never);

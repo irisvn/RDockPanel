@@ -112,6 +112,25 @@ db_test!(
                     &anonymous,
                     StatusCode::UNAUTHORIZED,
                 ),
+                // Docker → Nodes: the list for docker.view; joining, changing and
+                // removing a node for system.manage (operators refused).
+                read("/docker/nodes"),
+                Case::new(Method::POST, "/docker/nodes/join-command")
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/docker/nodes/rotate-token")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/docker/nodes/n1/impact")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::PATCH, "/docker/nodes/n1")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::DELETE, "/docker/nodes/n1")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
                 // The Swarm's nodes (where a service runs): system.manage.
                 Case::new(Method::GET, "/apps/nodes")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)

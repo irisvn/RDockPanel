@@ -48,7 +48,7 @@ Chọn **Dockerfile** và viết trong ô soạn thảo. Mỗi lần **Deploy**,
 
 ## Template {#template}
 
-Template là một app làm sẵn, kèm database và cấu hình. Danh mục có hơn 800 template, được tải từ danh mục template công khai của EasyPanel khi bạn mở nó.
+Template là một app làm sẵn, kèm database và cấu hình. Danh mục có hơn 800 template, được tải từ một danh mục mã nguồn mở công khai khi bạn mở nó.
 
 1. Trong một project, bấm **Template** (Templates).
 2. **Tìm template**, rồi chọn một cái.

@@ -38,6 +38,7 @@ Những gì RDockPanel làm được hiện nay. [English](features.md) · quay 
   - **terminal** ngay trên trình duyệt.
 - **Image:** pull (xem tiến độ trực tiếp), xoá theo tag, dọn container đã dừng và image "dangling" (không còn tag).
 - **Volume và network:** tạo và xoá (bridge hoặc overlay).
+- **Node:** các server của Swarm; thêm server (copy lệnh join), tạm dừng, drain (nói trước những gì bị chuyển), kích hoạt, gỡ.
 - **An toàn:**
   - container, volume, network của chính panel (label `rdockpanel.system=true`) bị ẩn và không thao tác được nếu không có quyền `system.manage`;
   - lệnh dọn dẹp luôn bỏ qua chúng.

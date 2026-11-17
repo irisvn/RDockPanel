@@ -139,7 +139,7 @@ and nothing to import but `~templates-utils` (`randomString`, `randomPassword`, 
 `crypto` (`randomBytes`, `randomUUID`; also `require("crypto")` and `Buffer.from` for older
 templates); no file system, no network. Its `{services: [{type, data}]}` output becomes
 services through `creation_service` (one transaction: all or none): apps from an image (env as
-`.env` text, quoted and multi-line values, placeholders resolved at deploy, `$(EASYPANEL_DOMAIN)` domains as generated domains,
+`.env` text, quoted and multi-line values, placeholders resolved at deploy (the catalog's `$(EASYPANEL_*)` names saved as `$(RDP_*)`), `$(RDP_DOMAIN)` domains as generated domains,
 volumes, files, ports, command, replicas, zero downtime) and databases (their options), databases
 first. What cannot be done is said, never dropped silently: host directories, redirects, resources
 and registry credentials are left out with a warning; what a service needs to be safe or to run
@@ -171,9 +171,11 @@ database's own.
 
 - **Placeholders** (`services/placeholders.rs`), as templates write them, are replaced
   in the environment at each deployment: `$(PROJECT_NAME)`, `$(SERVICE_NAME)`, `$(PRIMARY_DOMAIN)`
-  (the first domain added, else the generated one), `$(EASYPANEL_DOMAIN)` (the generated domain),
-  `$(EASYPANEL_HOST)` (`[panel] service_domain`) and `$(EASYPANEL_HOST_IP)` (`[panel] public_ip`).
-  An unknown or unset one is left as written.
+  (the first domain added, else the generated one), `$(RDP_DOMAIN)` (the generated domain),
+  `$(RDP_HOST)` (`[panel] service_domain`) and `$(RDP_HOST_IP)` (`[panel] public_ip`).
+  An unknown or unset one is left as written. The template catalog's names
+  (`$(EASYPANEL_DOMAIN)`, `…_HOST`, `…_HOST_IP`) still resolve (services made before 0.14.0 keep
+  them), and a template's environment and domains are saved with the `RDP_` names.
 - **Generated domains**: `<project>-<service>.<[panel] service_domain>` (a wildcard DNS record to
   the server; development: `localhost`), with a short hash of both names when the project's name has
   a dash or the label would pass 63 characters (never the same for two services). The Domains tab
@@ -377,6 +379,26 @@ The Advanced tab. Tini is every container's init. A service's added and dropped
 Linux capabilities (`CAP_` prefix optional) and sysctls (`key=value` lines) become its container
 spec's `CapabilityAdd`, `CapabilityDrop` and `Sysctls`. Adding capabilities, sysctls or supplemental groups reaches the
 host's kernel: it needs `system.manage` (in the panel and for templates); dropping does not.
+
+### Nodes
+
+Docker → Nodes (`/docker/nodes`, `nodes_controller`, rules in `node_service`). The list is a
+whitelist of each node's fields (labels through `secret_scan_service::redact_labels`; running tasks
+counted, the panel's own only for `system.manage`), for `docker.view`. Everything else is
+`system.manage`, recorded as actions (`node.drain`, `node.remove`, `swarm.rotate_token`…):
+- **Join command**: the panel's node's advertised manager address (`ManagerStatus.Addr`; a loopback
+  or unspecified one gives no command, with why) and the worker token (never the manager's), read
+  only after its audit entry is committed (`swarm.join_token.read`), answered `no-store`.
+- **Availability**: the node read again, its whole `Spec` kept (labels such as the installer's
+  `rdockpanel.main`, its role), only `Availability` changed, at the `Version.Index` read (a change
+  meanwhile is refused). The panel's node (resolved from Docker every time; unknown: refused) only
+  goes back to active.
+- **Remove**: a worker that is Down (`docker swarm leave` on it first), never forced, never a
+  manager or the panel's node.
+- **Impact** (before a drain): from Docker's live state, the services with tasks on the node, each
+  tied to it (a `node.id`/`node.hostname` constraint), with volumes or folders, or not the panel's;
+  and the panel's services whose saved placement is that node.
+Promotion, demotion and labels are left to Docker.
 
 ### Where a service runs
 

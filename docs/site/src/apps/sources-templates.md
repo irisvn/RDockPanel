@@ -48,7 +48,7 @@ Choose **Dockerfile** and write it in the editor. It is built on this server at 
 
 ## Templates
 
-A template is a ready-made app with its databases and settings. The catalog has 800+ templates, fetched from the public EasyPanel templates catalog when you open it.
+A template is a ready-made app with its databases and settings. The catalog has 800+ templates, fetched from a public, open-source catalog when you open it.
 
 1. On a project, press **Templates**.
 2. **Search templates**, then pick one.

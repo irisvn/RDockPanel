@@ -35,7 +35,7 @@ pub struct PanelConfig {
     /// The domain generated ones live under (`<project>-<service>.<this>`,
     /// a wildcard DNS record to the server); empty: none generated.
     pub service_domain: String,
-    /// The server's public address (`$(EASYPANEL_HOST_IP)`); empty: unknown.
+    /// The server's public address (`$(RDP_HOST_IP)`); empty: unknown.
     pub public_ip: String,
     /// Where EasyPanel's templates are fetched from (their repository's
     /// `templates/` folder, raw files).

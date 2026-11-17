@@ -122,7 +122,8 @@ panel's schedules.
   and finish or undo the imports under way. An older release ignores `services.admin_only` and
   `services.run_user`: an imported service that runs as another user would run as its image's, and project
   members could change it; a folder used in place and an `rdp.invalid/` image do not deploy there.
-- **A release for a big change**: bump `Cargo.toml`, write its `## X.Y.Z` section of
+- **A release for a big change**: run `sh scripts/check-cloudflared.sh` (a newer cloudflared: bump
+  `tunnel_service::IMAGE` in the same release), bump `Cargo.toml`, write its `## X.Y.Z` section of
   `CHANGELOG.md` (the GitHub Release's notes), push, let CI and the image build, then push the tag
   `vX.Y.Z` (`release.yml` names the image and publishes the Release). The docs follow the code in
   the same commit.

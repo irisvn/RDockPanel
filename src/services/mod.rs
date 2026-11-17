@@ -32,6 +32,7 @@ pub mod import_run_service;
 pub mod import_service;
 pub mod live_service;
 pub mod maintenance_service;
+pub mod node_service;
 pub mod notify_service;
 pub mod panel_domain_service;
 pub mod panel_log;

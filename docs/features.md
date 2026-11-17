@@ -38,6 +38,7 @@ Everything RDockPanel does today. [Tiếng Việt](features.vi.md) · back to th
   browser.
 - **Images**: pull (progress shown live), remove per tag, prune stopped containers and dangling images.
 - **Volumes and networks**: create and remove (bridge or overlay).
+- **Nodes**: the Swarm's servers; add one (a join command to copy), pause, drain (what it moves, said first), activate, remove.
 - **Safety**: the panel's own containers, volumes and networks (labelled `rdockpanel.system=true`) are
   hidden and untouchable without the `system.manage` permission; prune skips them.
 - **Accountability**: every Docker management operation (containers, images, volumes, networks,

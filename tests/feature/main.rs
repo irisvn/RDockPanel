@@ -24,6 +24,7 @@ mod imports;
 mod large_values;
 mod live;
 mod members;
+mod nodes;
 mod notifications;
 mod projects;
 mod routing;

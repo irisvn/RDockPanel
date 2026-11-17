@@ -1,9 +1,28 @@
-//! Placeholders in a service's environment, as EasyPanel's templates write
-//! them: `$(PROJECT_NAME)`, `$(SERVICE_NAME)`, `$(PRIMARY_DOMAIN)`,
-//! `$(EASYPANEL_DOMAIN)` (the service's generated domain),
-//! `$(EASYPANEL_HOST)` (the domain generated ones live under) and
-//! `$(EASYPANEL_HOST_IP)`. Replaced at each deployment; an unknown name, or
-//! one without a value, is left as written. Pure functions.
+//! Placeholders in a service's environment: `$(PROJECT_NAME)`,
+//! `$(SERVICE_NAME)`, `$(PRIMARY_DOMAIN)`, `$(RDP_DOMAIN)` (the service's
+//! generated domain), `$(RDP_HOST)` (the domain generated ones live under)
+//! and `$(RDP_HOST_IP)`. Replaced at each deployment; an unknown name, or one
+//! without a value, is left as written. The template catalog's own names
+//! ([`LEGACY`]) still work, and become ours when a template is used
+//! ([`rename_legacy`]). Pure functions.
+
+/// The template catalog's names for the panel's own, in the order they are
+/// renamed (the longer `…_HOST_IP` before `…_HOST`).
+pub const LEGACY: [(&str, &str); 3] = [
+    ("EASYPANEL_HOST_IP", "RDP_HOST_IP"),
+    ("EASYPANEL_DOMAIN", "RDP_DOMAIN"),
+    ("EASYPANEL_HOST", "RDP_HOST"),
+];
+
+/// `text` with the catalog's placeholders written with the panel's names
+/// (`$(EASYPANEL_DOMAIN)` → `$(RDP_DOMAIN)`): whole placeholders only.
+pub fn rename_legacy(text: &str) -> String {
+    let mut out = text.to_owned();
+    for (old, new) in LEGACY {
+        out = out.replace(&format!("$({old})"), &format!("$({new})"));
+    }
+    out
+}
 
 /// What placeholders stand for, for one service.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -25,13 +44,17 @@ impl Vars {
     }
 
     fn value(&self, name: &str) -> Option<String> {
+        let name = LEGACY
+            .iter()
+            .find(|(old, _)| *old == name)
+            .map_or(name, |(_, new)| *new);
         match name {
             "PROJECT_NAME" => Some(self.project.clone()),
             "SERVICE_NAME" => Some(self.service.clone()),
             "PRIMARY_DOMAIN" => self.primary_domain.clone().or_else(|| self.auto_domain()),
-            "EASYPANEL_DOMAIN" => self.auto_domain(),
-            "EASYPANEL_HOST" => self.host.clone(),
-            "EASYPANEL_HOST_IP" => self.host_ip.clone(),
+            "RDP_DOMAIN" => self.auto_domain(),
+            "RDP_HOST" => self.host.clone(),
+            "RDP_HOST_IP" => self.host_ip.clone(),
             _ => None,
         }
     }
@@ -95,6 +118,30 @@ mod tests {
             host: Some("apps.example.com".into()),
             host_ip: Some("203.0.113.7".into()),
         }
+    }
+
+    #[test]
+    fn the_panels_names_are_replaced() {
+        let v = vars();
+        assert_eq!(
+            expand("$(RDP_DOMAIN) $(RDP_HOST) $(RDP_HOST_IP)", &v),
+            "shop-web.apps.example.com apps.example.com 203.0.113.7"
+        );
+    }
+
+    #[test]
+    fn the_catalogs_names_become_the_panels() {
+        assert_eq!(
+            rename_legacy(
+                "https://$(EASYPANEL_DOMAIN) $(EASYPANEL_HOST) $(EASYPANEL_HOST_IP) $(PRIMARY_DOMAIN)"
+            ),
+            "https://$(RDP_DOMAIN) $(RDP_HOST) $(RDP_HOST_IP) $(PRIMARY_DOMAIN)"
+        );
+        // Whole placeholders only.
+        assert_eq!(
+            rename_legacy("EASYPANEL_HOST=x $(EASYPANEL_HOSTS)"),
+            "EASYPANEL_HOST=x $(EASYPANEL_HOSTS)"
+        );
     }
 
     #[test]

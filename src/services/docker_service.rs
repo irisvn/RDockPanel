@@ -520,9 +520,37 @@ pub trait DockerApi: Send + Sync {
     async fn list_services(&self) -> DockerResult<Vec<Value>> {
         Err(unsupported("listing Swarm services"))
     }
-    /// Every Swarm node, raw (a cluster of several is out of scope).
+    /// Every Swarm node, raw.
     async fn list_nodes(&self) -> DockerResult<Vec<Value>> {
         Err(unsupported("listing Swarm nodes"))
+    }
+    /// A Swarm node, raw (`None`: no such node).
+    async fn inspect_node(&self, id: &str) -> DockerResult<Option<Value>> {
+        let _ = id;
+        Err(unsupported("inspecting a Swarm node"))
+    }
+    /// Sets a node's whole spec, as read at `version` (Docker refuses a stale one).
+    async fn update_node(&self, id: &str, version: i64, spec: Value) -> DockerResult<()> {
+        let _ = (id, version, spec);
+        Err(unsupported("updating a Swarm node"))
+    }
+    /// Removes a node, never forced: Docker refuses one that has not left.
+    async fn remove_node(&self, id: &str) -> DockerResult<()> {
+        let _ = id;
+        Err(unsupported("removing a Swarm node"))
+    }
+    /// The Swarm's worker join token (never the manager's).
+    async fn worker_join_token(&self) -> DockerResult<String> {
+        Err(unsupported("reading the Swarm's join token"))
+    }
+    /// A new worker join token (the Swarm's spec kept as it is).
+    async fn rotate_worker_token(&self) -> DockerResult<()> {
+        Err(unsupported("rotating the Swarm's join token"))
+    }
+    /// Every task placed on `node`, whatever its service.
+    async fn node_tasks(&self, node: &str) -> DockerResult<Vec<SwarmTask>> {
+        let _ = node;
+        Err(unsupported("listing a node's tasks"))
     }
     /// A volume with `labels` (`create_volume` has none).
     async fn create_volume_labelled(

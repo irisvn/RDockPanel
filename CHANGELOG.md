@@ -3,8 +3,14 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
-## Unreleased
+## 0.14.0 — 2026-11-18
 
+- **Docker → Nodes**: the Swarm's servers with their state, resources and tasks. Add a server (a
+  command to copy), pause, drain (what moves is said first), activate, or remove one that has left.
+  The panel's own server is never paused, drained or removed.
+- Environment placeholders are now `$(RDP_DOMAIN)`, `$(RDP_HOST)` and `$(RDP_HOST_IP)`; a template's
+  environment and domains are saved with them. The names used before keep working.
+- cloudflared 2026.11.1 (the newest) for Cloudflare Tunnel.
 - A user guide in English and Vietnamese, with screenshots: https://irisvn.github.io/RDockPanel/
 
 ## 0.13.1 — 2026-11-17

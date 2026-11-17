@@ -74,6 +74,8 @@ const PAGES = [
   ["images", "/p/images"],
   ["volumes", "/p/volumes"],
   ["networks", "/p/networks"],
+  ["nodes", "/p/nodes"],
+  ["nodes-add", "/p/nodes", (page) => page.getByRole("button", { name: /Add a node|Thêm node/ }).first().click()],
   ["container-logs", "/p/containers/demo_web/logs"],
   ["service-record", "/r/services/records/9"],
   ["users", "/system/users"],
@@ -132,6 +134,8 @@ async function mask(page) {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n; (n = walker.nextNode()); ) {
       if (n.nodeValue.includes(short)) n.nodeValue = n.nodeValue.split(h).join("server-01").split(short).join("server-01");
+      // A Swarm join token is a key: never in a picture.
+      if (n.nodeValue.includes("SWMTKN-")) n.nodeValue = n.nodeValue.replace(/SWMTKN-[A-Za-z0-9-]+/g, "SWMTKN-1-xxxxxxxxxxxxxxxxxxxx");
     }
   }, host);
 }
@@ -149,6 +153,14 @@ for (const locale of locales) {
         localStorage.setItem("rustcms-admin-locale", lang);
       } catch {}
     }, [theme, locale]);
+    // The Swarm's join token never reaches a screenshot: its request is
+    // answered here with a stand-in (the text mask below is a second guard).
+    await context.route("**/docker/nodes/join-command", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ command: "docker swarm join --token SWMTKN-1-xxxxxxxxxxxxxxxxxxxx 203.0.113.10:2377" }),
+      }),
+    );
     const page = await context.newPage();
     await page.goto(`${base}/login`);
     await page.locator("input[type=email]").fill(email);

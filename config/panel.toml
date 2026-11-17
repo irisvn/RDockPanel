@@ -37,7 +37,7 @@ traefik_service = "rdp-traefik"
 # generated. Development: "localhost" (set in .env), so http://shop-web.localhost:8080.
 service_domain = ""
 
-# The server's public IP address, for `$(EASYPANEL_HOST_IP)` in environments.
+# The server's public IP address, for `$(RDP_HOST_IP)` in environments.
 public_ip = ""
 
 # Compose services' files, one directory each. The Docker daemon reads the

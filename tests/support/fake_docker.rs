@@ -69,6 +69,14 @@ pub struct FakeDocker {
     pub detailed: Arc<Mutex<Vec<Value>>>,
     pub swarm_services: Arc<Mutex<Vec<Value>>>,
     pub nodes: Arc<Mutex<Vec<Value>>>,
+    /// The Swarm's worker join token (`worker_join_token`), and the tasks on
+    /// each node whatever their service (`node_tasks`).
+    pub join_token: Arc<Mutex<String>>,
+    /// The next node update is refused as out of sequence (another change won).
+    pub node_update_conflict: Arc<Mutex<bool>>,
+    /// The node id `info` gives (default `node-1`; `Some("")`: none said).
+    pub node_id: Arc<Mutex<Option<String>>>,
+    pub node_task_list: Arc<Mutex<Vec<SwarmTask>>>,
     /// Volume sizes by name; a file's archive by `container:path`.
     pub volume_sizes: Arc<Mutex<HashMap<String, i64>>>,
     pub files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
@@ -205,7 +213,12 @@ impl DockerApi for FakeDocker {
             containers_running: 0,
             images: 0,
             swarm: SwarmRole::Manager,
-            node_id: "node-1".to_owned(),
+            node_id: self
+                .node_id
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| "node-1".to_owned()),
         })
     }
     async fn containers(&self) -> DockerResult<Vec<ContainerItem>> {
@@ -410,6 +423,68 @@ impl DockerApi for FakeDocker {
     }
     async fn list_nodes(&self) -> DockerResult<Vec<Value>> {
         Ok(self.nodes.lock().unwrap().clone())
+    }
+    async fn inspect_node(&self, id: &str) -> DockerResult<Option<Value>> {
+        Ok(self
+            .nodes
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|n| n["ID"] == id)
+            .cloned())
+    }
+    async fn update_node(&self, id: &str, version: i64, spec: Value) -> DockerResult<()> {
+        self.record(format!(
+            "update_node {id} {}",
+            spec["Availability"].as_str().unwrap_or_default()
+        ));
+        let mut nodes = self.nodes.lock().unwrap();
+        let node = nodes
+            .iter_mut()
+            .find(|n| n["ID"] == id)
+            .ok_or(DockerError::NotFound)?;
+        if std::mem::take(&mut *self.node_update_conflict.lock().unwrap())
+            || node["Version"]["Index"].as_i64() != Some(version)
+        {
+            return Err(DockerError::Conflict("update out of sequence".to_owned()));
+        }
+        node["Spec"] = spec;
+        node["Version"]["Index"] = serde_json::json!(version + 1);
+        Ok(())
+    }
+    async fn remove_node(&self, id: &str) -> DockerResult<()> {
+        self.record(format!("remove_node {id}"));
+        let mut nodes = self.nodes.lock().unwrap();
+        let at = nodes
+            .iter()
+            .position(|n| n["ID"] == id)
+            .ok_or(DockerError::NotFound)?;
+        if nodes[at]["Status"]["State"] != "down" {
+            return Err(DockerError::Conflict(
+                "node is not down and can't be removed".to_owned(),
+            ));
+        }
+        nodes.remove(at);
+        Ok(())
+    }
+    async fn worker_join_token(&self) -> DockerResult<String> {
+        Ok(self.join_token.lock().unwrap().clone())
+    }
+    async fn rotate_worker_token(&self) -> DockerResult<()> {
+        self.record("rotate_worker_token".to_owned());
+        let mut token = self.join_token.lock().unwrap();
+        *token = format!("{token}-rotated");
+        Ok(())
+    }
+    async fn node_tasks(&self, node: &str) -> DockerResult<Vec<SwarmTask>> {
+        Ok(self
+            .node_task_list
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|t| t.node_id.as_deref() == Some(node))
+            .cloned()
+            .collect())
     }
     async fn create_volume_labelled(
         &self,

@@ -169,6 +169,8 @@ what ships. Its **§10 checklist** is binding: run it before showing anything.
    `docs/*.md`, `CHANGELOG.md`).
 4. **Commits**: short messages in Vietnamese, easy to understand.
 5. **Releases**: a big update bumps the version.
+   - Run `sh scripts/check-cloudflared.sh`: when Cloudflare has a newer cloudflared, bump
+     `tunnel_service::IMAGE` to it (read its release notes) in that release.
    - Bump `[package] version` in `Cargo.toml`: a minor bump for features, a patch bump for fixes.
      `[package.metadata.rustcms] version` is RustCMS's version: only `rustcms upgrade` changes it.
    - Add a CHANGELOG section: a few plain bullets on what changed for users, no internals.
