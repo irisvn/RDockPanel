@@ -121,6 +121,8 @@ pub struct Model {
     /// Where its tasks run: empty, automatic; `node:<id>`; `any`
     /// (`placement_service`). The panel's administrators' only.
     pub placement: Option<String>,
+    /// Its WAF: empty, the panel's setting; `on` or `off` (`waf_service`).
+    pub waf: Option<String>,
     /// Environment variables, sealed with `APP_KEY` (context `services.env`).
     #[sea_orm(column_type = "Text", nullable)]
     pub env: Option<Encrypted<BTreeMap<String, String>>>,

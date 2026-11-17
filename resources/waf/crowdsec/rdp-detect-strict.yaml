@@ -1,0 +1,7 @@
+# Detect mode at the Strict level.
+name: rdp/appsec-detect-strict
+outofband_rules:
+  - crowdsecurity/base-config
+  - crowdsecurity/vpatch-*
+  - crowdsecurity/generic-*
+  - crowdsecurity/crs

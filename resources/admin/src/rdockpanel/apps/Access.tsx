@@ -318,9 +318,66 @@ function RateLimitSection(props: Props) {
 export function SecurityTab(props: Props) {
   return (
     <Stack>
+      <WafSection {...props} />
       <RateLimitSection {...props} />
       <BasicAuthSection {...props} />
     </Stack>
+  );
+}
+
+/** The WAF for this service: the panel's (Settings → Security), on, or
+ * off. Turning it off needs `system.manage` (the server checks it too). */
+function WafSection(props: Props) {
+  const { t, d } = props;
+  const s = d.service;
+  const [choice, setChoice] = useState(s.waf ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const fields = error instanceof ResourceError ? error.fieldErrors : {};
+  const panel: Record<string, string> = { off: t("off"), detect: t("detect only"), block: t("block") };
+  return (
+    <Section
+      title={t("Web application firewall")}
+      description={t("Checks the requests to this service's domains and stops known attacks before they reach the app. Applied when saved.")}
+    >
+      <form
+        className="rdp2-form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setError(null);
+          setBusy(true);
+          try {
+            await resources.update("services", s.id, { waf: choice || null });
+            props.onSaved();
+          } catch (err) {
+            setError(err);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {s.waf_mode === "off" && <Alert>{t("The panel's WAF is off (Settings → Security): no service is checked.")}</Alert>}
+        <Field
+          label={t("WAF")}
+          help={t("Turning it off removes this service's protection: only the panel's administrators may.")}
+          error={fields.waf}
+        >
+          <NativeSelect value={choice} onChange={(e) => setChoice(e.target.value)} disabled={!d.can.update}>
+            <option value="">{t("The panel's setting ({mode})").replace("{mode}", panel[s.waf_mode] ?? s.waf_mode)}</option>
+            <option value="on">{t("On")}</option>
+            <option value="off">{t("Off")}</option>
+          </NativeSelect>
+        </Field>
+        {Object.keys(fields).length === 0 && <ErrorNote error={error} />}
+        {d.can.update && (
+          <div className="rdp2-row rdp2-end">
+            <Button type="submit" disabled={busy || choice === (s.waf ?? "")}>
+              {busy ? t("Saving…") : t("Save")}
+            </Button>
+          </div>
+        )}
+      </form>
+    </Section>
   );
 }
 

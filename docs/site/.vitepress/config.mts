@@ -16,7 +16,7 @@ const en: Words = {
   env: 'Environment and secrets', domains: 'Domains and HTTPS', tunnel: 'Cloudflare Tunnel',
   access: 'Redirects, security, maintenance', storage: 'Storage and volumes', databases: 'Databases and backups',
   logs: 'Logs, terminal, scripts', compose: 'Docker Compose', import: 'Import existing containers', nodes: 'Where a service runs',
-  server: 'Server', docker: 'Docker', swarmNodes: 'Nodes', firewall: 'Firewall', settings: 'Settings', users: 'Users and roles',
+  server: 'Server', docker: 'Docker', swarmNodes: 'Nodes', firewall: 'Firewall', waf: 'WAF', settings: 'Settings', users: 'Users and roles',
   ref: 'Reference', api: 'API', security: 'Security', trouble: 'Troubleshooting',
 }
 const vi: Words = {
@@ -26,7 +26,7 @@ const vi: Words = {
   env: 'Biến môi trường và secret', domains: 'Domain và HTTPS', tunnel: 'Cloudflare Tunnel',
   access: 'Chuyển hướng, bảo mật, bảo trì', storage: 'Lưu trữ và volume', databases: 'Database và backup',
   logs: 'Log, terminal, script', compose: 'Docker Compose', import: 'Import container có sẵn', nodes: 'Chọn node chạy',
-  server: 'Server', docker: 'Docker', swarmNodes: 'Node', firewall: 'Firewall', settings: 'Cài đặt', users: 'Người dùng và vai trò',
+  server: 'Server', docker: 'Docker', swarmNodes: 'Node', firewall: 'Firewall', waf: 'WAF', settings: 'Cài đặt', users: 'Người dùng và vai trò',
   ref: 'Tham khảo', api: 'API', security: 'Bảo mật', trouble: 'Xử lý sự cố',
 }
 
@@ -58,6 +58,7 @@ function sidebar(w: Words, p: string): DefaultTheme.SidebarItem[] {
       { text: w.docker, link: `${p}/server/docker` },
       { text: w.swarmNodes, link: `${p}/server/nodes` },
       { text: w.firewall, link: `${p}/server/firewall` },
+      { text: w.waf, link: `${p}/server/waf` },
       { text: w.settings, link: `${p}/server/settings` },
       { text: w.users, link: `${p}/server/users` },
     ] },

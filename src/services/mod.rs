@@ -50,4 +50,6 @@ pub mod traefik_service;
 pub mod traefik_settings_service;
 pub mod tunnel_service;
 pub mod version_service;
+pub mod waf_docker_service;
+pub mod waf_service;
 // rustcms:services

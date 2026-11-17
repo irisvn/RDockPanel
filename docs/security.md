@@ -216,6 +216,36 @@ are always open and are accepted before the blocked addresses (SSH) or the drops
 reverted by the host itself after 120 s unless kept; a boot that cannot load the confirmed table
 loads the fallback (SSH and the web only), and Docker does not start unfiltered.
 
+## The WAF
+
+Settings → Security (`system.manage`) puts CrowdSec's AppSec in front of the services' domains: a
+Traefik plugin (crowdsec-bouncer-traefik-plugin, vendored at a fixed commit in `resources/waf/plugin`,
+loaded as a local plugin) asks the `rdp-crowdsec` service about each request. What it guards and how
+it fails:
+
+- **Only service routers**: the panel's own routes, ACME challenges, the maintenance page and the
+  redirects to HTTPS never go through it, so a WAF fault cannot lock anyone out of the panel.
+- **Fail open, always**: CrowdSec stopped, slow or unreachable lets requests through unchecked; a
+  plugin Traefik could not load is replaced by a no-op middleware (never a missing one, which would
+  404 every site). A hidden canary router (`rdp-waf-canary.invalid`, always the plugin) is probed every
+  minute: the sites get the plugin only after the canary proves it loaded and a test attack is
+  blocked. The page says "Unavailable" whenever requests pass unchecked.
+- **The visitor's address**: the plugin reads `X-Forwarded-For` only from Traefik's trusted proxies
+  (Cloudflare's ranges, the tunnel's network); an empty list in the plugin would trust everyone, so
+  it is always given. Trusted addresses skip the WAF entirely, so their list is administrators' only.
+- **Bodies**: a `buffering` middleware runs first (10 MB kept in memory, the rest in a temporary file,
+  no limit on the request), as the plugin would cut larger bodies; bodies are never stored, alerts keep
+  the address, host, path and rule only.
+- **The canary**: its host `rdp-waf-canary.invalid` cannot be a domain (nor `*.invalid`), its
+  router outranks every service's, and only the panel's exact answer counts: a service cannot make the
+  panel take the WAF off the sites.
+- **Secrets**: the bouncer's key is a Docker secret mounted in Traefik and CrowdSec, never in the
+  database, the definitions or a job. CrowdSec runs with `DISABLE_ONLINE_API=true` unless community
+  sharing is on, so nothing leaves the server by default.
+- **Names**: `rdp-waf*` middlewares are the panel's; a domain or custom middleware cannot name them.
+- A service's WAF turned off needs `system.manage` (see [permissions.md](permissions.md)). Saving the
+  settings and Repair are audited (`waf.settings`, `waf.repair`).
+
 ## Live data limits
 
 Log lines are cut to 16 KiB. A log request (the last lines) stops reading after about 2 MiB of text;

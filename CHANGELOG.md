@@ -3,6 +3,15 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.15.0 — 2026-11-18
+
+- **Web application firewall** (Settings → Security): CrowdSec checks every request to your services'
+  domains. Detect only (recorded) or Block (403), Basic (known exploits, secret-file probes) or Strict
+  (+ OWASP Core Rule Set: SQL injection, XSS…), trusted addresses, the latest alerts. Off by default.
+- Each service can follow the panel's WAF setting, or turn it on or off (off: administrators only).
+- If the WAF fails, requests go through unchecked: it never takes a site down. The page says so, with a
+  Repair button.
+
 ## 0.14.0 — 2026-11-18
 
 - **Docker → Nodes**: the Swarm's servers with their state, resources and tasks. Add a server (a

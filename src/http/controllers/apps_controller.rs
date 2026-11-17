@@ -296,6 +296,8 @@ pub async fn service(
             "healthcheck_start_period_s": row.healthcheck_start_period_s,
             "healthcheck_off": row.healthcheck_off,
             "placement": row.placement,
+            "waf": row.waf,
+            "waf_mode": crate::services::waf_service::Settings::load(app.db()).await?.mode,
             "away": away,
             "registry_username": row.registry_username,
             "source": row.source,

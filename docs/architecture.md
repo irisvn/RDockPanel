@@ -255,6 +255,39 @@ whose ranges they may not overlap). Every service router's priority is its rule'
 then length) times 4, the variants +1 and +2: never above another route. Counters are Traefik's, in
 memory: per router (so per domain), reset when Traefik restarts or reloads.
 
+### WAF
+
+Settings → Security stores `waf.settings` (mode `off`/`detect`/`block`, level `basic`/`strict`, trusted
+addresses, sharing) and a service may override it (`services.waf`: null follows the panel, `on`,
+`off`). `waf_service` holds the rules, `waf_docker_service` the Docker side:
+
+- **CrowdSec** (`rdp-crowdsec`, a pinned `crowdsecurity/crowdsec` image on the panel's node, volumes
+  `rdp_crowdsec_data` and `rdp_crowdsec_config`) gets its AppSec configs and acquisition as Swarm
+  configs from `resources/waf/crowdsec/`: port 7422 answers in band (Block), 7423 out of band (Detect:
+  recorded by the scenario `rdp/appsec-detect`, never a decision). Off scales it to 0.
+- **Traefik** gets the plugin as a local plugin: the panel copies `resources/waf/plugin` (in the
+  image at `/app/waf/plugin`) into the volume `rdp_traefik_plugins` with a helper container, mounts it
+  read-only at `/plugins-local`, adds `--experimental.localPlugins.rdpwaf.moduleName`, the bouncer's
+  secret and the CrowdSec network. That restarts Traefik once (the first start, or after a plugin it
+  could not load).
+- **Definitions** (`rdp-waf.yml` in Traefik's dynamic folder): `rdp-waf-buffer` (buffering),
+  `rdp-waf` (the plugin, or a no-op headers middleware while it is not proven) and the canary router
+  `rdp-waf-canary` → the panel's public `/api/v1/waf-canary`.
+- **Routes**: a deployment snapshot carries `waf: bool` (the effective setting); the route builder puts
+  `rdp-waf-buffer@file, rdp-waf@file` first on every router reaching the app, before rate limits,
+  redirects and basic authentication, but not on the HTTPS redirects or the maintenance page. A
+  change of setting re-syncs the routes (no deploy).
+- **State** (`waf.status`): `reconcile` (on save, Repair and boot, in the background, one at a time)
+  writes the no-op first, starts what is needed, then follows the canary; the `waf-check` schedule
+  probes it every minute (skipped while a reconcile runs). The definitions follow each probe, never
+  the stored status: 404 → the plugin is not loaded (sites back to the no-op, and a reconcile starts
+  Traefik again, at most every ten minutes); the panel's answer (`rdp-waf-canary`) and `/.env` 403 →
+  the plugin on the sites, `on`; anything else → `unavailable` with the reason, the sites as they were.
+  The canary's router has a priority above every service's, and no domain may take its host.
+  CrowdSec cancels the canary's alerts and events (`on_match` in the Block configs).
+- **Alerts** are `cscli alerts list -o json` in the container, summarized (time, address, host, path,
+  rule, blocked or recorded).
+
 ### Capacity check
 
 `services/capacity_service.rs` tells whether the server has room for what is about to run. It is

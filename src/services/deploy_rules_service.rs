@@ -266,18 +266,26 @@ pub fn valid_hostname(host: &str) -> bool {
 }
 
 /// A domain's host: a hostname, or a wildcard `*.example.com` (every name
-/// one level under it).
+/// one level under it). Never the WAF's canary (`rdp-waf-canary.invalid`): a
+/// service taking it would make the panel think the WAF's plugin is not
+/// loaded.
 pub fn valid_domain_host(host: &str) -> bool {
-    match host.strip_prefix("*.") {
-        Some(rest) => valid_hostname(rest),
-        None => valid_hostname(host),
-    }
+    valid_hostname(host.strip_prefix("*.").unwrap_or(host)) && !reserved_host(host)
+}
+
+/// The WAF's canary (`rdp-waf-canary.invalid`), or the wildcard covering it:
+/// the panel's own, never a service's, even one saved before this rule (its
+/// routes are not written).
+pub fn reserved_host(host: &str) -> bool {
+    host == crate::services::waf_docker_service::CANARY_HOST || host == "*.invalid"
 }
 
 /// A Traefik middleware a domain names (`ratelimit@file`, `auth@docker`):
 /// letters, digits, `-`, `_`, `.`, one `@`.
 pub fn valid_middleware(name: &str) -> bool {
+    // The WAF's middlewares are the panel's to attach (`waf_service`).
     !name.is_empty()
+        && !name.starts_with(crate::services::waf_service::PREFIX)
         && name.len() <= 100
         && name.matches('@').count() <= 1
         && name

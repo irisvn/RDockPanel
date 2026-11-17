@@ -61,6 +61,9 @@ export type ServiceDetail = {
     healthcheck_timeout_s: number | null;
     healthcheck_start_period_s: number | null;
     healthcheck_off: boolean;
+    /** Its WAF: null follows the panel's, `on`, `off`; and the panel's mode. */
+    waf: string | null;
+    waf_mode: "off" | "detect" | "block";
     /** Where it runs: null automatic, `node:<id>`, `any`. */
     placement: string | null;
     /** Why the panel may not reach its containers (another node), or null. */

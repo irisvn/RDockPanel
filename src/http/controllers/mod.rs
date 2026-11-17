@@ -24,4 +24,5 @@ pub mod tokens_controller;
 pub mod traefik_controller;
 pub mod trigger_controller;
 pub mod tunnel_controller;
+pub mod waf_controller;
 // rustcms:controller-mods

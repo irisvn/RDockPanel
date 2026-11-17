@@ -69,6 +69,9 @@ Everything RDockPanel does today. [Tiếng Việt](features.vi.md) · back to th
   through Cloudflare too, with exempt addresses), HTTP basic authentication, and a maintenance page (built in or your own HTML, with when you are
   back, and addresses that still reach the service).
   A **Domains** page lists every service's domains, where they lead and whether they are served.
+  A **web application firewall** (Settings → Security, CrowdSec's AppSec in Traefik): detect or block,
+  basic (known exploits, probes of secret files) or strict (+ the OWASP Core Rule Set), trusted
+  addresses, the latest alerts, on or off per service; it fails open, never taking a site down.
   Domains, redirects, rate limits, basic authentication and maintenance **apply when saved** (no Deploy, the
   running containers untouched); image, environment, ports, mounts and resources need a Deploy.
   A certificate resolver per domain (Settings → Certificates: Let's Encrypt over HTTP or over DNS with

@@ -12,6 +12,7 @@ import { Notifications } from "./Notifications";
 import { Certificates } from "./Certificates";
 import { UploadedCertificates } from "./Uploaded";
 import { Traefik } from "./Traefik";
+import { Waf } from "./Waf";
 import { Panel } from "./Panel";
 import { Version } from "./Version";
 import { Git } from "./Git";
@@ -255,6 +256,7 @@ const TABS: Array<{ id: string; label: string; permission: string | null }> = [
   { id: "panel", label: "Panel", permission: "system.manage" },
   { id: "version", label: "Version", permission: "system.manage" },
   { id: "traefik", label: "Traefik", permission: "system.manage" },
+  { id: "security", label: "Security", permission: "system.manage" },
   { id: "certificates", label: "Certificates", permission: "system.manage" },
   { id: "tunnel", label: "Cloudflare Tunnel", permission: "system.manage" },
   { id: "branding", label: "Branding", permission: "system.manage" },
@@ -296,6 +298,7 @@ export function Settings(props: PageProps<unknown>) {
         {tab === "panel" && <Panel {...props} />}
         {tab === "version" && <Version {...props} />}
         {tab === "traefik" && <Traefik {...props} />}
+        {tab === "security" && <Waf {...props} />}
         {tab === "certificates" && (
           <>
             <Certificates {...props} />

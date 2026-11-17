@@ -1,0 +1,7 @@
+# RDockPanel's WAF, Detect mode: the same rules after the request (never
+# blocking); matches become alerts (scenario rdp/appsec-detect).
+name: rdp/appsec-detect
+outofband_rules:
+  - crowdsecurity/base-config
+  - crowdsecurity/vpatch-*
+  - crowdsecurity/generic-*

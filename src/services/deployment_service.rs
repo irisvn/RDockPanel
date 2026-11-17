@@ -221,7 +221,8 @@ pub async fn snapshot_without_env<C: ConnectionTrait>(
         } else {
             Default::default()
         };
-    Ok(Snapshot::of(
+    let waf = crate::services::waf_service::Settings::load(db).await?;
+    let mut snapshot = Snapshot::of(
         &project,
         service,
         &domains,
@@ -230,7 +231,9 @@ pub async fn snapshot_without_env<C: ConnectionTrait>(
         &resolvers,
         &certificates,
     )
-    .with_access(&redirects, &users))
+    .with_access(&redirects, &users);
+    snapshot.waf = crate::services::waf_service::effective(&waf, service.waf.as_deref());
+    Ok(snapshot)
 }
 
 /// Whether the configuration changed since the last successful deployment,

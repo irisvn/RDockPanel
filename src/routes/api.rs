@@ -17,6 +17,17 @@ pub fn routes() -> ApiRoutes {
             Access::public(),
             controllers::trigger_controller::deploy,
         )
+        // The WAF's canary backend (a constant: Traefik routes its host here).
+        .get(
+            "/waf-canary",
+            Access::public(),
+            controllers::waf_controller::canary,
+        )
+        .get(
+            "/waf-canary/{*rest}",
+            Access::public(),
+            controllers::waf_controller::canary,
+        )
         // A service's maintenance page (Traefik routes its domains here).
         .get(
             "/maintenance/{name}",

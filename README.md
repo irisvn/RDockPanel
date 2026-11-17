@@ -21,7 +21,8 @@ feature is free: no project limits, no paid tiers.
   `docker compose` becomes a service, with a plan, a copy of its data and an undo
   ([docs/import.md](docs/import.md)).
 - **Domains and HTTPS** through Traefik (Let's Encrypt, your own certificates, Cloudflare Tunnel),
-  redirects, rate limits, basic auth and a maintenance page, applied when saved.
+  redirects, rate limits, basic auth, a web application firewall (CrowdSec) and a maintenance page,
+  applied when saved.
 - **Operations**: scheduled backups (local or S3), notifications (Discord, Slack, Telegram, email,
   webhooks), a firewall, one-click panel updates, users, roles and project members, a public API.
 - English and Vietnamese, light and dark.

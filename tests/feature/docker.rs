@@ -793,6 +793,7 @@ async fn desired_specs_run_on_a_real_swarm() {
         redirects: vec![],
         basic_auth: vec![],
         rate_limit: None,
+        waf: false,
         maintenance_bypass: vec![],
         admin_only: false,
         user: None,

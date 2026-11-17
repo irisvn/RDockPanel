@@ -1,6 +1,6 @@
 # Redirects, security, maintenance
 
-Three tabs of a service control what visitors of its domains get: **Redirects**, **Security** (basic authentication and a rate limit) and **Maintenance**. Everything here applies **when saved**: Traefik's routes are written again, the containers keep running, no Deploy is needed.
+Three tabs of a service control what visitors of its domains get: **Redirects**, **Security** (basic authentication, a rate limit and the WAF) and **Maintenance**. Everything here applies **when saved**: Traefik's routes are written again, the containers keep running, no Deploy is needed.
 
 Databases have none of these tabs. They act on the service's domains only, not on published ports.
 
@@ -45,6 +45,10 @@ Limits how often one visitor (their IP address) sends requests to the service's 
 - **Exempt addresses**: IPs or networks never limited, one a line (a VPN, a monitor).
 
 Visitors are counted per domain. Those coming through Cloudflare (a proxied record or the tunnel) are counted by their own address; IPv6 visitors by their `/64`. Exempt addresses match visitors who reach the server directly, not through Cloudflare. The counters start again when Traefik restarts.
+
+### WAF
+
+**WAF** follows the panel's [web application firewall](/server/waf) (**The panel's setting**), or is set **On** or **Off** for this service. Turning it **off** removes its protection: only the panel's administrators may. It applies when saved.
 
 ![Security tab](/shots/service-security.png)
 

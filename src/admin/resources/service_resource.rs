@@ -114,6 +114,7 @@ impl Resource for ServiceResource {
             Field::column(service::Column::HealthcheckTimeoutS),
             Field::column(service::Column::HealthcheckStartPeriodS),
             Field::column(service::Column::HealthcheckOff),
+            Field::column(service::Column::Waf).max_length(8),
             Field::column(service::Column::Placement)
                 .max_length(crate::services::placement_service::MAX),
             // Sealed with APP_KEY; names shown, values never.
@@ -438,6 +439,14 @@ fn normalize(mut data: Data) -> Data {
             data.insert(field.to_owned(), value);
         }
     }
+    if let Some(waf) = text(&data, "waf").map(|w| w.trim().to_owned()) {
+        let value = if waf.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(waf)
+        };
+        data.insert("waf".to_owned(), value);
+    }
     if let Some(placement) = text(&data, "placement").map(|p| p.trim().to_owned()) {
         let value = if placement.is_empty() {
             serde_json::Value::Null
@@ -533,6 +542,25 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
             errors.add("sysctls", ctx.t("must be key=value lines"));
         } else if !lines.trim().is_empty() && !system {
             errors.add("sysctls", ctx.t("needs system.manage"));
+        }
+    }
+    // Its WAF: following the panel's, on, or off. Turning it off lowers its
+    // protection: the panel's administrators only.
+    if data.contains_key("waf") {
+        let waf = text(data, "waf").map(str::trim).filter(|w| !w.is_empty());
+        if !crate::services::waf_service::valid_service_setting(waf) {
+            errors.add(
+                "waf",
+                ctx.t("must be on, off or empty (the panel's setting)"),
+            );
+        } else if waf == Some("off")
+            && record.and_then(|r| r.waf.as_deref()) != Some("off")
+            && !system
+        {
+            errors.add(
+                "waf",
+                ctx.t("needs system.manage (it removes the service's protection)"),
+            );
         }
     }
     // Where it runs: the panel's administrators choose, for an image a

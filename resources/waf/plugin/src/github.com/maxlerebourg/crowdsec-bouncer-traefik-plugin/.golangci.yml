@@ -1,0 +1,90 @@
+run:
+  timeout: 3m
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  gocyclo:
+    min-complexity: 20
+  goconst:
+    min-len: 5
+    min-occurrences: 4
+  misspell:
+    locale: US
+  funlen:
+    lines: -1
+    statements: 60
+  godox:
+    keywords:
+      - FIXME
+  gofumpt:
+    extra-rules: true
+  depguard:
+    rules:
+      Main:
+        files:
+          - $all
+          - "!$test"
+        allow:
+          - $gostd
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/logger
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/ip
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/location
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/configuration
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/cache
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/captcha
+          - github.com/leprosus/golang-ttl-map
+          - github.com/maxlerebourg/simpleredis
+      Test:
+        files:
+          - $test
+        allow:
+          - $gostd
+          - github.com/maxlerebourg/simpleredis
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/logger
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/ip
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/location
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/configuration
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/cache
+          - github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin/pkg/captcha
+
+linters:
+  enable-all: true
+  disable:
+    - sqlclosecheck # not relevant (SQL)
+    - rowserrcheck # not relevant (SQL)
+    - cyclop # duplicate of gocyclo
+    - bodyclose # Too many false positives: https://github.com/timakin/bodyclose/issues/30
+    - dupl
+    - testpackage
+    - tparallel
+    - paralleltest
+    - nlreturn
+    - wsl
+    - exhaustive
+    - exhaustruct
+    - err113
+    - wrapcheck
+    - noctx
+    - lll
+    - forbidigo
+    - varnamelen
+    - wastedassign # is disabled because of generics
+    - gofumpt
+    - gci
+    - mnd
+    - exportloopref
+    - contextcheck
+issues:
+  exclude-use-default: false
+  max-same-issues: 0
+  exclude:
+    - "G402: TLS InsecureSkipVerify may be true."
+  exclude-rules:
+    - path: (.+)_test.go
+      linters:
+        - goconst
+        - funlen
+        - godot

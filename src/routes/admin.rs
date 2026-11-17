@@ -14,6 +14,7 @@ use crate::http::controllers::{
     nodes_controller as nodes, notifications_controller as notifications,
     server_controller as server, system_controller as system, templates_controller as templates,
     tokens_controller as tokens, traefik_controller as traefik, tunnel_controller as tunnel,
+    waf_controller as waf,
 };
 use crate::policies::permissions;
 
@@ -382,6 +383,27 @@ pub fn routes() -> AdminRoutes {
                     "/system/version/dismiss",
                     AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::dismiss_version,
+                )
+                // Settings → Security (the WAF): the panel's administrators.
+                .get(
+                    "/waf",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::show,
+                )
+                .put(
+                    "/waf",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::update,
+                )
+                .post(
+                    "/waf/repair",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::repair,
+                )
+                .get(
+                    "/waf/alerts",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::alerts,
                 )
                 .post(
                     "/system/version/update",

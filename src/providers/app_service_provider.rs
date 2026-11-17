@@ -80,6 +80,15 @@ impl ServiceProvider for AppServiceProvider {
         app.job::<crate::jobs::import_discover::ImportDiscover>();
         app.job::<crate::jobs::import_step::ImportStep>();
         // Imports whose step lost its lease, and originals that run again.
+        // The WAF's canary: is it still checking requests?
+        app.schedule(
+            rustcms::schedule::Schedule::every("waf-check", std::time::Duration::from_secs(60))
+                .task(|ctx| async move {
+                    let status = crate::services::waf_docker_service::check(&ctx.state).await?;
+                    Ok((status.state == "unavailable")
+                        .then(|| format!("WAF unavailable: {}", status.detail.unwrap_or_default())))
+                }),
+        );
         app.schedule(
             rustcms::schedule::Schedule::every("import-tick", std::time::Duration::from_secs(60))
                 .task(|ctx| async move {
@@ -349,6 +358,8 @@ impl ServiceProvider for AppServiceProvider {
         crate::services::tunnel_service::sync_panel_route(state).await;
         crate::services::tunnel_service::reconcile(state);
         crate::services::rate_limit_service::reconcile(state);
+        // The WAF's definitions before the routes name them (no-ops first).
+        crate::services::waf_docker_service::boot(state).await;
         firewall_watch(state);
         // Traefik's routes, written again from the database.
         if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {

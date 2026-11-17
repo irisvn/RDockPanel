@@ -49,6 +49,8 @@ WORKDIR /app
 COPY --from=build /rdockpanel /app/rdockpanel
 COPY config /app/config
 COPY install/entrypoint.sh /app/entrypoint.sh
+# The WAF's Traefik plugin (vendored, pinned), seeded into a volume Traefik reads.
+COPY resources/waf/plugin /app/waf/plugin
 RUN mkdir -p /app/storage && chmod 0755 /app/entrypoint.sh
 ENV APP_ENV=production \
     APP_DEBUG=false \

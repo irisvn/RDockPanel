@@ -63,6 +63,7 @@ const PAGES = [
   ["settings-panel", "/p/settings/panel"],
   ["settings-version", "/p/settings/version"],
   ["settings-traefik", "/p/settings/traefik"],
+  ["settings-security", "/p/settings/security"],
   ["settings-certificates", "/p/settings/certificates"],
   ["settings-tunnel", "/p/settings/tunnel"],
   ["settings-branding", "/p/settings/branding"],

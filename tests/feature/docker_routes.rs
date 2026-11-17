@@ -112,6 +112,22 @@ db_test!(
                     &anonymous,
                     StatusCode::UNAUTHORIZED,
                 ),
+                // Settings → Security (the WAF): system.manage only.
+                Case::new(Method::GET, "/apps/waf")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
+                Case::new(Method::PUT, "/apps/waf")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/waf/repair")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/waf/alerts")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
                 // Docker → Nodes: the list for docker.view; joining, changing and
                 // removing a node for system.manage (operators refused).
                 read("/docker/nodes"),

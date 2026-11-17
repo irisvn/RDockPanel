@@ -1,6 +1,6 @@
 # Chuyển hướng, bảo mật, bảo trì
 
-Ba tab của service quyết định khách vào domain của nó sẽ gặp gì: **Chuyển hướng** (Redirects), **Bảo mật** (Security: xác thực cơ bản và giới hạn request) và **Bảo trì** (Maintenance). Mọi thứ ở đây áp dụng **ngay khi lưu**: route của Traefik được ghi lại, container vẫn chạy, không cần Deploy.
+Ba tab của service quyết định khách vào domain của nó sẽ gặp gì: **Chuyển hướng** (Redirects), **Bảo mật** (Security: xác thực cơ bản, giới hạn request và WAF) và **Bảo trì** (Maintenance). Mọi thứ ở đây áp dụng **ngay khi lưu**: route của Traefik được ghi lại, container vẫn chạy, không cần Deploy.
 
 Database không có các tab này. Chúng chỉ tác động lên domain của service, không lên port đã publish.
 
@@ -45,6 +45,10 @@ Giới hạn số request mỗi khách (theo địa chỉ IP) gửi tới các d
 - **Địa chỉ được miễn** (Exempt addresses): IP hoặc dải mạng không bị giới hạn, mỗi dòng một mục (VPN, máy monitoring).
 
 Khách được đếm theo từng domain. Khách đi qua Cloudflare (bản ghi bật proxy hoặc Tunnel) được đếm theo IP thật của họ; khách IPv6 đếm theo dải `/64`. Địa chỉ được miễn chỉ khớp với khách kết nối thẳng tới server, không qua Cloudflare. Bộ đếm bắt đầu lại khi Traefik khởi động lại.
+
+### WAF
+
+**WAF** theo [tường lửa ứng dụng web](/vi/server/waf) của panel (**Theo panel**), hoặc đặt **Bật** hay **Tắt** riêng cho service này. **Tắt** là bỏ bảo vệ của service: chỉ quản trị viên panel được làm. Áp dụng ngay khi lưu.
 
 ![Tab Bảo mật](/shots/service-security.png)
 

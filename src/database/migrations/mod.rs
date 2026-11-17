@@ -45,6 +45,7 @@ mod m20261116_000000_add_cleaning_to_import_volumes;
 mod m20261117_000000_add_healthcheck_settings;
 mod m20261117_000100_create_import_events;
 mod m20261117_000200_add_service_placement;
+mod m20261118_000000_add_service_waf;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -96,6 +97,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261117_000000_add_healthcheck_settings::Migration),
             Box::new(m20261117_000100_create_import_events::Migration),
             Box::new(m20261117_000200_add_service_placement::Migration),
+            Box::new(m20261118_000000_add_service_waf::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

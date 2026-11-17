@@ -2758,3 +2758,254 @@ db_test!(
             .assert_status(StatusCode::OK);
     }
 );
+
+async fn waf_audited(app: &TestApp) -> u64 {
+    rustcms::models::audit_log::Entity::find()
+        .filter(rustcms::models::audit_log::Column::Event.eq("waf.settings"))
+        .count(app.state().db())
+        .await
+        .unwrap()
+}
+
+db_test!(
+    the_waf_guards_a_services_domains_and_only_administrators_lower_it,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        let waf = app.admin_api("x/apps/waf");
+        // Off by default: no router names it.
+        assert_eq!(admin.get(&waf).await.json()["settings"]["mode"], "off");
+        publish_routes(&app, id).await;
+        let read =
+            || std::fs::read_to_string(support::traefik_dir(&app).join("shop_web.yml")).unwrap();
+        assert!(!read().contains("rdp-waf"), "{}", read());
+        // A bad address refused; nothing saved, nothing audited.
+        admin
+            .send(
+                rustcms::axum::http::Method::PUT,
+                &waf,
+                Some(&json!({"mode": "block", "level": "basic", "allowlist": ["example.com"]})),
+            )
+            .await
+            .assert_validation_error("allowlist");
+        assert_eq!(waf_audited(&app).await, 0);
+        let saved = admin
+            .send(rustcms::axum::http::Method::PUT, &waf, Some(&json!({"mode": "block", "level": "strict", "allowlist": [" 203.0.113.7 ", "203.0.113.7"]})))
+            .await;
+        saved.assert_status(StatusCode::OK);
+        assert_eq!(
+            saved.json()["settings"]["allowlist"],
+            json!(["203.0.113.7"])
+        );
+        assert_eq!(waf_audited(&app).await, 1);
+        // Its routes now: buffer then WAF, first.
+        publish_routes(&app, id).await;
+        let routes = read();
+        assert!(routes.contains("rdp-waf-buffer@file"), "{routes}");
+        assert!(routes.contains("rdp-waf@file"), "{routes}");
+        // A member who may change the service cannot turn its WAF off…
+        let member = support::user_with(
+            &app,
+            "member",
+            &["services.view_any", "services.view", "services.update"],
+        )
+        .await;
+        let member = app.acting_as(&member).await;
+        let url = format!("{}/{id}", records(&app, "services"));
+        member
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"waf": "off"})),
+            )
+            .await
+            .assert_validation_error("waf");
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"waf": "nope"})),
+            )
+            .await
+            .assert_validation_error("waf");
+        // …the panel's administrator can: its routes go without it.
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"waf": "off"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        publish_routes(&app, id).await;
+        assert!(!read().contains("rdp-waf"), "{}", read());
+        // Turning it back on is the member's to do (it raises protection).
+        member
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &url,
+                Some(&json!({"waf": ""})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        publish_routes(&app, id).await;
+        assert!(read().contains("rdp-waf@file"), "{}", read());
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        assert!(page["service"]["waf"].is_null(), "{page}");
+        assert_eq!(page["service"]["waf_mode"], "block");
+    }
+);
+
+db_test!(
+    a_domain_cannot_name_the_wafs_own_middlewares,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        let made = admin
+            .post_json(
+                &records(&app, "service_domains"),
+                &json!({"service_id": id.to_string(), "host": "canary.example.com", "path": "/", "port": 80, "https": false, "middlewares": "rdp-waf-canary@file"}),
+            )
+            .await;
+        made.assert_validation_error("middlewares");
+        // The canary's host (or the wildcard covering it) is not a domain: a
+        // service answering it would make the panel unload the WAF.
+        for host in ["rdp-waf-canary.invalid", "*.invalid"] {
+            admin
+                .post_json(
+                    &records(&app, "service_domains"),
+                    &json!({"service_id": id.to_string(), "host": host, "path": "/", "port": 80, "https": false}),
+                )
+                .await
+                .assert_validation_error("host");
+        }
+    }
+);
+
+/// A canary for [`waf_docker_service::probe`]: `/` answers `normal` (a status
+/// and a body), `/.env` 403. Its address.
+async fn fake_canary(normal: (u16, &'static str)) -> String {
+    use rustcms::axum::{Router, http::StatusCode as Code, routing::get};
+    let (code, body) = normal;
+    let app = Router::new()
+        .route(
+            "/",
+            get(move || async move { (Code::from_u16(code).unwrap(), body) }),
+        )
+        .route("/.env", get(|| async { Code::FORBIDDEN }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { rustcms::axum::serve(listener, app).await.unwrap() });
+    format!("http://{address}")
+}
+
+db_test!(
+    the_wafs_sites_follow_the_canary_whatever_the_stored_status_says,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::waf_docker_service::{self as waf, Status};
+        use rdockpanel::services::waf_service::{Mode, Settings};
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let state = app.state();
+        let traefik = state
+            .service::<rdockpanel::services::traefik_service::Traefik>()
+            .unwrap();
+        let docker = state
+            .service::<rdockpanel::services::docker_service::Docker>()
+            .unwrap();
+        let settings = Settings {
+            mode: Mode::Block,
+            ..Settings::default()
+        };
+        settings.store(state.db()).await.unwrap();
+        let plugin = || {
+            let text =
+                std::fs::read_to_string(support::traefik_dir(&app).join("rdp-waf.yml")).unwrap();
+            let doc: serde_json::Value = serde_yaml_ng::from_str(&text).unwrap();
+            doc["http"]["middlewares"]["rdp-waf"]["plugin"].is_object()
+        };
+        // Two reconciles crossed: the sites' no-ops are written, but the
+        // stored status says the plugin is applied.
+        waf::write_definitions(&traefik, &docker, &settings, false)
+            .await
+            .unwrap();
+        Status::now("on", None, true)
+            .store(state.db())
+            .await
+            .unwrap();
+        // The canary is loaded and blocks: the sites get the plugin again.
+        let ok = waf::probe(state, Some(fake_canary((200, waf::CANARY_ANSWER)).await))
+            .await
+            .unwrap();
+        assert_eq!(ok.state, "on", "{ok:?}");
+        assert!(plugin());
+        // Something else answers the canary's host: nothing changes.
+        let other = waf::probe(state, Some(fake_canary((200, "hello")).await))
+            .await
+            .unwrap();
+        assert_eq!(other.state, "unavailable", "{other:?}");
+        assert!(plugin());
+        // A 404 (Traefik did not load the plugin): the sites' no-ops.
+        let gone = waf::probe(state, Some(fake_canary((404, "")).await))
+            .await
+            .unwrap();
+        assert_eq!(gone.detail.as_deref(), Some(waf::PLUGIN_NOT_LOADED));
+        assert!(!plugin());
+    }
+);
+
+db_test!(
+    the_wafs_definitions_are_always_valid_middlewares,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::waf_service::{Mode, Settings};
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let traefik = app
+            .state()
+            .service::<rdockpanel::services::traefik_service::Traefik>()
+            .unwrap();
+        let docker = app
+            .state()
+            .service::<rdockpanel::services::docker_service::Docker>()
+            .unwrap();
+        for (mode, healthy) in [
+            (Mode::Off, false),
+            (Mode::Block, false),
+            (Mode::Block, true),
+            (Mode::Detect, true),
+        ] {
+            let settings = Settings {
+                mode,
+                ..Settings::default()
+            };
+            rdockpanel::services::waf_docker_service::write_definitions(
+                &traefik, &docker, &settings, healthy,
+            )
+            .await
+            .unwrap();
+            let text =
+                std::fs::read_to_string(support::traefik_dir(&app).join("rdp-waf.yml")).unwrap();
+            let doc: serde_json::Value = serde_yaml_ng::from_str(&text).unwrap();
+            for name in ["rdp-waf", "rdp-waf-buffer", "rdp-waf-canary"] {
+                let m = &doc["http"]["middlewares"][name];
+                // Never an empty middleware (Traefik would drop the whole file).
+                assert!(
+                    m.as_object().is_some_and(|o| !o.is_empty()),
+                    "{mode:?} {healthy} {name}: {text}"
+                );
+            }
+            let plugin = doc["http"]["middlewares"]["rdp-waf"]["plugin"].is_object();
+            assert_eq!(plugin, healthy && mode != Mode::Off, "{text}");
+        }
+    }
+);

@@ -1,0 +1,12 @@
+# An alert for each request a rule matched in Detect mode: recorded, never
+# banned (remediation false). Same address and path: one alert a minute.
+type: trigger
+name: rdp/appsec-detect
+description: "A request matched a WAF rule in Detect mode (recorded, not blocked)"
+filter: evt.Parsed.source == 'crowdsec-appsec' && evt.Appsec.HasOutBandMatches == true
+groupby: "evt.Meta.source_ip + evt.Parsed.target_uri"
+blackhole: 1m
+labels:
+  type: exploit
+  remediation: false
+  service: http

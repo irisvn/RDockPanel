@@ -24,7 +24,7 @@ tabs), `server.view` (its server metrics only) or `apps.access` (a member's proj
 `projects.view_any` or `apps.access` (a member's projects' actions); Domains
 `service_domains.view_any` or `apps.access`; Firewall `system.manage`; Settings any of `storage_providers.view_any` (its
 Backups tab), `notification_channels.view_any` (Notifications), `system.manage` (Panel, Version,
-Traefik, Certificates, Cloudflare Tunnel, Branding, Maintenance page, Git), `projects.view_any` or `apps.access`:
+Traefik, Security, Certificates, Cloudflare Tunnel, Branding, Maintenance page, Git), `projects.view_any` or `apps.access`:
 each tab shows with its own, and API tokens (each user's own) needs none. The resources behind them have no
 sidebar entry, so give a role that manages services `projects.view_any` as well (their routes,
 `/admin/r/<slug>`, still answer to the resource's own permissions).
@@ -58,6 +58,9 @@ The resources use the panel's standard permissions, one set per resource
 - uploaded certificates (Settings → Certificates, Uploaded certificates: upload, replace, delete): `system.manage`
   only; choosing one on a domain too;
 - Traefik (Settings → Traefik: its state, restart, live logs, custom middlewares): `system.manage` only;
+- the WAF (Settings → Security: mode, level, trusted addresses, sharing, Repair, alerts): `system.manage`
+  only. A service's own WAF setting is the service's (`services.update`), but setting it to **off** from
+  anything else needs `system.manage`: whoever edits a service may turn its WAF back on, not off;
 - the panel's domain, Let's Encrypt email and apps' domain (Settings → Panel: shown, checked, the
   installer command given): `system.manage` only;
 - adding Linux capabilities, sysctls or supplemental groups to a service needs `system.manage`

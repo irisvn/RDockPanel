@@ -123,6 +123,10 @@ pub struct Snapshot {
     /// Its rate limit on its domains (`None`: off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<crate::services::rate_limit_service::RateLimit>,
+    /// Its domains go through the WAF (`waf_service::effective`): applied
+    /// when saved, like the rate limit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub waf: bool,
     /// Only administrators change or deploy it (`services.admin_only`): kept
     /// here so that rolling back to this deployment sees it too.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -478,6 +482,8 @@ impl Snapshot {
             redirects: vec![],
             basic_auth: vec![],
             rate_limit: crate::services::rate_limit_service::RateLimit::of(service),
+            // Set with the panel's settings (`snapshot_without_env`).
+            waf: false,
             maintenance_bypass: crate::services::rate_limit_service::exempt(
                 service.maintenance_bypass.as_deref(),
             )
@@ -604,6 +610,7 @@ impl Snapshot {
         container.redirects.clear();
         container.basic_auth.clear();
         container.rate_limit = None;
+        container.waf = false;
         container.maintenance_bypass.clear();
         container.maintenance = false;
         container.hash()
@@ -1258,6 +1265,9 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
         access.push(name);
     }
     for (index, domain) in snapshot.domains.iter().enumerate() {
+        if crate::services::deploy_rules_service::reserved_host(&domain.host) {
+            continue;
+        }
         // A Compose service's container: its alias on the project network.
         // In maintenance: the panel's page for it (`/api/v1/maintenance/<name>`).
         if snapshot.maintenance && !options.internal_url.is_empty() {
@@ -1444,10 +1454,36 @@ pub fn routes(snapshot: &Snapshot, options: &DeployOptions) -> Option<TraefikFil
     {
         rate_limited(&mut http, &base, snapshot.domains.len(), limit);
     }
+    if snapshot.waf {
+        guarded(&mut http, &base);
+    }
     if let Some(normal) = normal {
         bypassed(&mut http, &base, normal.http, &snapshot.maintenance_bypass);
     }
     Some(TraefikFile { http })
+}
+
+/// The WAF (`waf_service`), first on every router reaching the service's
+/// app: not on the scheme redirect routers (they serve nothing) nor on the
+/// maintenance page's. A maintenance bypass is built from the normal routes,
+/// which have it already.
+fn guarded(http: &mut TraefikHttp, base: &str) {
+    let page = format!("{base}-maintenance");
+    // Scheme redirects: straight to Traefik, and through the tunnel.
+    let redirects = [format!("{base}-https"), format!("{base}-tunnel-https")];
+    for router in http.routers.values_mut() {
+        if router.service == page
+            || router
+                .middlewares
+                .first()
+                .is_some_and(|m| redirects.contains(m))
+        {
+            continue;
+        }
+        for (at, middleware) in crate::services::waf_service::chain().iter().enumerate() {
+            router.middlewares.insert(at, (*middleware).to_owned());
+        }
+    }
 }
 
 /// `limit` on the routers serving a service's domains (not its redirects):
@@ -1796,6 +1832,7 @@ mod tests {
             redirects: vec![],
             basic_auth: vec![],
             rate_limit: None,
+            waf: false,
             maintenance_bypass: vec![],
             admin_only: false,
             user: None,
@@ -1985,6 +2022,133 @@ mod tests {
         // Off: none.
         let off = routes_of(&plain);
         assert!(!off.http.routers.keys().any(|k| k.ends_with("-tunnel")));
+    }
+
+    #[test]
+    fn a_domain_under_invalid_saved_before_the_rule_gets_no_route() {
+        // It would answer the WAF's canary (`rdp-waf-canary.invalid`).
+        let mut old = snapshot();
+        old.domains[0].host = "rdp-waf-canary.invalid".into();
+        let file = routes(&old, &production()).unwrap();
+        let text = serde_json::to_string(&file.http.routers).unwrap();
+        assert!(!text.contains(".invalid"), "{text}");
+        assert!(
+            !file.http.routers.is_empty(),
+            "the other domain keeps its routes"
+        );
+    }
+
+    #[test]
+    fn the_waf_comes_first_on_every_router_reaching_the_app_and_nowhere_else() {
+        use crate::services::rate_limit_service::RateLimit;
+        use crate::services::waf_service::{BUFFER, MIDDLEWARE};
+        let mut guarded = snapshot();
+        guarded.domains[1].https = false;
+        guarded.redirects = vec![Redirect {
+            regex: "^x".into(),
+            replacement: "y".into(),
+            permanent: false,
+        }];
+        guarded.basic_auth = vec!["u:h".into()];
+        guarded.rate_limit = Some(RateLimit {
+            average: 5,
+            period: "1m".into(),
+            burst: 10,
+            exempt: vec!["10.8.0.0/24".into()],
+        });
+        let options = DeployOptions {
+            tunnel: true,
+            internal_url: "http://rdockpanel:3000".into(),
+            ..production()
+        };
+        let mut open = guarded.clone();
+        open.waf = false;
+        guarded.waf = true;
+        let plain = routes(&open, &options).unwrap();
+        let file = routes(&guarded, &options).unwrap();
+        let base = guarded.service_name();
+        let page = format!("{base}-maintenance");
+        let redirects = [format!("{base}-https"), format!("{base}-tunnel-https")];
+        for (name, router) in &file.http.routers {
+            let before = &plain.http.routers[name];
+            if router
+                .middlewares
+                .first()
+                .is_some_and(|m| redirects.contains(m))
+            {
+                // A scheme redirect serves nothing: unchanged.
+                assert_eq!(router.middlewares, before.middlewares, "{name}");
+            } else {
+                // Buffer, WAF, then exactly what it had (rate limit, redirects, auth…).
+                assert_eq!(router.middlewares[..2], [BUFFER, MIDDLEWARE], "{name}");
+                assert_eq!(router.middlewares[2..], before.middlewares[..], "{name}");
+            }
+            assert_ne!(router.service, page);
+        }
+        assert!(file.http.routers.keys().any(|n| n.ends_with("-cf")));
+        assert!(file.http.routers.keys().any(|n| n.ends_with("-exempt")));
+        assert!(file.http.routers.keys().any(|n| n.contains("-tunnel")));
+        // In maintenance: the page never inspected; a bypass is (after its
+        // no-cache header, before what it had).
+        let mut down = guarded.clone();
+        down.maintenance = true;
+        down.maintenance_bypass = vec!["203.0.113.7/32".into()];
+        let file = routes(&down, &options).unwrap();
+        for (name, router) in &file.http.routers {
+            if router.service == page {
+                assert!(
+                    !router.middlewares.iter().any(|m| m.starts_with("rdp-waf")),
+                    "{name}"
+                );
+            } else if name.contains("-bypass") {
+                assert_eq!(
+                    router.middlewares[0],
+                    format!("{base}-bypass-private"),
+                    "{name}"
+                );
+                if router
+                    .middlewares
+                    .get(1)
+                    .is_some_and(|m| redirects.contains(m))
+                {
+                    // The bypass of a scheme redirect: still only that.
+                    assert_eq!(router.middlewares.len(), 2, "{name}");
+                    continue;
+                }
+                assert_eq!(router.middlewares[1..3], [BUFFER, MIDDLEWARE], "{name}");
+                assert_eq!(
+                    router
+                        .middlewares
+                        .iter()
+                        .filter(|m| *m == MIDDLEWARE)
+                        .count(),
+                    1,
+                    "{name}"
+                );
+            }
+        }
+        assert!(file.http.routers.keys().any(|n| n.contains("-bypass")));
+        // Off: no router names it.
+        let none = routes(&open, &options).unwrap();
+        assert!(
+            none.http
+                .routers
+                .values()
+                .all(|r| !r.middlewares.iter().any(|m| m.starts_with("rdp-waf")))
+        );
+    }
+
+    #[test]
+    fn a_domain_cannot_name_the_wafs_middlewares() {
+        assert!(!crate::services::deploy_rules_service::valid_middleware(
+            "rdp-waf-canary@file"
+        ));
+        assert!(!crate::services::deploy_rules_service::valid_middleware(
+            "rdp-waf@file"
+        ));
+        assert!(crate::services::deploy_rules_service::valid_middleware(
+            "ratelimit@file"
+        ));
     }
 
     #[test]
