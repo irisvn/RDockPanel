@@ -186,6 +186,19 @@ pub async fn guard_prune_containers<C: ConnectionTrait>(txn: &C) -> AppResult<()
     Ok(())
 }
 
+/// Writes the middlewares for Traefik after a change of the imports' (best
+/// effort: the boot and every later save write them again).
+pub async fn sync_imported(app: &AppState) {
+    let Some(traefik) = app.service::<crate::services::traefik_service::Traefik>() else {
+        return;
+    };
+    if let Err(why) =
+        crate::services::traefik_settings_service::sync_middlewares(app.db(), &traefik).await
+    {
+        tracing::warn!(%why, "the imported middlewares could not be written");
+    }
+}
+
 /// A domain of the plan as the service gets it. A hint without a port (a plan
 /// read before ports were filled in) leads to 80.
 pub fn domain_of_hint(hint: &Value) -> crate::services::creation_service::NewDomain {
@@ -198,6 +211,13 @@ pub fn domain_of_hint(hint: &Value) -> crate::services::creation_service::NewDom
             .unwrap_or(80),
         https: hint["https"] == true,
         compose_service: None,
+        // Its IP allow list, as the panel's middleware (`keep_imported`).
+        middlewares: hint.get("allow").filter(|a| a.is_object()).map(|a| {
+            format!(
+                "{}@file",
+                crate::services::traefik_settings_service::allow_name(a)
+            )
+        }),
     }
 }
 
@@ -1173,13 +1193,42 @@ pub fn health_line(detail: &Detail, taken: &dyn Fn(&str) -> bool) -> HealthLine 
 pub const HEALTH_MAX: usize = 500;
 
 /// The service a container becomes (an app: databases map to apps for now).
+/// What the admin chose for a container in the plan.
+#[derive(Debug, Clone, Default)]
+pub struct Choices {
+    /// For a health check the panel could not cut.
+    pub health: Option<HealthChoice>,
+    /// Ports published on others (`(port, protocol)` → port).
+    pub ports_moved: std::collections::BTreeMap<(u16, String), u16>,
+    /// A database service of the panel's (its engine), its configuration kept.
+    pub as_database: Option<crate::services::database_service::Engine>,
+}
+
+impl Choices {
+    /// From a plan item.
+    pub fn of(item: &Value) -> Self {
+        Self {
+            health: HealthChoice::of(&item["healthcheck_choice"]),
+            ports_moved: ports_moved_of(item),
+            as_database: (item["as_database"] == true)
+                .then(|| {
+                    item["database"]
+                        .as_str()
+                        .and_then(crate::services::database_service::Engine::parse)
+                })
+                .flatten(),
+        }
+    }
+}
+
 pub fn new_service_of(
     detail: &Detail,
     project: &str,
     links: &std::path::Path,
-    health_choice: Option<&HealthChoice>,
-    ports_moved: &std::collections::BTreeMap<(u16, String), u16>,
+    choices: &Choices,
 ) -> Result<Made, String> {
+    let health_choice = choices.health.as_ref();
+    let ports_moved = &choices.ports_moved;
     use crate::services::creation_service::{NewMount, NewPort, NewService};
     let m = &detail.member;
     let name = sanitized(m.compose_service().unwrap_or(&m.name));
@@ -1207,6 +1256,12 @@ pub fn new_service_of(
     let local = crate::services::deploy_rules_service::local_image(&image);
     let mut new = NewService::app(&name, image);
     new.local_image = local;
+    // A database service of the panel's, as it is: its env, command, health
+    // check and volumes are the container's (`DatabaseOptions::keep`).
+    if let Some(engine) = choices.as_database {
+        new.kind = engine.kind().to_owned();
+        new.database.keep = true;
+    }
     new.env = m
         .env
         .iter()
@@ -1434,13 +1489,11 @@ pub async fn start(
             .iter()
             .find(|d| d.member.id == id)
             .ok_or_else(|| AppError::BadRequest("a container of the plan is gone".into()))?;
-        let choice = HealthChoice::of(&item["healthcheck_choice"]);
         let mut one = new_service_of(
             detail,
             &row.project_name,
             &settings(app).links(),
-            choice.as_ref(),
-            &ports_moved_of(item),
+            &Choices::of(item),
         )
         .map_err(AppError::BadRequest)?;
         // Written with the service, by its rules (`creation_service::create`).
@@ -1657,6 +1710,26 @@ pub async fn start(
     queued.project_id = Set(Some(project.id));
     queued.updated_at = Set(chrono::Utc::now());
     queued.update(&txn).await?;
+    // The domains' IP allow lists, as the panel's middlewares.
+    let allows: serde_json::Map<String, Value> = brought
+        .iter()
+        .filter(|i| i["as_tunnel"] != true)
+        .flat_map(|i| i["domains"].as_array().cloned().unwrap_or_default())
+        .filter(|d| d["skip"] != true && d["allow"].is_object())
+        .map(|d| {
+            (
+                crate::services::traefik_settings_service::allow_name(&d["allow"]),
+                d["allow"].clone(),
+            )
+        })
+        .collect();
+    let (middlewares_added, middlewares_dropped) =
+        crate::services::traefik_settings_service::keep_imported(&txn, &allows)
+            .await
+            .map_err(|e| match e {
+                sea_orm::DbErr::Custom(why) => AppError::BadRequest(why),
+                e => e.into(),
+            })?;
     let entry = AuditEntry::new("imports.start", "container_imports")
         .key(import_id.to_string())
         .meta(serde_json::json!({
@@ -1668,6 +1741,8 @@ pub async fn start(
                 .flat_map(|i| kept_domains(i))
                 .map(|d| d.host)
                 .collect::<Vec<_>>(),
+            "middlewares_added": middlewares_added,
+            "middlewares_dropped": middlewares_dropped,
         }));
     audit::record(
         &txn,
@@ -1678,6 +1753,9 @@ pub async fn start(
     rustcms::queue::dispatch(&txn, &crate::jobs::import_step::ImportStep { import_id }).await?;
     txn.commit().await?;
     let _ = service_model::Entity;
+    if !allows.is_empty() || !middlewares_dropped.is_empty() {
+        sync_imported(app).await;
+    }
     Ok(())
 }
 
@@ -1703,8 +1781,7 @@ mod tests {
             &detail,
             "p",
             std::path::Path::new("/links"),
-            None,
-            &Default::default(),
+            &Choices::default(),
         )
         .unwrap();
         let command = made.service.command.clone().unwrap();
@@ -1749,8 +1826,7 @@ mod tests {
             &detail,
             "p",
             std::path::Path::new("/links"),
-            None,
-            &Default::default(),
+            &Choices::default(),
         )
         .unwrap();
         assert_eq!(made.service.ports.len(), 1, "{:?}", made.service.ports);

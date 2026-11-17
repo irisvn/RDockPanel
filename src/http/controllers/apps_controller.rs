@@ -266,6 +266,14 @@ pub async fn service(
     if let Some(latest) = latest.as_mut() {
         latest["log"] = Value::Null;
     }
+    // Placed off the panel's node: what the panel cannot reach, said.
+    let away = match app.service::<crate::services::docker_service::Docker>() {
+        Some(docker) => crate::services::placement_service::away(&docker, row.placement.as_deref())
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
     let cfg = crate::services::deploy_rules_service::config();
     let default_resolver = (!cfg.cert_resolver.is_empty()).then(|| cfg.cert_resolver.clone());
     Ok(Json(json!({
@@ -287,6 +295,8 @@ pub async fn service(
             "healthcheck_timeout_s": row.healthcheck_timeout_s,
             "healthcheck_start_period_s": row.healthcheck_start_period_s,
             "healthcheck_off": row.healthcheck_off,
+            "placement": row.placement,
+            "away": away,
             "registry_username": row.registry_username,
             "source": row.source,
             "git_url": row.git_url,
@@ -685,6 +695,7 @@ pub async fn create_service(
             user: db.user,
             password: db.password,
             root_password: db.root_password,
+            keep: false,
         };
     }
     let row = creation_service::create(&txn, app.keyring(), &project, new).await?;
@@ -953,9 +964,20 @@ pub async fn stats(
     } else {
         vec![]
     };
+    // Sampled through the panel's Docker: its node's containers only; the
+    // others are counted apart.
+    let here = crate::services::placement_service::panel_node(&docker)
+        .await
+        .unwrap_or_default();
+    let elsewhere = tasks
+        .iter()
+        .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
+        .filter(|t| !crate::services::placement_service::on_node(t, &here))
+        .count();
     let containers: Vec<(i64, String)> = tasks
         .iter()
         .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
+        .filter(|t| crate::services::placement_service::on_node(t, &here))
         .filter_map(|t| {
             let container = t
                 .status
@@ -1000,8 +1022,31 @@ pub async fn stats(
     // Tasks without a sample (stats failed or too slow): said, not counted as 0.
     let missing = containers.len() - tasks.len();
     Ok(Json(
-        json!({ "cpu_percent": cpu, "mem_used": mem, "tasks": tasks, "missing": missing }),
+        json!({ "cpu_percent": cpu, "mem_used": mem, "tasks": tasks, "missing": missing, "elsewhere": elsewhere }),
     ))
+}
+
+/// The Swarm's nodes, to choose where a service runs (id, name, role,
+/// availability, state, the panel's).
+pub async fn nodes(State(app): State<AppState>) -> AppResult<Json<Value>> {
+    use crate::services::docker_service::Docker;
+    let docker = app
+        .service::<Docker>()
+        .ok_or_else(|| AppError::BadRequest("Docker is not available".into()))?;
+    let nodes = crate::services::placement_service::nodes(&docker)
+        .await
+        .map_err(AppError::BadRequest)?;
+    Ok(Json(json!({ "nodes": nodes })))
+}
+
+/// Refused (409 `off_node`) when the service's running containers are all
+/// on another node: the panel reaches only its own node's.
+pub(crate) fn off_node() -> AppError {
+    AppError::Conflict {
+        code: "off_node",
+        reason: "placement",
+        message: "It runs on another node: the panel reaches only the containers on its own node",
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1221,18 +1266,20 @@ pub async fn run_script(
         .list_tasks(&name)
         .await
         .map_err(|e| AppError::BadRequest(format!("the service's tasks: {e}")))?;
-    let container = tasks
-        .iter()
-        .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
-        .find_map(|t| {
-            t.status
-                .as_ref()?
-                .container_status
-                .as_ref()?
-                .container_id
-                .clone()
-        })
-        .ok_or_else(|| AppError::BadRequest("the service is not running".into()))?;
+    // A container on the panel's node (its Docker is the one reached).
+    let here = crate::services::placement_service::panel_node(&docker)
+        .await
+        .unwrap_or_default();
+    let container = match crate::services::placement_service::running_here(&tasks, &here) {
+        Some(container) => container,
+        None if tasks
+            .iter()
+            .any(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING)) =>
+        {
+            return Err(off_node());
+        }
+        None => return Err(AppError::BadRequest("the service is not running".into())),
+    };
     let entry = AuditEntry::new("services.script.run", "services")
         .key(row.id.to_string())
         .meta(json!({ "script": script.name }));

@@ -114,6 +114,8 @@ impl Resource for ServiceResource {
             Field::column(service::Column::HealthcheckTimeoutS),
             Field::column(service::Column::HealthcheckStartPeriodS),
             Field::column(service::Column::HealthcheckOff),
+            Field::column(service::Column::Placement)
+                .max_length(crate::services::placement_service::MAX),
             // Sealed with APP_KEY; names shown, values never.
             Field::column(service::Column::Env)
                 .encrypted_map()
@@ -436,6 +438,14 @@ fn normalize(mut data: Data) -> Data {
             data.insert(field.to_owned(), value);
         }
     }
+    if let Some(placement) = text(&data, "placement").map(|p| p.trim().to_owned()) {
+        let value = if placement.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(placement)
+        };
+        data.insert("placement".to_owned(), value);
+    }
     if let Some(contact) = text(&data, "maintenance_contact").map(|c| c.trim().to_owned()) {
         let value = if contact.is_empty() {
             serde_json::Value::Null
@@ -523,6 +533,25 @@ fn check(ctx: &Ctx, data: &Data, record: Option<&service::Model>) -> AppResult<(
             errors.add("sysctls", ctx.t("must be key=value lines"));
         } else if !lines.trim().is_empty() && !system {
             errors.add("sysctls", ctx.t("needs system.manage"));
+        }
+    }
+    // Where it runs: the panel's administrators choose, for an image a
+    // registry has (other nodes pull it).
+    // As it will be after this write: an image changed under a placement is
+    // checked too.
+    let placement = after("placement", record.and_then(|r| r.placement.as_deref()))
+        .filter(|p| !p.trim().is_empty());
+    if let Some(value) = placement.as_deref() {
+        if crate::services::placement_service::parse(value).is_none() {
+            errors.add("placement", ctx.t("must be any or node:<id>"));
+        } else if !system {
+            errors.add("placement", ctx.t("needs system.manage"));
+        } else {
+            let kind = record.map_or("app", |r| r.kind.as_str());
+            let image = after("image", record.map(|r| r.image.as_str())).unwrap_or_default();
+            if let Some(why) = crate::services::placement_service::problem(kind, &source, &image) {
+                errors.add("placement", ctx.t(why));
+            }
         }
     }
     let compose = record.is_some_and(|r| r.kind == "compose");

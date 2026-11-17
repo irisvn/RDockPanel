@@ -361,6 +361,10 @@ pub struct DomainHint {
     /// it cannot be ticked, or the site would be served unprotected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guard: Option<String>,
+    /// An IP allow list carried as the panel's middleware (its definition:
+    /// ranges, never a secret).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow: Option<Value>,
     /// Middlewares that do not protect and are not carried over.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub lost: Vec<String>,
@@ -393,8 +397,57 @@ const HARMLESS_MIDDLEWARES: [&str; 18] = [
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Guarding {
     auth: Option<String>,
+    /// An IP allow list the panel carries: `{"ipAllowList": {...}}`.
+    allow: Option<Value>,
     guard: Option<String>,
     lost: Vec<String>,
+}
+
+/// An `ipAllowList` (or `ipWhiteList`) of a container's labels as the
+/// panel's middleware: its source ranges, IP strategy and reject status; an
+/// option the panel does not know, or a value that does not fit: none.
+fn allow_list(kind: &str, options: &[(&str, &str)]) -> Option<Value> {
+    use serde_json::json;
+    let prefix = format!("{kind}.");
+    let list = |v: &str| -> Vec<String> {
+        v.split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let mut def = serde_json::Map::new();
+    for (key, value) in options {
+        let key = key.strip_prefix(&prefix)?;
+        match key {
+            "sourcerange" => {
+                def.insert("sourceRange".into(), json!(list(value)));
+            }
+            "rejectstatuscode" => {
+                def.insert(
+                    "rejectStatusCode".into(),
+                    json!(value.trim().parse::<u16>().ok()?),
+                );
+            }
+            "ipstrategy.depth" => {
+                def.entry("ipStrategy")
+                    .or_insert_with(|| json!({}))
+                    .as_object_mut()?
+                    .insert("depth".into(), json!(value.trim().parse::<u32>().ok()?));
+            }
+            "ipstrategy.excludedips" => {
+                def.entry("ipStrategy")
+                    .or_insert_with(|| json!({}))
+                    .as_object_mut()?
+                    .insert("excludedIPs".into(), json!(list(value)));
+            }
+            _ => return None,
+        }
+    }
+    def.get("sourceRange")?;
+    let definition = json!({ "ipAllowList": def });
+    crate::services::traefik_settings_service::valid_definition("custom-check", &definition)
+        .then_some(definition)
 }
 
 /// Reads `traefik.http.routers.<router>.middlewares` and the definitions of
@@ -448,6 +501,15 @@ fn guarding(member: &Member, router: &str) -> Guarding {
                         out.auth = Some(name.to_owned());
                     }
                 }
+                "ipallowlist" | "ipwhitelist" => match allow_list(kind, &options) {
+                    // Carried as the panel's middleware; one per router.
+                    Some(def) if out.allow.is_none() => out.allow = Some(def),
+                    Some(_) => guard(format!("{name}: a second IP allow list"), &mut out),
+                    None => guard(
+                        format!("{name} ({kind}): options the panel does not carry"),
+                        &mut out,
+                    ),
+                },
                 kind if HARMLESS_MIDDLEWARES.contains(&kind) => {
                     out.lost.push(format!("{name} ({kind})"));
                 }
@@ -548,7 +610,7 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
             .iter_mut()
             .find(|h| h.host == hint.host && h.path == hint.path)
         {
-            if had.auth != hint.auth {
+            if had.auth != hint.auth || had.allow != hint.allow {
                 had.guard
                     .get_or_insert_with(|| "two routers protect it differently".to_owned());
             }
@@ -614,6 +676,7 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
                         skip: guarded.guard.is_some(),
                         auth: guarded.auth.clone(),
                         guard: guarded.guard.clone(),
+                        allow: guarded.allow.clone(),
                         lost: guarded.lost.clone(),
                     };
                     push(&mut hints, hint);
@@ -644,6 +707,7 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
                 skip: false,
                 auth: None,
                 guard: None,
+                allow: None,
                 lost: vec![],
             };
             push(&mut hints, hint);
@@ -665,23 +729,116 @@ pub fn domains_of(member: &Member) -> (Vec<DomainHint>, Vec<String>) {
     }
     // Last, once every guard is known: a path guarded on a host: a domain of that host whose path covers it
     // (`/` covers `/admin`) would serve it unguarded. It stays out too.
-    let guarded: Vec<(String, String)> = hints
+    // An allow list is the domain's own: a path under another's, kept with
+    // an allow list it does not have, would be served without it too.
+    let guarded: Vec<(String, String, bool, Option<Value>)> = hints
         .iter()
-        .filter(|h| h.guard.is_some())
-        .map(|h| (h.host.clone(), h.path.clone()))
+        .map(|h| {
+            (
+                h.host.clone(),
+                h.path.clone(),
+                h.guard.is_some(),
+                h.allow.clone(),
+            )
+        })
         .collect();
     for hint in hints.iter_mut().filter(|h| h.guard.is_none()) {
         // As Traefik's `PathPrefix` matches: a plain prefix (`/app` also
         // answers `/application`).
-        let covers = guarded
-            .iter()
-            .any(|(host, path)| *host == hint.host && path.starts_with(&hint.path));
+        let covers = guarded.iter().any(|(host, path, is_guarded, allow)| {
+            *host == hint.host
+                && path.starts_with(&hint.path)
+                && *path != hint.path
+                && (*is_guarded || (allow.is_some() && *allow != hint.allow))
+        }) || guarded.iter().any(|(host, path, is_guarded, _)| {
+            *host == hint.host && *path == hint.path && *is_guarded
+        });
         if covers {
             hint.guard = Some("a path under it is protected".to_owned());
             hint.skip = true;
         }
     }
     (hints, notes)
+}
+
+/// The database engine a container can be imported as, its configuration
+/// kept: the official image (`postgres`, `mysql`, `mariadb`, `mongo`), the
+/// credentials the panel reads in its environment (not from files, not random
+/// or empty), and its data mounted where the engine keeps it. Else why not.
+/// An image's name as Docker Hub's official images are named (`postgres` for
+/// `postgres:17`, `library/postgres`, `docker.io/library/postgres@sha256:…`);
+/// another registry's or namespace's keeps its path (`ghcr.io/x/postgres`),
+/// which may log in, listen or dump differently.
+fn official_name(image: &str) -> &str {
+    let reference = image.split('@').next().unwrap_or_default();
+    let path = match reference.rsplit_once(':') {
+        Some((path, tag)) if !tag.contains('/') => path,
+        _ => reference,
+    };
+    let path = ["docker.io/", "index.docker.io/", "registry-1.docker.io/"]
+        .iter()
+        .find_map(|p| path.strip_prefix(p))
+        .unwrap_or(path);
+    path.strip_prefix("library/").unwrap_or(path)
+}
+
+pub fn database_of(
+    detail: &Detail,
+) -> Result<crate::services::database_service::Engine, &'static str> {
+    use crate::services::database_service::Engine;
+    let engine = match official_name(&detail.image) {
+        "postgres" => Engine::Postgres,
+        "mysql" => Engine::Mysql,
+        "mariadb" => Engine::Mariadb,
+        "mongo" => Engine::Mongo,
+        _ => return Err("not an official database image"),
+    };
+    let env = |k: &str| {
+        detail
+            .member
+            .env
+            .iter()
+            .find(|(n, _)| n == k)
+            .map(|(_, v)| v.as_str())
+            .filter(|v| !v.is_empty())
+    };
+    if detail.member.env.iter().any(|(n, _)| n.ends_with("_FILE")) {
+        return Err("its credentials are read from files");
+    }
+    let readable = match engine {
+        Engine::Postgres => env("POSTGRES_PASSWORD").is_some(),
+        Engine::Mysql => env("MYSQL_ROOT_PASSWORD").is_some(),
+        Engine::Mariadb => env("MARIADB_ROOT_PASSWORD")
+            .or(env("MYSQL_ROOT_PASSWORD"))
+            .is_some(),
+        Engine::Mongo => {
+            env("MONGO_INITDB_ROOT_USERNAME").is_some()
+                && env("MONGO_INITDB_ROOT_PASSWORD").is_some()
+        }
+        Engine::Redis => false,
+    };
+    if !readable {
+        return Err("its credentials are not in its environment");
+    }
+    // Where the engine keeps its data: the mount there, or one above it
+    // (PostgreSQL 18 mounts /var/lib/postgresql, PGDATA below it).
+    let data = match engine {
+        Engine::Postgres => env("PGDATA")
+            .unwrap_or("/var/lib/postgresql/data")
+            .to_owned(),
+        Engine::Mysql | Engine::Mariadb => "/var/lib/mysql".to_owned(),
+        Engine::Mongo => "/data/db".to_owned(),
+        Engine::Redis => "/data".to_owned(),
+    };
+    let mounted = detail.member.mounts.iter().any(|m| {
+        m.writable
+            && (m.destination == data
+                || data.starts_with(&format!("{}/", m.destination.trim_end_matches('/'))))
+    });
+    if !mounted {
+        return Err("its data is not mounted where the engine keeps it");
+    }
+    Ok(engine)
 }
 
 /// Whether the container is a Cloudflare tunnel whose token is readable.
@@ -831,6 +988,23 @@ pub fn findings(detail: &Detail, panel: &PanelFacts) -> Vec<Finding> {
                 None,
             ));
         }
+    }
+    match database_of(detail) {
+        Ok(engine) => out.push(finding(
+            "as_database",
+            Level::Info,
+            engine.kind(),
+            "it becomes a database service of the panel (connection details, dumps), its configuration kept: the credentials shown are those of its environment, which may differ from the current ones if they were changed inside the database",
+            None,
+        )),
+        Err(why) if why != "not an official database image" => out.push(finding(
+            "not_database",
+            Level::Info,
+            "database",
+            why,
+            Some("It is imported as an app: its data and configuration come along the same."),
+        )),
+        Err(_) => {}
     }
     // A secret of the command line or the health check moves to the
     // environment (the command reads it there); one that cannot be set apart
@@ -1050,6 +1224,12 @@ pub struct Item {
     /// A Cloudflare tunnel whose token can be read: it may run as a tunnel of
     /// the panel (Settings → Cloudflare Tunnel) instead of a service.
     pub tunnel_token: bool,
+    /// The database engine it can be imported as (`postgres`, `mysql`,
+    /// `mariadb`, `mongo`): a database service of the panel's, its
+    /// configuration kept.
+    pub database: Option<String>,
+    /// Chosen to become that database service (default when it can).
+    pub as_database: bool,
     /// Chosen to run as a tunnel of the panel: no service is made.
     pub as_tunnel: bool,
     /// Domains it was routed by: names only, added to the service when ticked.
@@ -1179,6 +1359,8 @@ pub fn plan_of(
                     env_names: vec![],
                     command_secrets: 0,
                     tunnel_token: false,
+                    database: None,
+                    as_database: false,
                     as_tunnel: false,
                     domains: vec![],
                     skip_domains: vec![],
@@ -1218,7 +1400,24 @@ pub fn plan_of(
                         "a Traefik protection the panel cannot carry over guards it: it is left out, or the site would be open",
                         Some("Protect the service the same way in the panel, then add the domain."),
                     ));
-                } else if !hint.lost.is_empty() {
+                    continue;
+                }
+                if let Some(allow) = &hint.allow {
+                    let ranges: Vec<&str> = allow["ipAllowList"]["sourceRange"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect();
+                    found.push(finding(
+                        "domain_ip_allow",
+                        Level::Info,
+                        &format!("{field} ({})", ranges.join(", ")),
+                        "its IP allow list comes along as a middleware of the panel's (Settings → Traefik keeps it while a domain uses it)",
+                        None,
+                    ));
+                }
+                if !hint.lost.is_empty() {
                     found.push(finding(
                         "domain_middleware_lost",
                         Level::Info,
@@ -1293,6 +1492,8 @@ pub fn plan_of(
                 env_names,
                 command_secrets: command_secrets(detail),
                 tunnel_token: tunnel_option(detail),
+                database: database_of(detail).ok().map(|e| e.kind().to_owned()),
+                as_database: database_of(detail).is_ok(),
                 as_tunnel: false,
                 domains,
                 skip_domains,
@@ -1446,6 +1647,25 @@ pub fn fingerprint(docs: &[Value], key: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_docker_hubs_official_database_images_are_databases() {
+        assert_eq!(official_name("postgres:17"), "postgres");
+        assert_eq!(
+            official_name("docker.io/library/mysql:8.4@sha256:ab"),
+            "mysql"
+        );
+        assert_eq!(official_name("library/mariadb"), "mariadb");
+        assert_eq!(
+            official_name("localhost:5000/mongo"),
+            "localhost:5000/mongo"
+        );
+        assert_eq!(
+            official_name("registry.example.com/company/mysql:1"),
+            "registry.example.com/company/mysql"
+        );
+        assert_eq!(official_name("bitnami/postgresql"), "bitnami/postgresql");
+    }
+
     use serde_json::json;
 
     use super::*;
@@ -1789,6 +2009,7 @@ mod tests {
             skip: false,
             auth: None,
             guard: None,
+            allow: None,
             lost: vec![],
         }
     }

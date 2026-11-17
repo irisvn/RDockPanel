@@ -3,6 +3,18 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.13.0 — 2026-11-17
+
+- An imported PostgreSQL, MySQL, MariaDB or MongoDB container can become a database service of the panel
+  (connection details, dumps, backups), its image, settings and data kept as they are. Chosen in the
+  container's details.
+- An imported domain behind a Traefik IP allow list keeps it, as a middleware of the panel (shown in
+  Settings → Traefik) instead of being left out.
+- Choose where a service runs (Advanced tab, administrators only): automatic, one node of the Swarm, or any
+  node. Backups, scripts, the terminal and live stats work for containers on the panel's node; the page
+  says so when a service runs elsewhere.
+- RustCMS 0.13.0, with SQLite 3.54 (a security fix for SQLite databases).
+
 ## 0.12.1 — 2026-11-17
 
 - Importing a database no longer stops at its health check: a password written in it (`mysqladmin ping

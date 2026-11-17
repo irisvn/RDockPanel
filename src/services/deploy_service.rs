@@ -73,6 +73,9 @@ pub struct Snapshot {
     /// The health check is off (Docker's `NONE`): the image's own does not run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub healthcheck_off: bool,
+    /// Where its tasks run (`placement_service`); none: automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<String>,
     pub domains: Vec<Domain>,
     pub ports: Vec<Port>,
     pub mounts: Vec<Mount>,
@@ -451,6 +454,12 @@ impl Snapshot {
             zero_downtime: service.zero_downtime,
             healthcheck,
             healthcheck_off: service.healthcheck_off,
+            placement: service
+                .placement
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_owned),
             domains,
             ports,
             mounts,
@@ -1731,6 +1740,7 @@ mod tests {
                 start_period_s: None,
             }),
             healthcheck_off: false,
+            placement: None,
             domains: vec![
                 Domain {
                     host: "shop.example.com".to_owned(),

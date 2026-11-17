@@ -118,6 +118,9 @@ pub struct Model {
     /// The check is off: the image's own does not run either (an import of a
     /// container whose check was `NONE`, or dropped).
     pub healthcheck_off: bool,
+    /// Where its tasks run: empty, automatic; `node:<id>`; `any`
+    /// (`placement_service`). The panel's administrators' only.
+    pub placement: Option<String>,
     /// Environment variables, sealed with `APP_KEY` (context `services.env`).
     #[sea_orm(column_type = "Text", nullable)]
     pub env: Option<Encrypted<BTreeMap<String, String>>>,
@@ -185,6 +188,10 @@ pub fn privileged(service: &Model) -> bool {
             .groups
             .as_deref()
             .is_some_and(|g| !g.trim().is_empty())
+        || service
+            .placement
+            .as_deref()
+            .is_some_and(|p| !p.trim().is_empty())
 }
 
 /// Where `env` is sealed.

@@ -31,6 +31,9 @@ pub struct DatabaseOptions {
     pub user: Option<String>,
     pub password: Option<String>,
     pub root_password: Option<String>,
+    /// An imported database: its configuration kept as it is (its env,
+    /// command, health check and volumes); nothing generated or added.
+    pub keep: bool,
 }
 
 /// What a new domain breaks of the panel's rules, without the database
@@ -64,6 +67,8 @@ pub struct NewDomain {
     pub https: bool,
     /// A Compose service's container it leads to.
     pub compose_service: Option<String>,
+    /// Traefik middlewares of its own (`custom-imp-…@file`: an import's).
+    pub middlewares: Option<String>,
 }
 
 /// A redirect of a new service (Traefik's `redirectRegex`).
@@ -301,6 +306,8 @@ pub async fn create(
     let mut healthcheck: Option<String> = None;
     let mut mounts = new.mounts.clone();
     let image = match engine {
+        // Imported: the image (pinned) and everything else as they came.
+        Some(_) if new.database.keep => new.image.clone().unwrap_or_default().trim().to_owned(),
         Some(engine) => {
             let options = &new.database;
             let credentials = Credentials {
@@ -636,8 +643,8 @@ pub async fn create(
         mem_reservation_mb: Set(new.mem_reservation_mb.and_then(|m| i32::try_from(m).ok())),
         zero_downtime: Set(new.zero_downtime && engine.is_none()),
         healthcheck_cmd: Set(healthcheck),
-        healthcheck_interval_s: Set(engine.map(|_| 5)),
-        healthcheck_retries: Set(engine.map(|_| 20)),
+        healthcheck_interval_s: Set(engine.filter(|_| !new.database.keep).map(|_| 5)),
+        healthcheck_retries: Set(engine.filter(|_| !new.database.keep).map(|_| 20)),
         env: Set(sealed),
         desired_state: Set("running".to_owned()),
         status: Set(service::NEW.to_owned()),
@@ -673,6 +680,7 @@ pub async fn create(
             port: Set(i32::from(domain.port)),
             https: Set(domain.https),
             compose_service: Set(domain.compose_service.clone()),
+            middlewares: Set(domain.middlewares.clone()),
             created_at: Set(now),
             updated_at: Set(now),
             ..Default::default()

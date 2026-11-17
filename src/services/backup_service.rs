@@ -143,13 +143,13 @@ fn format_of(engine: Engine) -> Option<(&'static str, bool)> {
 fn dump_command(engine: Engine, database: &str) -> Option<Vec<String>> {
     let script = match engine {
         Engine::Postgres => {
-            r#"PGPASSWORD="$POSTGRES_PASSWORD" exec pg_dump -h 127.0.0.1 -U "$POSTGRES_USER" --clean --if-exists --no-owner -d "$1""#
+            r#"PGPASSWORD="$POSTGRES_PASSWORD" exec pg_dump -h 127.0.0.1 -U "${POSTGRES_USER:-postgres}" --clean --if-exists --no-owner -d "$1""#
         }
         Engine::Mysql => {
             r#"exec mysqldump -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --events "$1""#
         }
         Engine::Mariadb => {
-            r#"exec mariadb-dump -h 127.0.0.1 -uroot -p"$MARIADB_ROOT_PASSWORD" --single-transaction --routines --triggers --events "$1""#
+            r#"exec mariadb-dump -h 127.0.0.1 -uroot -p"${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}" --single-transaction --routines --triggers --events "$1""#
         }
         Engine::Mongo => {
             r#"exec mongodump --archive --gzip --db="$1" --username="$MONGO_INITDB_ROOT_USERNAME" --password="$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase=admin"#
@@ -165,10 +165,12 @@ fn dump_command(engine: Engine, database: &str) -> Option<Vec<String>> {
 fn restore_command(engine: Engine, database: &str, source: Option<&str>) -> Option<Vec<String>> {
     let script = match engine {
         Engine::Postgres => {
-            r#"PGPASSWORD="$POSTGRES_PASSWORD" exec psql -q -v ON_ERROR_STOP=1 --single-transaction -h 127.0.0.1 -U "$POSTGRES_USER" -d "$1" -f -"#
+            r#"PGPASSWORD="$POSTGRES_PASSWORD" exec psql -q -v ON_ERROR_STOP=1 --single-transaction -h 127.0.0.1 -U "${POSTGRES_USER:-postgres}" -d "$1" -f -"#
         }
         Engine::Mysql => r#"exec mysql -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" "$1""#,
-        Engine::Mariadb => r#"exec mariadb -h 127.0.0.1 -uroot -p"$MARIADB_ROOT_PASSWORD" "$1""#,
+        Engine::Mariadb => {
+            r#"exec mariadb -h 127.0.0.1 -uroot -p"${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}" "$1""#
+        }
         Engine::Mongo => {
             r#"exec mongorestore --archive --gzip --drop --nsFrom="$2.*" --nsTo="$1.*" --username="$MONGO_INITDB_ROOT_USERNAME" --password="$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase=admin"#
         }
@@ -570,18 +572,23 @@ async fn target(
         .list_tasks(&owner)
         .await
         .map_err(|e| format!("the service's tasks: {e}"))?;
-    let container = tasks
-        .iter()
-        .filter(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING))
-        .find_map(|t| {
-            t.status
-                .as_ref()?
-                .container_status
-                .as_ref()?
-                .container_id
-                .clone()
-        })
-        .ok_or("the service is not running (deploy it first)")?;
+    // Read through the panel's Docker: a container on its node.
+    let here = crate::services::placement_service::panel_node(&docker)
+        .await
+        .unwrap_or_default();
+    let container = match crate::services::placement_service::running_here(&tasks, &here) {
+        Some(container) => container,
+        None if tasks
+            .iter()
+            .any(|t| t.status.as_ref().and_then(|s| s.state) == Some(TaskState::RUNNING)) =>
+        {
+            return Err(
+                "it runs on another node: the panel backs up only containers on its own node"
+                    .to_owned(),
+            );
+        }
+        None => return Err("the service is not running (deploy it first)".to_owned()),
+    };
     // A volume as the container has it (not what the panel's records say):
     // that named volume at that path, and nothing mounted inside it.
     if let (What::Volume(path), Some(expected)) = (&what, &expected_volume) {

@@ -44,6 +44,7 @@ mod m20261115_000100_add_tunnel_to_import_items;
 mod m20261116_000000_add_cleaning_to_import_volumes;
 mod m20261117_000000_add_healthcheck_settings;
 mod m20261117_000100_create_import_events;
+mod m20261117_000200_add_service_placement;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -94,6 +95,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261116_000000_add_cleaning_to_import_volumes::Migration),
             Box::new(m20261117_000000_add_healthcheck_settings::Migration),
             Box::new(m20261117_000100_create_import_events::Migration),
+            Box::new(m20261117_000200_add_service_placement::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

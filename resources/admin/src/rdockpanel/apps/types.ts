@@ -61,6 +61,10 @@ export type ServiceDetail = {
     healthcheck_timeout_s: number | null;
     healthcheck_start_period_s: number | null;
     healthcheck_off: boolean;
+    /** Where it runs: null automatic, `node:<id>`, `any`. */
+    placement: string | null;
+    /** Why the panel may not reach its containers (another node), or null. */
+    away: string | null;
     registry_username: string | null;
     source: "image" | "git" | "dockerfile";
     git_url: string | null;
@@ -160,3 +164,6 @@ export type ServiceDetail = {
     mounts: Abilities;
   };
 };
+
+/** A Swarm node, to place a service on (`GET /apps/nodes`). */
+export type SwarmNode = { id: string; name: string; role: string; availability: string; state: string; panel: boolean };

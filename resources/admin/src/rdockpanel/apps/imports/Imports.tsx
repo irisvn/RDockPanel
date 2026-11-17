@@ -23,8 +23,12 @@ type PlanItem = {
   command_secrets: number;
   tunnel_token: boolean;
   as_tunnel: boolean;
+  /** The database engine it can become (`postgres`…), its configuration kept. */
+  database?: string | null;
+  /** Chosen to become that database service. */
+  as_database?: boolean;
   ports: Array<{ host_ip: string; host_port: number; container_port: number; protocol: string }>;
-  domains: Array<{ host: string; path: string; port: number | null; https: boolean; skip: boolean; auth?: string; guard?: string; lost?: string[] }>;
+  domains: Array<{ host: string; path: string; port: number | null; https: boolean; skip: boolean; auth?: string; guard?: string; lost?: string[]; allow?: { ipAllowList?: { sourceRange?: string[] } } }>;
   findings: Finding[];
   /** Bytes of its volumes to copy (null: Docker did not say). */
   copy_bytes?: number | null;
@@ -734,6 +738,20 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
       setBusy(false);
     }
   };
+  // A database service of the panel's, or an app.
+  const setDatabase = async (on: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await props.api.patch(`/imports/${props.imp.id}/plan`, { database: { [item.container_id]: on } });
+      props.toast.success(t("Saved"));
+      props.onSaved();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
   // A domain ticked or not: the hosts left out are sent.
   const setDomain = async (host: string, on: boolean) => {
     setBusy(true);
@@ -834,6 +852,23 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
             </span>
           )}
         </Field>
+        {item.database && (
+          <Field
+            label={t("Database")}
+            help={t("As a database service it gets the panel's connection details and dumps; its image, environment, command and data stay as they are. The credentials shown are those of its environment: if they were changed inside the database since, update them there.")}
+          >
+            {editable ? (
+              <div>
+                <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setDatabase(!item.as_database)}>
+                  {busy ? t("Saving…") : item.as_database ? t("Import it as an app") : t("Import it as a database service")}
+                </Button>
+              </div>
+            ) : null}
+            <span className="rdp2-small">
+              {item.as_database ? t("A database service ({engine})").replace("{engine}", item.database) : t("An app")}
+            </span>
+          </Field>
+        )}
         {item.tunnel_token && (
           <Field
             label={t("How it runs")}
@@ -947,6 +982,7 @@ function Detail(props: PageProps<unknown> & { imp: ImportView; plan: Plan; id: s
                     {why && <span className="rdp2-muted rdp2-small">{said(t, why, why.text)}</span>}
                     {d.guard && <span className="rdp2-muted rdp2-small">{t("Protected by a Traefik middleware the panel cannot carry over: add it after protecting the service.")}</span>}
                     {d.auth && !d.skip && <span className="rdp2-muted rdp2-small">{t("Its basic auth users come along.")}</span>}
+                    {d.allow && !d.skip && <span className="rdp2-muted rdp2-small">{t("Its IP allow list comes along: {ranges}.").replace("{ranges}", (d.allow.ipAllowList?.sourceRange ?? []).join(", "))}</span>}
                   </label>
                 );
               })}

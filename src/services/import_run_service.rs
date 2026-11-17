@@ -1539,13 +1539,24 @@ mv "$b" "$o""#;
         .exec(&txn)
         .await
         .map_err(|e| e.to_string())?;
+    // Their domains' allow lists, unless another domain uses them.
+    let (_, middlewares_dropped) =
+        crate::services::traefik_settings_service::keep_imported(&txn, &serde_json::Map::new())
+            .await
+            .map_err(|e| e.to_string())?;
     let entry = AuditEntry::new("imports.services_removed", "container_imports")
         .key(cx.import.id.to_string())
-        .meta(serde_json::json!({ "services": cx.items.iter().filter_map(|i| i.service_id).collect::<Vec<_>>() }));
+        .meta(serde_json::json!({
+            "services": cx.items.iter().filter_map(|i| i.service_id).collect::<Vec<_>>(),
+            "middlewares_dropped": middlewares_dropped,
+        }));
     audit::record(&txn, &job_audit(cx), entry)
         .await
         .map_err(|e| e.to_string())?;
     txn.commit().await.map_err(|e| e.to_string())?;
+    if !middlewares_dropped.is_empty() {
+        crate::services::import_service::sync_imported(cx.app).await;
+    }
     Ok(Next::Go("reverted"))
 }
 

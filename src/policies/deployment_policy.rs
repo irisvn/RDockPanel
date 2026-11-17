@@ -36,6 +36,7 @@ fn privileged(record: &Data) -> bool {
         || set("sysctls")
         || set("groups")
         || spec["admin_only"].as_bool().unwrap_or(false)
+        || spec["placement"].as_str().is_some_and(|p| !p.is_empty())
 }
 
 /// Viewing needs the permissions; nobody writes through the panel; rolling

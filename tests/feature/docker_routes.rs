@@ -112,6 +112,12 @@ db_test!(
                     &anonymous,
                     StatusCode::UNAUTHORIZED,
                 ),
+                // The Swarm's nodes (where a service runs): system.manage.
+                Case::new(Method::GET, "/apps/nodes")
+                    .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)
+                    .expect("nobody", &nobody, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
                 // GitHub tokens: system.manage; a service's: services.update.
                 Case::new(Method::GET, "/apps/git/providers")
                     .expect("anonymous", &anonymous, StatusCode::UNAUTHORIZED)

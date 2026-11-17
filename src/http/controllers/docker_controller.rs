@@ -799,7 +799,7 @@ async fn task_container(docker: &Docker, name: &str, container: &str) -> AppResu
         .list_tasks(name)
         .await
         .map_err(AppError::from)?;
-    let found = tasks.iter().any(|t| {
+    let found = tasks.iter().find(|t| {
         t.desired_state == Some(crate::services::docker_service::TaskState::RUNNING)
             && t.status
                 .as_ref()
@@ -807,10 +807,19 @@ async fn task_container(docker: &Docker, name: &str, container: &str) -> AppResu
                 .and_then(|c| c.container_id.as_deref())
                 == Some(container)
     });
-    if found {
-        Ok(())
-    } else {
-        Err(AppError::NotFound)
+    match found {
+        None => Err(AppError::NotFound),
+        // Its shell is reached through the panel's Docker: its node's only.
+        Some(task) => {
+            let here = crate::services::placement_service::panel_node(docker)
+                .await
+                .unwrap_or_default();
+            if crate::services::placement_service::on_node(task, &here) {
+                Ok(())
+            } else {
+                Err(crate::http::controllers::apps_controller::off_node())
+            }
+        }
     }
 }
 

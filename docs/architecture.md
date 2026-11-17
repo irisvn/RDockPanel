@@ -378,6 +378,19 @@ Linux capabilities (`CAP_` prefix optional) and sysctls (`key=value` lines) beco
 spec's `CapabilityAdd`, `CapabilityDrop` and `Sysctls`. Adding capabilities, sysctls or supplemental groups reaches the
 host's kernel: it needs `system.manage` (in the panel and for templates); dropping does not.
 
+### Where a service runs
+
+The Advanced tab's "Runs on" (`services.placement`, the panel's administrators only: setting it, and
+changing a service that has one, needs `system.manage`). Empty, automatic: its tasks run on the panel's
+node (`node.id==…`) when only that machine has what it needs (an image it built or imported, a folder used
+in place, an imported service's volumes), else on any node. `node:<id>`: that node (from `GET
+/apps/nodes`). `any`: no constraint, for storage shared between nodes. A Compose service, an image the
+panel builds and one only this machine has are refused (422 in the form; a deployment fails, said, when
+its snapshot says otherwise or the node left the Swarm). The panel reaches containers through its own
+Docker: backups and restores, scripts, the terminal and live stats work for the tasks on its node; for
+the others they answer 409 `off_node` (stats count them as `elsewhere`) and the service page says why.
+Volumes are the node's: on another node a volume starts empty unless the storage is shared.
+
 ### Scripts
 
 The Scripts tab. A service's scripts (`service_scripts`: a name, a shell command) run with

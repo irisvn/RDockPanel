@@ -328,8 +328,16 @@ pub async fn status(State(app): State<AppState>) -> AppResult<Json<Value>> {
     )
     .await?
     .unwrap_or_default();
+    // The imports' (an imported domain's IP allow list): shown, not edited.
+    let imported: Vec<Value> =
+        crate::services::traefik_settings_service::imported(app.db())
+            .await
+            .map_err(AppError::internal)?
+            .into_iter()
+            .map(|(name, definition)| json!({ "name": format!("{name}@file"), "definition": definition }))
+            .collect();
     Ok(Json(
-        json!({ "traefik": state, "middlewares": middlewares }),
+        json!({ "traefik": state, "middlewares": middlewares, "imported": imported }),
     ))
 }
 

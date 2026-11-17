@@ -19,6 +19,7 @@ type Status = {
     update?: string | null;
   };
   middlewares: string;
+  imported?: Array<{ name: string; definition: { ipAllowList?: { sourceRange?: string[] } } }>;
 };
 
 const EXAMPLE = `custom-ratelimit:
@@ -141,6 +142,18 @@ export function Traefik(props: PageProps<unknown>) {
         >
           <Textarea className="rdp2-mono" rows={8} value={text} placeholder={EXAMPLE} onChange={(e) => setYaml(e.target.value)} />
         </Field>
+        {(status.data.imported ?? []).length > 0 && (
+          <Field label={t("Imported IP allow lists")} help={t("Made by imports for their domains; removed once no domain uses them.")}>
+            <div>
+              {(status.data.imported ?? []).map((m) => (
+                <p key={m.name} className="rdp2-small">
+                  <span className="rdp2-mono">{m.name}</span>{" "}
+                  <span className="rdp2-muted">{(m.definition.ipAllowList?.sourceRange ?? []).join(", ")}</span>
+                </p>
+              ))}
+            </div>
+          </Field>
+        )}
         <div className="rdp2-row rdp2-end">
           <Button type="submit" disabled={yaml === null}>
             {t("Save")}

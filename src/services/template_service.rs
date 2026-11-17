@@ -395,6 +395,7 @@ fn template_compose(
             port: number(domain, "port").unwrap_or(80).clamp(1, 65535) as u16,
             https: domain.get("https").and_then(Value::as_bool).unwrap_or(true),
             compose_service: text(domain, "service"),
+            middlewares: None,
         });
     }
     Ok(new)
@@ -422,6 +423,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 user: text(&data, "user"),
                 password: text(&data, "password"),
                 root_password: text(&data, "rootPassword"),
+                keep: false,
             };
             if let Some(env) = text(&data, "env") {
                 new.env = env_lines(&name, &env)?;
@@ -502,6 +504,7 @@ pub fn plan(output: &Value, project: &str, host: Option<&str>) -> Result<Plan, S
                 port: number(domain, "port").unwrap_or(80).clamp(1, 65535) as u16,
                 https: domain.get("https").and_then(Value::as_bool).unwrap_or(true),
                 compose_service: None,
+                middlewares: None,
             });
         }
         for mount in data

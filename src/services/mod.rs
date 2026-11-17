@@ -37,6 +37,7 @@ pub mod panel_domain_service;
 pub mod panel_log;
 pub mod panel_update_service;
 pub mod placeholders;
+pub mod placement_service;
 pub mod rate_limit_service;
 pub mod secret_scan_service;
 pub mod storage_service;

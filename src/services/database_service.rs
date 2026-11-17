@@ -38,6 +38,21 @@ pub struct Setup {
     pub data_path: &'static str,
 }
 
+/// MySQL's or MariaDB's credentials: root when there is no user of its own.
+fn mysql_credentials(user: &str, password: &str, database: &str, root: &str) -> Credentials {
+    let (user, password) = if user.is_empty() {
+        ("root".to_owned(), root.to_owned())
+    } else {
+        (user.to_owned(), password.to_owned())
+    };
+    Credentials {
+        user,
+        password,
+        database: database.to_owned(),
+        root_password: Some(root.to_owned()),
+    }
+}
+
 impl Engine {
     pub const ALL: [Engine; 5] = [
         Engine::Postgres,
@@ -174,24 +189,42 @@ impl Engine {
     pub fn credentials_of(self, env: &BTreeMap<String, String>) -> Credentials {
         let get = |k: &str| env.get(k).cloned().unwrap_or_default();
         match self {
-            Self::Postgres => Credentials {
-                user: get("POSTGRES_USER"),
-                password: get("POSTGRES_PASSWORD"),
-                database: get("POSTGRES_DB"),
-                root_password: None,
-            },
-            Self::Mysql => Credentials {
-                user: get("MYSQL_USER"),
-                password: get("MYSQL_PASSWORD"),
-                database: get("MYSQL_DATABASE"),
-                root_password: Some(get("MYSQL_ROOT_PASSWORD")),
-            },
-            Self::Mariadb => Credentials {
-                user: get("MARIADB_USER"),
-                password: get("MARIADB_PASSWORD"),
-                database: get("MARIADB_DATABASE"),
-                root_password: Some(get("MARIADB_ROOT_PASSWORD")),
-            },
+            // As the official image reads them: the user `postgres` and a
+            // database of the user's name when not set (an imported one).
+            Self::Postgres => {
+                let user = Some(get("POSTGRES_USER"))
+                    .filter(|u| !u.is_empty())
+                    .unwrap_or_else(|| "postgres".to_owned());
+                Credentials {
+                    database: Some(get("POSTGRES_DB"))
+                        .filter(|d| !d.is_empty())
+                        .unwrap_or_else(|| user.clone()),
+                    user,
+                    password: get("POSTGRES_PASSWORD"),
+                    root_password: None,
+                }
+            }
+            // No user of their own: root (an imported one).
+            Self::Mysql => mysql_credentials(
+                &get("MYSQL_USER"),
+                &get("MYSQL_PASSWORD"),
+                &get("MYSQL_DATABASE"),
+                &get("MYSQL_ROOT_PASSWORD"),
+            ),
+            // MariaDB's own names first, else the MySQL ones it also reads.
+            Self::Mariadb => {
+                let either = |m: &str, y: &str| {
+                    Some(get(m))
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or_else(|| get(y))
+                };
+                mysql_credentials(
+                    &either("MARIADB_USER", "MYSQL_USER"),
+                    &either("MARIADB_PASSWORD", "MYSQL_PASSWORD"),
+                    &either("MARIADB_DATABASE", "MYSQL_DATABASE"),
+                    &either("MARIADB_ROOT_PASSWORD", "MYSQL_ROOT_PASSWORD"),
+                )
+            }
             Self::Mongo => Credentials {
                 user: get("MONGO_INITDB_ROOT_USERNAME"),
                 password: get("MONGO_INITDB_ROOT_PASSWORD"),
@@ -250,6 +283,37 @@ pub fn random_string(len: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_imported_databases_credentials_fall_back_as_its_image_does() {
+        let env = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect()
+        };
+        let pg = Engine::Postgres.credentials_of(&env(&[("POSTGRES_PASSWORD", "p")]));
+        assert_eq!(
+            (pg.user.as_str(), pg.database.as_str()),
+            ("postgres", "postgres")
+        );
+        let my = Engine::Mysql.credentials_of(&env(&[
+            ("MYSQL_ROOT_PASSWORD", "r"),
+            ("MYSQL_DATABASE", "shop"),
+        ]));
+        assert_eq!(
+            (my.user.as_str(), my.password.as_str(), my.database.as_str()),
+            ("root", "r", "shop")
+        );
+        let maria = Engine::Mariadb.credentials_of(&env(&[
+            ("MYSQL_ROOT_PASSWORD", "r"),
+            ("MYSQL_USER", "app"),
+            ("MYSQL_PASSWORD", "a"),
+        ]));
+        assert_eq!((maria.user.as_str(), maria.password.as_str()), ("app", "a"));
+        assert_eq!(maria.root_password.as_deref(), Some("r"));
+    }
+
     use super::*;
 
     fn creds() -> Credentials {

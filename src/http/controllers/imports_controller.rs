@@ -257,6 +257,9 @@ pub struct PlanChange {
     tunnel: Option<BTreeMap<String, bool>>,
     /// Container id → the hosts of its domains left out (the others are added).
     domains: Option<BTreeMap<String, Vec<String>>>,
+    /// Container id → `true`: a database service of the panel's (when it can
+    /// be one); `false`: an app.
+    database: Option<BTreeMap<String, bool>>,
     /// Container id → `{"<host port>/<protocol>": another port, or null}`:
     /// publish a port the panel keeps (or one on the loopback) on another.
     ports: Option<BTreeMap<String, BTreeMap<String, Option<u16>>>>,
@@ -585,6 +588,22 @@ pub async fn change_plan(
             }
         }
     }
+    if let Some(databases) = &change.database {
+        let items = plan["items"].as_array_mut().ok_or(AppError::NotFound)?;
+        for (container, on) in databases {
+            let item = items
+                .iter_mut()
+                .find(|i| i["container_id"] == *container)
+                .ok_or_else(|| invalid("database", "names a container that is not in the plan"))?;
+            if *on && !item["database"].is_string() {
+                return Err(invalid(
+                    "database",
+                    "this container cannot become a database service",
+                ));
+            }
+            item["as_database"] = json!(on);
+        }
+    }
     if let Some(moves) = &change.ports {
         move_ports(&txn, &mut plan, moves).await?;
     }
@@ -706,6 +725,7 @@ pub async fn change_plan(
             "project_name": change.project_name,
             "domains": change.domains,
             "ports": change.ports,
+            "database": change.database,
             // What was chosen, never a command's text.
             "healthcheck": change.healthcheck.as_ref().map(|c| c
                 .iter()

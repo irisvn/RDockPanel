@@ -21,7 +21,11 @@ Những gì RDockPanel làm được hiện nay. [English](features.md) · quay 
   dự án: đọc, lập kế hoạch (cái gì chặn, cái gì mất), dừng, chép dữ liệu, deploy, và giữ bản gốc tới
   khi kết thúc để hoàn tác được. Thư mục trên máy được dùng tại chỗ, về sau có thể chuyển vào volume. Label Traefik và `VIRTUAL_HOST` thành domain của service; container cloudflared có thể thành
   một Cloudflare Tunnel của panel (mỗi token một tunnel); mật khẩu trên dòng lệnh được chuyển sang biến môi trường; container
-  chạy bằng user khác image giữ nguyên user đó.
+  chạy bằng user khác image giữ nguyên user đó. Container PostgreSQL, MySQL, MariaDB hoặc MongoDB chính thức có thể
+  thành service database (thông tin kết nối, dump) mà giữ nguyên cấu hình; domain có danh sách IP được phép
+  của Traefik giữ được danh sách đó.
+- **Chọn node chạy service** (tab Advanced, chỉ quản trị viên): tự động, một node trong Swarm, hoặc node
+  bất kỳ (lưu trữ dùng chung).
 
 **Server và Docker**
 
@@ -74,4 +78,4 @@ Những gì RDockPanel làm được hiện nay. [English](features.md) · quay 
 **Sắp tới** (xem [lộ trình](roadmap.md))
 
 - Nguồn Upload; web client cho database.
-- **Sau đó:** nhiều node, xác thực 2 lớp.
+- **Sau đó:** chuyển dữ liệu của service sang node khác, xác thực 2 lớp.

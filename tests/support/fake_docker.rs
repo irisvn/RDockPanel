@@ -38,6 +38,8 @@ pub struct FakeDocker {
     pub secrets: Arc<Mutex<HashMap<String, FakeConfig>>>,
     /// The state every task reports (default: running).
     pub task_state: Arc<Mutex<Option<TaskState>>>,
+    /// The node every task runs on (default: none said, this machine).
+    pub task_node: Arc<Mutex<Option<String>>>,
     /// The update status an update leaves (default: none, like a create).
     pub update_state: Arc<Mutex<Option<ServiceUpdateStatusStateEnum>>>,
     /// A stopped service's task that Swarm wants shut down but still runs.
@@ -937,6 +939,7 @@ impl DockerApi for FakeDocker {
             .map(|slot| SwarmTask {
                 id: Some(format!("task-{service}-{slot}")),
                 slot: Some(slot),
+                node_id: self.task_node.lock().unwrap().clone(),
                 spec: spec.task_template.clone(),
                 desired_state: Some(TaskState::RUNNING),
                 status: Some(rdockpanel::services::docker_service::TaskStatus {

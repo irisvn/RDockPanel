@@ -32,7 +32,7 @@ import { dateTime, percent, relative, size } from "../lib/format";
 import { ResourceError, resources } from "../lib/resources";
 import { BackupsTab } from "./Backups";
 import { MaintenanceTab, RedirectsTab, ScriptsTab, SecurityTab } from "./Access";
-import type { Deployment, Domain, ServiceDetail } from "./types";
+import type { Deployment, Domain, ServiceDetail, SwarmNode } from "./types";
 import { DomainForm, plainDomain } from "./DomainForm";
 import { ServiceLogs, ServiceTerminal } from "./Terminal";
 import { useCapacityCheck } from "./Capacity";
@@ -213,6 +213,9 @@ export function ServicePage(props: Props) {
           { id: "advanced", label: t("Advanced") },
         ]}
       >
+        {d.service.away && ["overview", "backups", "scripts"].includes(tab) && (
+          <Alert>{t("It runs on another node: backups, scripts, the terminal and live stats work only for containers on the panel's node.")}</Alert>
+        )}
         {tab === "overview" && <OverviewTab {...props} d={d} />}
         {tab === "credentials" && d.database && <CredentialsTab {...props} d={d} />}
         {tab === "backups" && <BackupsTab {...props} d={d} />}
@@ -233,6 +236,7 @@ export function ServicePage(props: Props) {
           <AdvancedTab
             t={t}
             d={d}
+            api={props.api}
             onSaved={saved}
             onError={setError}
             onDestroy={() =>
@@ -1395,6 +1399,7 @@ const str = (v: number | null | undefined) => (v === null || v === undefined ? "
 function AdvancedTab(props: {
   t: T;
   d: ServiceDetail;
+  api: PageProps<unknown>["api"];
   onSaved: () => void;
   onError: (e: unknown) => void;
   onDestroy: () => void;
@@ -1420,6 +1425,21 @@ function AdvancedTab(props: {
   const [capDrop, setCapDrop] = useState(s.cap_drop ?? "");
   const [sysctls, setSysctls] = useState(s.sysctls ?? "");
   const [groups, setGroups] = useState(s.groups ?? "");
+  const [placement, setPlacement] = useState(s.placement ?? "");
+  // The Swarm's nodes, for the panel's administrators (who place services).
+  const placeable = d.can.system && s.kind !== "compose" && s.source === "image" && !s.image.startsWith("rdp.invalid/");
+  const [nodes, setNodes] = useState<SwarmNode[] | null>(null);
+  useEffect(() => {
+    if (!placeable) return;
+    let live = true;
+    props.api
+      .get<{ nodes: SwarmNode[] }>("/nodes")
+      .then((r) => live && setNodes(r.nodes))
+      .catch(() => live && setNodes([]));
+    return () => {
+      live = false;
+    };
+  }, [placeable, props.api]);
   const { save, error, busy, fields } = useServiceSave(s.id, props.onSaved);
   const [published, setPublished] = useState("");
   const [targetPort, setTargetPort] = useState("");
@@ -1453,6 +1473,7 @@ function AdvancedTab(props: {
               ...(capDrop !== (s.cap_drop ?? "") ? { cap_drop: capDrop.trim() || null } : {}),
               ...(sysctls !== (s.sysctls ?? "") ? { sysctls: sysctls.trim() || null } : {}),
               ...(groups !== (s.groups ?? "") ? { groups: groups.trim() || null } : {}),
+              ...(placement !== (s.placement ?? "") ? { placement: placement || null } : {}),
             });
           }}
         >
@@ -1509,6 +1530,33 @@ function AdvancedTab(props: {
               <Input type="number" value={memR} onChange={(e) => setMemR(e.target.value)} disabled={disabled} />
             </Field>
           </div>
+          {(placeable || s.placement) && (
+            <>
+              <h3 className="rdp2-subtitle">{t("Runs on")}</h3>
+              <Field
+                label={t("Node")}
+                help={t("Automatic: the panel's node when only it has the image, a folder or imported data; else any node.")}
+                error={fields.placement}
+              >
+                <NativeSelect value={placement} onChange={(e) => setPlacement(e.target.value)} disabled={disabled || !d.can.system}>
+                  <option value="">{t("Automatic")}</option>
+                  {(nodes ?? []).map((n) => (
+                    <option key={n.id} value={`node:${n.id}`}>
+                      {n.panel ? t("{name} (the panel's node)").replace("{name}", n.name) : n.name}
+                    </option>
+                  ))}
+                  {placement.startsWith("node:") && nodes !== null && !nodes.some((n) => `node:${n.id}` === placement) && (
+                    <option value={placement}>{t("{name} (not in the Swarm)").replace("{name}", placement.slice(5))}</option>
+                  )}
+                  <option value="any">{t("Any node (storage shared between nodes)")}</option>
+                </NativeSelect>
+              </Field>
+              {placement !== "" && (d.mounts.length > 0 || s.kind !== "app") && (
+                <Alert>{t("Its data is in volumes on the node it ran on: on another node they start empty unless storage is shared.")}</Alert>
+              )}
+              {s.away && <p className="rdp2-muted rdp2-small">{t("Backups, scripts, the terminal and live stats work only for containers on the panel's node.")}</p>}
+            </>
+          )}
           {s.kind !== "compose" && (
             <>
               <h3 className="rdp2-subtitle">{t("Linux")}</h3>

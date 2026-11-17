@@ -40,7 +40,11 @@ list) is blocked; the folder of a link is checked again when its symlink is made
 by Move all. A service with a user of its own, a folder in place or an image only this machine has
 (`rdp.invalid/…`, which only `system.manage` may name) is the administrators', and runs on this machine's
 node. A read-only mount stays read only. A domain behind a Traefik protection the panel cannot carry over
-(anything but basic auth defined on the container) is left out and cannot be ticked. While an import runs,
+(anything but basic auth or a plain IP allow list defined on the container) is left out and cannot be
+ticked; so is a path that would answer a protected one without its protection. An allow list becomes a
+`custom-imp-…@file` middleware on that domain only, in the start's transaction. Choosing where a service
+runs (`services.placement`) needs `system.manage` and makes the service the administrators'; a service
+whose image or folder only this machine has stays on it. While an import runs,
 nothing else touches its services, the originals, their volumes or `prune`; a volume prune leaves the
 volumes an import holds. Clean the old folder never follows a symlink inside the folder and refuses a
 folder that is one; a symlink above it is resolved by Docker (keep those folders root's).

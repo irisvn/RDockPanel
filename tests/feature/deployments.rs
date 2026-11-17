@@ -2599,3 +2599,162 @@ db_test!(
             .assert_validation_error("image");
     }
 );
+
+fn constraints_of(fake: &FakeDocker, name: &str) -> Vec<String> {
+    fake.services.lock().unwrap()[name]
+        .spec
+        .clone()
+        .unwrap()
+        .task_template
+        .unwrap()
+        .placement
+        .and_then(|p| p.constraints)
+        .unwrap_or_default()
+}
+
+async fn place(app: &TestApp, client: &TestClient<'_>, id: i64, placement: &str) -> TestResponse {
+    client
+        .send(
+            rustcms::axum::http::Method::PATCH,
+            &format!("{}/{id}", records(app, "services")),
+            Some(&json!({ "placement": placement })),
+        )
+        .await
+}
+
+db_test!(
+    a_service_runs_on_the_node_chosen_or_any_node,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        *fake.nodes.lock().unwrap() = vec![
+            json!({"ID": "node-1", "Description": {"Hostname": "panel"}, "Spec": {"Role": "manager", "Availability": "active"}, "Status": {"State": "ready"}}),
+            json!({"ID": "node2", "Description": {"Hostname": "worker"}, "Spec": {"Role": "worker", "Availability": "active"}, "Status": {"State": "ready"}}),
+        ];
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        // Automatic: anywhere (a registry's image).
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        assert!(constraints_of(&fake, "shop_web").is_empty());
+        // The nodes, to choose from.
+        let nodes = admin.get(&app.admin_api("x/apps/nodes")).await.json();
+        assert_eq!(nodes["nodes"][1]["name"], "worker");
+        assert_eq!(nodes["nodes"][0]["panel"], true);
+        place(&app, &admin, id, "node:node2")
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        assert_eq!(constraints_of(&fake, "shop_web"), ["node.id==node2"]);
+        // What the panel cannot reach there is said.
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}")))
+            .await
+            .json();
+        assert!(page["service"]["away"].is_string(), "{page}");
+        // A node gone from the Swarm: the deployment fails, said.
+        fake.nodes.lock().unwrap().pop();
+        let failed = run(&app, &admin, "deploy", id).await;
+        assert_eq!(failed.status, "failed");
+        place(&app, &admin, id, "any")
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        assert!(constraints_of(&fake, "shop_web").is_empty());
+        // Back to automatic.
+        place(&app, &admin, id, "")
+            .await
+            .assert_status(StatusCode::OK);
+        assert!(service_row(&app, id).await.placement.is_none());
+    }
+);
+
+db_test!(
+    only_the_panels_administrators_place_a_service_and_only_a_registrys_image,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        place(&app, &admin, id, "node:a b")
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        // An image only this machine has stays here.
+        admin
+            .send(
+                rustcms::axum::http::Method::PATCH,
+                &format!("{}/{id}", records(&app, "services")),
+                Some(&json!({"image": "rdp.invalid/web:1", "placement": "any"})),
+            )
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        // A project's member who may update services: refused.
+        let member = support::user_with(
+            &app,
+            "member",
+            &["services.view_any", "services.view", "services.update"],
+        )
+        .await;
+        let member = app.acting_as(&member).await;
+        let refused = place(&app, &member, id, "any").await;
+        assert_eq!(
+            refused.status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{}",
+            refused.text()
+        );
+        assert!(service_row(&app, id).await.placement.is_none());
+        // Placed: the service is its administrators' only.
+        place(&app, &admin, id, "any")
+            .await
+            .assert_status(StatusCode::OK);
+        place(&app, &member, id, "")
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        assert_eq!(
+            service_row(&app, id).await.placement.as_deref(),
+            Some("any")
+        );
+    }
+);
+
+db_test!(
+    scripts_and_the_terminal_refuse_a_container_on_another_node,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        let app = support::app_with_docker(db, fake.clone()).await;
+        let (admin, id) = shop(&app).await;
+        let script = create(
+            &app,
+            &admin,
+            "service_scripts",
+            json!({"service_id": id.to_string(), "name": "Migrate", "command": "php artisan migrate --force"}),
+        )
+        .await;
+        place(&app, &admin, id, "any")
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(run(&app, &admin, "deploy", id).await.status, "succeeded");
+        *fake.task_node.lock().unwrap() = Some("node2".to_owned());
+        let url = app.admin_api(&format!("x/apps/scripts/{script}/run"));
+        let refused = admin
+            .post_json(&url, &json!({"command": "php artisan migrate --force"}))
+            .await;
+        assert_eq!(refused.status, StatusCode::CONFLICT, "{}", refused.text());
+        assert!(refused.text().contains("off_node"), "{}", refused.text());
+        assert!(!fake.calls().iter().any(|c| c.contains("artisan migrate")));
+        // Stats: nothing sampled there, counted apart.
+        let stats = admin
+            .get(&app.admin_api(&format!("x/apps/services/{id}/stats")))
+            .await
+            .json();
+        assert_eq!(stats["elsewhere"], 2, "{stats}");
+        assert_eq!(stats["tasks"], json!([]), "{stats}");
+        // On the panel's node: it runs.
+        *fake.task_node.lock().unwrap() = Some("node-1".to_owned());
+        admin
+            .post_json(&url, &json!({"command": "php artisan migrate --force"}))
+            .await
+            .assert_status(StatusCode::OK);
+    }
+);

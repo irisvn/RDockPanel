@@ -1540,6 +1540,38 @@ window.rustcms?.registerTranslations?.("vi", {
   "Protected by a Traefik middleware the panel cannot carry over: add it after protecting the service.":
     "Được bảo vệ bằng middleware Traefik mà panel không mang sang được: thêm domain này sau khi đã bảo vệ service.",
   "Its basic auth users come along.": "Các user basic auth của nó được mang theo.",
+  "As a database service it gets the panel's connection details and dumps; its image, environment, command and data stay as they are. The credentials shown are those of its environment: if they were changed inside the database since, update them there.":
+    "Thành service database, nó có thông tin kết nối và bản dump của panel; image, biến môi trường, lệnh và dữ liệu giữ nguyên. Thông tin đăng nhập hiển thị là của biến môi trường: nếu đã đổi bên trong database, hãy cập nhật lại ở đó.",
+  "Import it as an app": "Import thành app",
+  "Import it as a database service": "Import thành service database",
+  "A database service ({engine})": "Service database ({engine})",
+  "An app": "Một app",
+  "it becomes a database service of the panel (connection details, dumps), its configuration kept: the credentials shown are those of its environment, which may differ from the current ones if they were changed inside the database": "nó thành service database của panel (thông tin kết nối, dump), giữ nguyên cấu hình: thông tin đăng nhập hiển thị là của biến môi trường, có thể khác hiện tại nếu đã đổi bên trong database",
+  "Confirm.": "Xác nhận.",
+  "not an official database image": "không phải image database chính thức",
+  "its credentials are read from files": "thông tin đăng nhập được đọc từ file",
+  "its credentials are not in its environment": "thông tin đăng nhập không có trong biến môi trường",
+  "its data is not mounted where the engine keeps it": "dữ liệu không được mount ở nơi database lưu",
+  "It is imported as an app: its data and configuration come along the same.": "Nó được import thành app: dữ liệu và cấu hình vẫn được mang theo như nhau.",
+  "Runs on": "Chạy trên",
+  "Node": "Node",
+  "Automatic": "Tự động",
+  "Automatic: the panel's node when only it has the image, a folder or imported data; else any node.":
+    "Tự động: node của panel khi chỉ máy này có image, thư mục hoặc dữ liệu đã import; còn lại thì node bất kỳ.",
+  "{name} (the panel's node)": "{name} (node của panel)",
+  "{name} (not in the Swarm)": "{name} (không còn trong Swarm)",
+  "Any node (storage shared between nodes)": "Node bất kỳ (lưu trữ dùng chung giữa các node)",
+  "Its data is in volumes on the node it ran on: on another node they start empty unless storage is shared.":
+    "Dữ liệu của nó nằm trong volume trên node nó đã chạy: sang node khác, volume sẽ trống trừ khi lưu trữ dùng chung.",
+  "Backups, scripts, the terminal and live stats work only for containers on the panel's node.":
+    "Sao lưu, script, terminal và số liệu trực tiếp chỉ dùng được cho container trên node của panel.",
+  "It runs on another node: backups, scripts, the terminal and live stats work only for containers on the panel's node.":
+    "Service này chạy trên node khác: sao lưu, script, terminal và số liệu trực tiếp chỉ dùng được cho container trên node của panel.",
+  "Imported IP allow lists": "Danh sách IP được phép từ import",
+  "Made by imports for their domains; removed once no domain uses them.": "Do import tạo cho domain của nó; tự xoá khi không còn domain nào dùng.",
+  "Its IP allow list comes along: {ranges}.": "Danh sách IP được phép của nó được mang theo: {ranges}.",
+  "its IP allow list comes along as a middleware of the panel's (Settings → Traefik keeps it while a domain uses it)":
+    "danh sách IP được phép được mang theo thành một middleware của panel (Cài đặt → Traefik giữ nó khi còn domain dùng)",
   "it mounts a place of the host the panel never gives a service (the Docker socket, /proc, the panel's own folder…)":
     "nó mount một chỗ trên máy mà panel không bao giờ giao cho service (Docker socket, /proc, thư mục của panel…)",
   "Leave this container outside the panel, or remove that mount from it first.":

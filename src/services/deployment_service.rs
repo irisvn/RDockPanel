@@ -863,6 +863,80 @@ pub async fn publish(
     Ok(written)
 }
 
+/// The node the tasks must run on: the one chosen (`placement`, checked
+/// again: the node still in the Swarm, nothing only this machine has), else
+/// the panel's when only it has what the service needs (`only_here`) or an
+/// import's data (`imported_data`). None: any node.
+async fn node_for(
+    docker: &Docker,
+    snapshot: &Snapshot,
+    only_here: bool,
+    imported_data: bool,
+) -> Result<Option<String>, Outcome> {
+    use crate::services::placement_service::{self, Placement};
+    let failed = |why: String| Outcome::Failed(why);
+    let chosen =
+        match snapshot.placement.as_deref() {
+            None => None,
+            Some(value) => Some(placement_service::parse(value).ok_or_else(|| {
+                failed(format!("the placement {value} is not one the panel takes"))
+            })?),
+        };
+    if chosen.is_some()
+        && let Some(why) = placement_service::problem(
+            if snapshot.compose.is_some() {
+                "compose"
+            } else {
+                "app"
+            },
+            if snapshot.build.is_some() {
+                "build"
+            } else {
+                "image"
+            },
+            &snapshot.image,
+        )
+    {
+        return Err(failed(format!("it cannot run elsewhere: {why}")));
+    }
+    match chosen {
+        Some(Placement::Any) if only_here => Err(failed(
+            "it cannot run on any node: only this machine has its image or folder".to_owned(),
+        )),
+        Some(Placement::Any) => Ok(None),
+        Some(Placement::Node(id)) => {
+            let nodes = docker
+                .engine()
+                .list_nodes()
+                .await
+                .map_err(|e| failed(e.to_string()))?;
+            if !nodes.iter().any(|n| n["ID"].as_str() == Some(id.as_str())) {
+                return Err(failed(format!(
+                    "the node {id} is not in the Swarm any more: choose another"
+                )));
+            }
+            if only_here
+                && id
+                    != placement_service::panel_node(docker)
+                        .await
+                        .map_err(failed)?
+            {
+                return Err(failed(
+                    "it cannot run on another node: only this machine has its image or folder"
+                        .to_owned(),
+                ));
+            }
+            Ok(Some(id))
+        }
+        None if only_here || imported_data => Ok(Some(
+            placement_service::panel_node(docker)
+                .await
+                .map_err(failed)?,
+        )),
+        None => Ok(None),
+    }
+}
+
 /// The routes' and spec's options from the `[panel]` configuration.
 pub fn deploy_options(force_update: u64) -> DeployOptions {
     let cfg = config();
@@ -1459,19 +1533,17 @@ async fn apply(
             force_update_of(existing.as_ref())
                 + u64::from(trigger == Trigger::Restart || row.force_rebuild),
         );
-    // An imported image or folder is on this machine only: the tasks run here.
-    if crate::services::deploy_rules_service::local_image(&snapshot.image)
-        || snapshot.mounts.iter().any(|m| m.kind == "link")
-        || (imported && snapshot.mounts.iter().any(|m| m.kind == "volume"))
-    {
-        let node = docker.info().await.map_err(fail)?.node_id;
-        if node.is_empty() {
-            return Err(Outcome::Failed(
-                "Docker did not say which Swarm node this is".to_owned(),
-            ));
-        }
-        options.pin_node = Some(node);
-    }
+    // An image or folder only this machine has: the tasks must run here.
+    let only_here = crate::services::deploy_rules_service::local_image(&snapshot.image)
+        || matches!(image, PinnedImage::Local(_))
+        || snapshot.mounts.iter().any(|m| m.kind == "link");
+    options.pin_node = node_for(
+        docker,
+        &snapshot,
+        only_here,
+        imported && snapshot.mounts.iter().any(|m| m.kind == "volume"),
+    )
+    .await?;
     // Placeholders (`$(PROJECT_NAME)`, …) in the environment, as of now.
     let vars = placeholder_vars(&snapshot);
     let env: BTreeMap<String, String> = secrets

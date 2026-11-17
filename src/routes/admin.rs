@@ -273,6 +273,12 @@ pub fn routes() -> AdminRoutes {
                     member(),
                     docker::service_exec,
                 )
+                // The Swarm's nodes, to choose where a service runs.
+                .get(
+                    "/nodes",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    apps::nodes,
+                )
                 .get(
                     "/git/providers",
                     AdminAccess::can(permissions::SYSTEM_MANAGE),

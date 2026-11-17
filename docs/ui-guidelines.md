@@ -146,6 +146,13 @@ lines up with `sm` buttons. Its `aria-label` names the target ("Logs of demo_web
   deployments) is a visible toggle with the count (`Show 8 old tasks`).
 - **A list** (`List`) is for a collection with one attribute and an action, such as tokens or
   members. If it grows a second column, it becomes a table.
+- **Findings** (what a check found, as the import plan's): `rdp2-findings`, one row per
+  finding divided by a border, its level word first (12px/600, fixed width, `rdp2-finding-level`),
+  then the sentence. The level is a word, never a color. It stays a list while a finding has
+  only its level and its sentence; more attributes make it a table.
+- **A sequence of steps** (the import's levels, a port moved `80 → 8080`): `rdp2-levels` lays
+  the steps in a wrapping row with an `arrowRight` icon between them; each step is
+  `rdp2-level`, a 13px mono value on `--muted` with the theme's border.
 - **Service cards** on the Dashboard are the one place for cards in a section: each card is a
   link to the service, shows its name, kind, status (dot and word) and domain.
 - **Facts** (label above value) show the properties of one object: labels 12px muted, values

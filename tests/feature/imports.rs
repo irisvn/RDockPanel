@@ -3126,6 +3126,7 @@ async fn served_elsewhere(app: &TestApp, host: &str) {
         port: 80,
         https: false,
         compose_service: None,
+        middlewares: None,
     }];
     create(&txn, app.state().keyring(), &legacy, new)
         .await
@@ -5117,5 +5118,281 @@ db_test!(
             .assert_status(StatusCode::OK);
         let item = plan_item(&app, &admin, id, "id-db").await;
         assert_eq!(findings_of(&item, "healthcheck_long").len(), 1, "{item}");
+    }
+);
+
+/// `shop`'s `db` as an official PostgreSQL with its data where it keeps it.
+fn db_postgres(fake: &FakeDocker) {
+    let mut inspected = fake.inspected.lock().unwrap();
+    let doc = inspected.get_mut("shop-db-1").unwrap();
+    doc["Config"]["Image"] = json!("postgres:16");
+    doc["Config"]["Env"] = json!(["POSTGRES_PASSWORD=PgPw1234", "POSTGRES_DB=shop"]);
+    doc["Mounts"] = json!([{"Type": "volume", "Name": "dbdata", "Destination": "/var/lib/postgresql/data", "RW": true}]);
+}
+
+db_test!(
+    a_database_comes_as_a_database_service_with_its_configuration_kept,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        db_postgres(&fake);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let item = plan_item(&app, &admin, id, "id-db").await;
+        assert_eq!(item["database"], "postgres", "{item}");
+        assert_eq!(item["as_database"], true, "{item}");
+        start_and_run(&app, &admin, id).await;
+        let db_row = db_service(&app).await;
+        assert_eq!(db_row.kind, "postgres");
+        // Its own env, its one volume: nothing generated, nothing added.
+        let page = admin
+            .get(&app.admin_api(&format!("x/apps/services/{}", db_row.id)))
+            .await
+            .json();
+        let names: Vec<String> = page["env_names"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(names, ["POSTGRES_DB", "POSTGRES_PASSWORD"], "{names:?}");
+        assert_eq!(mounts_of(&app, db_row.id).await.len(), 1);
+        // Its credentials, as the official image reads them.
+        let creds = admin
+            .get(&app.admin_api(&format!("x/apps/services/{}/credentials", db_row.id)))
+            .await
+            .json();
+        assert_eq!(creds["password"], "PgPw1234", "{creds}");
+        assert_eq!(
+            creds["url"], "postgres://postgres:PgPw1234@shop_db:5432/shop?sslmode=disable",
+            "{creds}"
+        );
+    }
+);
+
+db_test!(
+    a_database_can_still_come_as_an_app,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        db_postgres(&fake);
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        admin
+            .send(
+                Method::PATCH,
+                &app.admin_api(&format!("x/imports/{id}/plan")),
+                Some(&json!({"database": {"id-db": false}})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+        // One that cannot be one is refused.
+        admin
+            .send(
+                Method::PATCH,
+                &app.admin_api(&format!("x/imports/{id}/plan")),
+                Some(&json!({"database": {"id-web": true}})),
+            )
+            .await
+            .assert_validation_error("database");
+        start_and_run(&app, &admin, id).await;
+        assert_eq!(db_service(&app).await.kind, "app");
+    }
+);
+
+/// The imports' middlewares as saved (`{name: definition}`).
+async fn imported_middlewares(app: &TestApp) -> serde_json::Map<String, serde_json::Value> {
+    rdockpanel::services::traefik_settings_service::imported(app.state().db())
+        .await
+        .unwrap()
+}
+
+async fn middlewares_of_host(app: &TestApp, host: &str) -> Vec<Option<String>> {
+    use rdockpanel::models::service_domain;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    service_domain::Entity::find()
+        .filter(service_domain::Column::Host.eq(host))
+        .all(app.state().db())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|d| d.middlewares)
+        .collect()
+}
+
+db_test!(
+    a_domain_behind_an_ip_allow_list_comes_with_it_and_undo_takes_it_away,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(&fake, "Host(`shop.example.com`)");
+        web_labels(
+            &fake,
+            &[
+                ("traefik.http.routers.web.middlewares", "office@docker"),
+                (
+                    "traefik.http.middlewares.office.ipAllowList.sourceRange",
+                    "10.0.0.0/8, 192.168.1.5",
+                ),
+                (
+                    "traefik.http.middlewares.office.ipAllowList.ipStrategy.depth",
+                    "1",
+                ),
+            ],
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert_eq!(web["domains"][0]["skip"], false, "{web}");
+        assert!(findings_of(&web, "domain_protected").is_empty(), "{web}");
+        assert_eq!(findings_of(&web, "domain_ip_allow").len(), 1, "{web}");
+        start_and_run(&app, &admin, id).await;
+        let saved = imported_middlewares(&app).await;
+        assert_eq!(saved.len(), 1, "{saved:?}");
+        let (name, definition) = saved.iter().next().unwrap();
+        assert!(name.starts_with("custom-imp-"), "{name}");
+        assert_eq!(
+            definition["ipAllowList"]["sourceRange"],
+            json!(["10.0.0.0/8", "192.168.1.5"])
+        );
+        assert_eq!(definition["ipAllowList"]["ipStrategy"]["depth"], 1);
+        assert_eq!(
+            middlewares_of_host(&app, "shop.example.com").await,
+            vec![Some(format!("{name}@file"))]
+        );
+        // Undone: no domain uses it, it goes.
+        admin
+            .post_json(&app.admin_api(&format!("x/imports/{id}/undo")), &json!({}))
+            .await
+            .assert_status(StatusCode::ACCEPTED);
+        run_all(&app).await;
+        assert_eq!(import_state(&app, id).await, "reverted");
+        assert!(imported_middlewares(&app).await.is_empty());
+    }
+);
+
+db_test!(
+    an_ip_allow_list_with_an_option_the_panel_does_not_carry_keeps_the_domain_out,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(&fake, "Host(`shop.example.com`)");
+        web_labels(
+            &fake,
+            &[
+                ("traefik.http.routers.web.middlewares", "office"),
+                (
+                    "traefik.http.middlewares.office.ipWhiteList.sourceRange",
+                    "10.0.0.0/8",
+                ),
+                (
+                    "traefik.http.middlewares.office.ipWhiteList.ipStrategy.ipv6Subnet",
+                    "64",
+                ),
+            ],
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        assert_eq!(web["domains"][0]["skip"], true, "{web}");
+        assert_eq!(findings_of(&web, "domain_protected").len(), 1, "{web}");
+        start_and_run(&app, &admin, id).await;
+        assert!(imported_middlewares(&app).await.is_empty());
+        assert!(domains_of_host(&app, "shop.example.com").await.is_empty());
+    }
+);
+
+db_test!(
+    a_path_under_a_domain_with_an_allow_list_keeps_the_open_domain_out,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(&fake, "Host(`shop.example.com`)");
+        web_labels(
+            &fake,
+            &[
+                (
+                    "traefik.http.routers.admin.rule",
+                    "Host(`shop.example.com`) && PathPrefix(`/admin`)",
+                ),
+                ("traefik.http.routers.admin.middlewares", "office"),
+                (
+                    "traefik.http.middlewares.office.ipwhitelist.sourcerange",
+                    "10.0.0.0/8",
+                ),
+            ],
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        let web = plan_item(&app, &admin, id, "id-web").await;
+        let domains = web["domains"].as_array().unwrap();
+        let root = domains.iter().find(|d| d["path"] == "/").unwrap();
+        let under = domains.iter().find(|d| d["path"] == "/admin").unwrap();
+        // `/` would answer `/admin` without its allow list.
+        assert_eq!(root["skip"], true, "{web}");
+        assert_eq!(under["skip"], false, "{web}");
+        assert!(under["allow"].is_object(), "{web}");
+    }
+);
+
+db_test!(
+    an_imported_allow_list_named_without_its_provider_is_kept,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::service_domain;
+        use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+        let fake = FakeDocker::default();
+        shop(&fake);
+        routed_web(&fake, "Host(`shop.example.com`)");
+        web_labels(
+            &fake,
+            &[
+                ("traefik.http.routers.web.middlewares", "office"),
+                (
+                    "traefik.http.middlewares.office.ipallowlist.sourcerange",
+                    "10.0.0.0/8",
+                ),
+            ],
+        );
+        let app = support::app_with_helper(db, fake.clone(), "helper:1").await;
+        let admin = ops(&app).await;
+        let id = planned_shop(&app, &admin).await;
+        start_and_run(&app, &admin, id).await;
+        let name = imported_middlewares(&app)
+            .await
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        // A file router names its own provider's middleware bare.
+        let domain = service_domain::Entity::find()
+            .filter(service_domain::Column::Host.eq("shop.example.com"))
+            .one(app.state().db())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut change: service_domain::ActiveModel = domain.into();
+        change.middlewares = Set(Some(name.clone()));
+        change.update(app.state().db()).await.unwrap();
+        let txn = rustcms::db::begin_write(app.state().db()).await.unwrap();
+        let (_, dropped) = rdockpanel::services::traefik_settings_service::keep_imported(
+            &txn,
+            &serde_json::Map::new(),
+        )
+        .await
+        .unwrap();
+        txn.commit().await.unwrap();
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert!(imported_middlewares(&app).await.contains_key(&name));
     }
 );

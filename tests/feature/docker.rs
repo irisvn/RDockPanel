@@ -758,6 +758,7 @@ async fn desired_specs_run_on_a_real_swarm() {
             start_period_s: None,
         }),
         healthcheck_off: false,
+        placement: None,
         domains: vec![],
         ports: vec![],
         mounts: vec![

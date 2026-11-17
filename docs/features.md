@@ -24,7 +24,10 @@ Everything RDockPanel does today. [Tiếng Việt](features.vi.md) · back to th
   originals kept until the import is finished, so it can be undone. Folders on the machine are used in
   place and can be moved into volumes later. Traefik labels and `VIRTUAL_HOST` become the service's domains; a cloudflared container can become
   a Cloudflare Tunnel of the panel (one per token); a password on a command line moves to an environment variable; a container that ran as another
-  user keeps it.
+  user keeps it. An official PostgreSQL, MySQL, MariaDB or MongoDB container can become a database service
+  (connection details, dumps) with its configuration kept; a domain behind a Traefik IP allow list keeps it.
+- **Where a service runs** (Advanced tab, administrators): automatic, one node of the Swarm, or any node
+  (shared storage).
 
 **Server and Docker**
 
@@ -125,4 +128,4 @@ Everything RDockPanel does today. [Tiếng Việt](features.vi.md) · back to th
 **Coming next** (see the [roadmap](roadmap.md))
 
 - Uploads as a source; a web database client.
-- Later: multiple nodes, two-factor authentication.
+- Later: moving a service's data to another node, two-factor authentication.

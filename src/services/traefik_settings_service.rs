@@ -16,6 +16,10 @@ use crate::services::traefik_service::Traefik;
 
 /// The setting holding them (`panel_settings`).
 pub const MIDDLEWARES_KEY: &str = "traefik.middlewares";
+/// The middlewares imports made (an imported domain's IP allow list), as
+/// JSON `{name: definition}`: apart from the administrators' YAML, which they
+/// never rewrite; both are written in one file.
+pub const IMPORTED_KEY: &str = "traefik.middlewares.imported";
 /// Their file, beside the routes (not a service's: never pruned).
 pub const MIDDLEWARES_FILE: &str = "rdp-custom-middlewares.yml";
 /// Largest YAML accepted.
@@ -410,6 +414,120 @@ pub fn write_middlewares(
     crate::services::certificate_service::write_private(dir, MIDDLEWARES_FILE, yaml.as_bytes())
 }
 
+/// The middlewares imports made, each checked as the administrators' are.
+pub async fn imported<C: sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<serde_json::Map<String, Value>, String> {
+    let saved = crate::models::panel_setting::get(db, IMPORTED_KEY)
+        .await
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    if saved.trim().is_empty() {
+        return Ok(serde_json::Map::new());
+    }
+    Ok(parse_saved(&saved).unwrap_or(None).unwrap_or_default())
+}
+
+/// A name for an import's middleware (`custom-imp-<12 hex>`): from what it is
+/// for, so that the same import made again gets the same name.
+pub fn imported_name(seed: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash: String = Sha256::digest(seed.as_bytes())
+        .iter()
+        .take(6)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("custom-imp-{hash}")
+}
+
+/// The name of an imported domain's IP allow list (`definition`): the same
+/// list, one middleware.
+pub fn allow_name(definition: &Value) -> String {
+    imported_name(&serde_json::to_string(definition).unwrap_or_default())
+}
+
+/// Keeps the imports' middlewares in `txn`: adds `add`, drops those no
+/// domain uses any more (an import undone, a domain changed). Locks the
+/// setting first: two writers never lose one's change. Returns the names
+/// added and dropped (empty: nothing changed).
+pub async fn keep_imported<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    add: &serde_json::Map<String, Value>,
+) -> Result<(Vec<String>, Vec<String>), sea_orm::DbErr> {
+    use crate::models::{panel_setting, service_domain};
+    use sea_orm::sea_query::OnConflict;
+    use sea_orm::{EntityTrait, QueryFilter, QuerySelect, Set};
+    // The row first (a first writer waits for another's insert; one there
+    // keeps its value: only its time is touched), then locked.
+    panel_setting::Entity::insert(panel_setting::ActiveModel {
+        key: Set(IMPORTED_KEY.to_owned()),
+        value: Set(String::new()),
+        updated_at: Set(chrono::Utc::now()),
+    })
+    .on_conflict(
+        OnConflict::column(panel_setting::Column::Key)
+            .update_column(panel_setting::Column::UpdatedAt)
+            .to_owned(),
+    )
+    .exec_without_returning(txn)
+    .await?;
+    panel_setting::Entity::find_by_id(IMPORTED_KEY.to_owned())
+        .lock_exclusive()
+        .one(txn)
+        .await?;
+    let mut map = imported(txn).await.map_err(sea_orm::DbErr::Custom)?;
+    let used: std::collections::BTreeSet<String> = service_domain::Entity::find()
+        .filter(sea_orm::ColumnTrait::is_not_null(
+            &service_domain::Column::Middlewares,
+        ))
+        .all(txn)
+        .await?
+        .into_iter()
+        .flat_map(|d| {
+            d.middlewares
+                .unwrap_or_default()
+                .split(',')
+                // `name@file`, or the bare name (a file router's own provider).
+                .filter_map(|m| match m.trim().split_once('@') {
+                    Some((name, "file")) => Some(name.to_owned()),
+                    Some(_) => None,
+                    None => Some(m.trim().to_owned()),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let dropped: Vec<String> = map
+        .keys()
+        .filter(|name| !used.contains(*name) && !add.contains_key(*name))
+        .cloned()
+        .collect();
+    for name in &dropped {
+        map.remove(name);
+    }
+    let mut added = Vec::new();
+    for (name, definition) in add {
+        if map.insert(name.clone(), definition.clone()).is_none() {
+            added.push(name.clone());
+        }
+    }
+    if !added.is_empty() || !dropped.is_empty() {
+        let text = serde_json::to_string(&map).unwrap_or_default();
+        if text.len() > MAX_YAML {
+            return Err(sea_orm::DbErr::Custom(
+                "the imported middlewares would pass 32 KB".to_owned(),
+            ));
+        }
+        panel_setting::set(txn, IMPORTED_KEY, &text).await?;
+    }
+    Ok((added, dropped))
+}
+
+/// Whether `definition` (`{"ipAllowList": {...}}`) is one the panel takes.
+pub fn valid_definition(name: &str, definition: &Value) -> bool {
+    let text = serde_json::to_string(&json!({ name: definition })).unwrap_or_default();
+    matches!(parse_middlewares(&text), Ok(Some(_)))
+}
+
 /// Writes the middlewares kept in the database (at boot, after a save).
 pub async fn sync_middlewares(
     db: &sea_orm::DatabaseConnection,
@@ -424,7 +542,12 @@ pub async fn sync_middlewares(
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
     // Kept only once checked: a check failing now writes none.
-    let map = parse_saved(&yaml).unwrap_or(None);
+    let mut map = parse_saved(&yaml).unwrap_or(None).unwrap_or_default();
+    // Then the imports' (an administrator's of the same name wins).
+    for (name, definition) in imported(db).await? {
+        map.entry(name).or_insert(definition);
+    }
+    let map = (!map.is_empty()).then_some(map);
     let dir = traefik.dir.clone();
     tokio::task::spawn_blocking(move || {
         FILE.write(generation, || write_middlewares(&dir, map.as_ref()))
