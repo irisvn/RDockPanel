@@ -17,8 +17,11 @@ Panel chạy WAF của [CrowdSec](https://www.crowdsec.net/) (bộ máy *AppSec*
 
 - **Chỉ domain của các service** đi qua WAF. Địa chỉ của chính panel và việc xác minh chứng chỉ HTTPS
   thì không, nên bạn luôn vào được panel để đổi thiết lập.
-- Body của request được đọc trước (kiểm tra tối đa 10 MB; upload lớn hơn vẫn qua nguyên vẹn, phần dư
-  không được kiểm tra), rồi request đi tiếp, không bị thay đổi.
+- Body của request được đọc trước (kiểm tra 1 MB đầu; upload lớn hơn vẫn qua nguyên vẹn, phần dư không
+  được kiểm tra), rồi request đi tiếp, không bị thay đổi. Mỗi request chiếm tối đa khoảng 1 MB bộ nhớ
+  của Traefik: phần còn lại của upload lớn nằm tạm trong một file.
+- Bộ luật của CrowdSec đi kèm panel (tải về lúc build bản phát hành): CrowdSec khởi động từ đó, không cần
+  internet, và mọi server cùng một bản có cùng bộ luật. Cập nhật panel sẽ mang bộ luật mới hơn.
 - WAF dùng IP thật của khách, kể cả khi qua Cloudflare và Cloudflare Tunnel.
 - **Nếu WAF lỗi** (CrowdSec dừng, chậm, hoặc plugin không nạp được), request vẫn đi qua **mà không được
   kiểm tra**: WAF không bao giờ làm sập trang. Trang Cài đặt sẽ báo điều đó.
@@ -71,22 +74,38 @@ hoặc **Tắt**:
 | **Không hoạt động** | Request đi qua mà không được kiểm tra; lý do hiện kèm. | Bấm **Sửa chữa (Repair)**. Vẫn không được? Xem lý do. |
 | **Tắt** | WAF đang tắt. | — |
 
-Mỗi phút panel gửi một request bình thường và một request tấn công thử qua một route ẩn của riêng nó.
-Nếu Traefik không nạp được plugin, panel chuyển các trang sang *không kiểm tra* và khởi động lại
-Traefik để nạp lại plugin (tối đa mười phút một lần). Các request kiểm tra này không bao giờ hiện trong
-cảnh báo.
+Mỗi phút panel gửi một request bình thường và vài request tấn công thử qua các route ẩn của riêng nó:
+request dò file phải bị chặn, ở mức Nghiêm ngặt thì cả một SQL injection, và ở chế độ Chỉ ghi nhận thì
+CrowdSec phải đếm được tấn công vừa gửi. Nếu Traefik không nạp được plugin, panel chuyển các trang sang
+*không kiểm tra* và khởi động lại Traefik để nạp lại plugin (tối đa mười phút một lần). Các request kiểm
+tra này không bao giờ hiện trong cảnh báo.
+
+Khi WAF chuyển sang **Không hoạt động**, và khi **Bật** lại, các kênh thông báo nhận sự kiện của Traefik
+sẽ được báo (Cài đặt → Thông báo).
+
+## Key giữa Traefik và CrowdSec
+
+Traefik gọi CrowdSec bằng một key do panel tạo (một Docker secret: không lưu trong database, không bao giờ
+hiện ra). **Key mới (New key)** (Cài đặt → Bảo mật) tạo key khác: CrowdSec rồi Traefik nhận key mới
+(Traefik khởi động lại: tạm ngừng vài giây), key cũ bị xoá khi key mới đã chạy. Bị ngắt giữa chừng thì
+key cũ vẫn dùng được.
+
+## Gỡ bỏ
+
+Đặt **Tắt**: CrowdSec dừng, các route không còn đi qua WAF. Muốn gỡ hết những gì WAF tạo ra (CrowdSec,
+volume và key của nó, plugin trong Traefik), chạy installer với `--remove-waf` sau khi đã tắt.
 
 ## Ai thấy gì
 
 | Người dùng | Thấy |
 |---|---|
-| Quản trị viên panel (`system.manage`) | Cài đặt → Bảo mật: chế độ, mức, địa chỉ, cảnh báo; tắt WAF của một service. |
+| Quản trị viên panel (`system.manage`) | Cài đặt → Bảo mật: chế độ, mức, địa chỉ, cảnh báo, Key mới, Sửa chữa; tắt WAF của một service. |
 | Sửa được một service | Thiết lập WAF của service đó; bật lại được, không tắt được. |
 | Người khác | Không thấy gì. |
 
-Cảnh báo (100 cái gần nhất) hiện thời gian, địa chỉ của khách, domain và đường dẫn, và luật bị khớp.
-**Body của request không bao giờ được lưu** (body trên 10 MB nằm tạm trong một file trong lúc được kiểm
-tra).
+Cảnh báo (100 cái gần nhất; CrowdSec giữ 30 ngày, tối đa 5000) hiện thời gian, địa chỉ của khách, domain
+và đường dẫn, và luật bị khớp. **Body của request không bao giờ được lưu** (body trên 1 MB nằm tạm trong
+một file trong lúc request đi qua).
 
 ## Địa chỉ tin cậy
 
@@ -95,7 +114,7 @@ sách ngắn: một địa chỉ tin cậy là một lối đi vòng qua WAF.
 
 ## Chia sẻ với cộng đồng CrowdSec
 
-Tắt mặc định: không gửi gì cho CrowdSec. Khi bật, CrowdSec gửi địa chỉ kẻ tấn công, luật và thời gian
+Tắt mặc định: không gửi gì cho CrowdSec, và CrowdSec không cần internet. Khi bật, CrowdSec gửi địa chỉ kẻ tấn công, luật và thời gian
 cho cộng đồng (không bao giờ gửi request của bạn), và nhận lại tri thức chung.
 
 ## Khi dùng Cloudflare
@@ -110,7 +129,9 @@ cho cộng đồng (không bao giờ gửi request của bạn), và nhận lạ
 ## Giới hạn
 
 - Port do service publish (Nâng cao → Port) không đi qua WAF: chỉ domain mới đi qua.
-- Bộ luật là của CrowdSec; một kiểu tấn công hoàn toàn mới có thể lọt cho tới khi bộ luật được cập nhật.
+- Bộ luật là của CrowdSec, tại thời điểm phát hành panel: một kiểu tấn công hoàn toàn mới có thể lọt cho
+  tới khi bản cập nhật panel mang bộ luật mới hơn.
+- Chỉ 1 MB đầu của body được kiểm tra.
 - Khi Traefik được khởi động lại không phải bởi panel (cập nhật server, chạy installer) và không nạp
   được plugin, các domain có WAF trả 404 cho tới lần kiểm tra kế tiếp của panel (tối đa một phút);
   sau đó panel phục vụ chúng mà không kiểm tra và khởi động lại Traefik để nạp plugin.

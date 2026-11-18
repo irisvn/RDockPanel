@@ -69,6 +69,7 @@ without changing anything.
 | `--version X.Y.Z` | that release of the panel |
 | `--image IMAGE` | another panel image (default: the `main` development build) |
 | `--upgrade-system` | pull MySQL and Traefik again at their tags (a newer patch) |
+| `--remove-waf` | remove the [WAF](/server/waf) and everything it made, then stop (turn it off first) |
 
 The options are kept in `/etc/rdockpanel/install.conf`. A later run changes only what you give it.
 

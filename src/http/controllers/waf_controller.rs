@@ -111,6 +111,30 @@ pub async fn repair(
     Ok(Json(json!({ "status": { "state": "starting" } })))
 }
 
+/// A new bouncer key (Traefik's for CrowdSec): CrowdSec, then Traefik, given
+/// it (Traefik restarts: a few seconds' pause); the previous one goes once
+/// the canary proves the new one. Audited; the WAF must be on.
+pub async fn rotate_key(
+    State(app): State<AppState>,
+    auth: Auth,
+    request: RequestMeta,
+) -> AppResult<Json<Value>> {
+    if Settings::load(app.db()).await?.mode == Mode::Off {
+        return Err(AppError::BadRequest("the WAF is off: it has no key".into()));
+    }
+    let txn = rustcms::db::begin_write(app.db()).await?;
+    audit::record(
+        &txn,
+        &AuditContext::new(AuditActor::user(auth.principal()), request),
+        AuditEntry::new("waf.rotate_key", "panel_settings")
+            .key(crate::services::waf_service::SETTINGS_KEY),
+    )
+    .await?;
+    txn.commit().await?;
+    waf_docker_service::reconcile_in_background_with(&app, true);
+    Ok(Json(json!({ "status": { "state": "starting" } })))
+}
+
 /// How many of CrowdSec's latest alerts the page shows.
 const ALERTS: usize = 100;
 

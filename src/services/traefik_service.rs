@@ -161,24 +161,57 @@ impl Traefik {
         api: &dyn crate::services::docker_service::DockerApi,
         change: impl Fn(&mut crate::services::docker_service::ServiceSpec) -> bool,
     ) -> DockerResult<bool> {
-        for _ in 0..5 {
+        let mut conflicts = 0;
+        let waited = std::time::Instant::now();
+        loop {
             let Some(current) = api.inspect_service(&self.service).await? else {
                 return Err(DockerError::NotFound);
             };
             let mut spec = current.spec.clone().unwrap_or_default();
+            // The installer changing Traefik (it reads its arguments, then
+            // writes them): the panel waits, two minutes at most.
+            if leased_by_another(&spec, chrono::Utc::now().timestamp()) {
+                if waited.elapsed() > LEASE_WAIT {
+                    return Err(DockerError::Conflict(
+                        "the installer is changing Traefik".into(),
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                continue;
+            }
             if !change(&mut spec) {
                 return Ok(false);
             }
             let version = current.version.and_then(|v| v.index).unwrap_or(0);
             match api.update_service(&self.service, version, spec, None).await {
-                Err(DockerError::Conflict(_)) => {
+                Err(DockerError::Conflict(_)) if conflicts < 5 => {
+                    conflicts += 1;
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+                Err(DockerError::Conflict(_)) => {
+                    return Err(DockerError::Conflict("Traefik kept changing".into()));
                 }
                 other => return other.map(|_| true),
             }
         }
-        Err(DockerError::Conflict("Traefik kept changing".into()))
     }
+}
+
+/// The label a writer of Traefik's service other than the panel (the
+/// installer) puts on it while it changes it: `installer:<unix expiry>`.
+pub const LEASE_LABEL: &str = "rdockpanel.lease";
+/// How long the panel waits for such a writer.
+const LEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Whether another writer holds Traefik's service at `now` (unix seconds):
+/// its label, not expired (a writer that died lets go at its expiry).
+pub fn leased_by_another(spec: &crate::services::docker_service::ServiceSpec, now: i64) -> bool {
+    spec.labels
+        .as_ref()
+        .and_then(|l| l.get(LEASE_LABEL))
+        .and_then(|v| v.rsplit_once(':'))
+        .and_then(|(_, expiry)| expiry.parse::<i64>().ok())
+        .is_some_and(|expiry| expiry > now)
 }
 
 impl Traefik {
@@ -466,6 +499,21 @@ pub async fn sync_all(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_installers_lease_holds_until_it_expires() {
+        let spec = |label: Option<&str>| crate::services::docker_service::ServiceSpec {
+            labels: label
+                .map(|l| std::collections::HashMap::from([(LEASE_LABEL.to_owned(), l.to_owned())])),
+            ..Default::default()
+        };
+        assert!(!leased_by_another(&spec(None), 100));
+        assert!(leased_by_another(&spec(Some("installer:160")), 100));
+        // Expired (the installer died): let go.
+        assert!(!leased_by_another(&spec(Some("installer:90")), 100));
+        assert!(!leased_by_another(&spec(Some("garbage")), 100));
+    }
+
     use super::*;
 
     #[test]

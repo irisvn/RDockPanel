@@ -25,6 +25,20 @@ RUN cargo build --release --locked \
  && cp target/release/rdockpanel /rdockpanel \
  && strip /rdockpanel
 
+# The WAF's rules (CrowdSec's hub: its index, the AppSec collections and
+# their data files), fetched once here: CrowdSec starts from them without a
+# network, the same rules for every server of this release. The image is
+# waf_docker_service::IMAGE (a test keeps them equal).
+FROM crowdsecurity/crowdsec:v1.8.2@sha256:65b74942f7e7ed5c60fde4ac15fc4ba715904c398c8b16dd451f4907d90347d4 AS waf-hub
+COPY resources/waf/crowdsec/config.yaml.local /tmp/config.yaml.local
+RUN set -e; mkdir -p /etc/crowdsec /var/lib/crowdsec/data \
+ && cp -r /staging/etc/crowdsec/* /etc/crowdsec/ \
+ && cp /tmp/config.yaml.local /etc/crowdsec/config.yaml.local \
+ && cscli hub update --with-content \
+ && cscli collections install crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules crowdsecurity/appsec-crs \
+ && mkdir -p /out && cp -r /etc/crowdsec/hub /out/hub && cp -rL /var/lib/crowdsec/data /out/data \
+ && rm -f /out/data/crowdsec.db*
+
 FROM debian:bookworm-slim
 ARG TARGETARCH
 # Git and SSH clone the services' repositories (and make deploy keys);
@@ -51,6 +65,8 @@ COPY config /app/config
 COPY install/entrypoint.sh /app/entrypoint.sh
 # The WAF's Traefik plugin (vendored, pinned), seeded into a volume Traefik reads.
 COPY resources/waf/plugin /app/waf/plugin
+COPY --from=waf-hub /out/hub /app/waf/hub
+COPY --from=waf-hub /out/data /app/waf/hub-data
 RUN mkdir -p /app/storage && chmod 0755 /app/entrypoint.sh
 ENV APP_ENV=production \
     APP_DEBUG=false \

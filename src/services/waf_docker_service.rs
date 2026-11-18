@@ -39,6 +39,9 @@ pub const IMAGE: &str = "crowdsecurity/crowdsec:v1.8.2@sha256:65b74942f7e7ed5c60
 pub const PLUGIN_VOLUME: &str = "rdp_traefik_plugins";
 const PLUGIN_MOUNT: &str = "/plugins-local";
 const PLUGIN_SOURCE: &str = "/app/waf/plugin";
+/// CrowdSec's hub and its data files, bundled in the panel's image.
+const HUB_SOURCE: &str = "/app/waf/hub";
+const HUB_DATA_SOURCE: &str = "/app/waf/hub-data";
 /// CrowdSec's volumes (its database, its hub content).
 const DATA_VOLUME: &str = "rdp_crowdsec_data";
 const CONFIG_VOLUME: &str = "rdp_crowdsec_config";
@@ -46,6 +49,11 @@ const CONFIG_VOLUME: &str = "rdp_crowdsec_config";
 const KEY_SECRET: &str = "rdp_crowdsec_bouncer";
 /// The canary's host (never a real domain) and its backend path in the panel.
 pub const CANARY_HOST: &str = "rdp-waf-canary.invalid";
+/// Its twin through the Detect listener (it never blocks: CrowdSec's
+/// counters prove it checked).
+pub const CANARY_DETECT_HOST: &str = "rdp-waf-canary-detect.invalid";
+/// An SQL injection only the Strict level (the OWASP Core Rule Set) stops.
+const STRICT_PROBE: &str = "/?id=1%27%20OR%20%271%27%3D%271";
 const CANARY_PRIORITY: i64 = 1_000_000_000;
 /// What the panel's canary route answers.
 pub const CANARY_ANSWER: &str = "rdp-waf-canary";
@@ -143,6 +151,10 @@ fn crowdsec_files(level: Level) -> Vec<(&'static str, String)> {
             include_str!("../../resources/waf/crowdsec/rdp-detect-strict.yaml").to_owned(),
         ),
         (
+            "/etc/crowdsec/config.yaml.local",
+            include_str!("../../resources/waf/crowdsec/config.yaml.local").to_owned(),
+        ),
+        (
             "/etc/crowdsec/scenarios/rdp-appsec-detect.yaml",
             include_str!("../../resources/waf/crowdsec/rdp-appsec-detect-scenario.yaml").to_owned(),
         ),
@@ -190,15 +202,21 @@ pub async fn write_definitions(
     if settings.mode != Mode::Off && !backend.is_empty() {
         let http = &mut file["http"];
         http["middlewares"]["rdp-waf-canary-path"] = json!({"replacePath": {"path": CANARY_PATH}});
-        http["routers"] = json!({"rdp-waf-canary": {
-            "rule": format!("Host(`{CANARY_HOST}`)"),
-            // Above every service's router (theirs are their rule's length
-            // times 4, at most about 40 000).
-            "priority": CANARY_PRIORITY,
-            "entryPoints": [crate::services::deploy_service::HTTP_ENTRYPOINT],
-            "middlewares": ["rdp-waf-buffer", "rdp-waf-canary", "rdp-waf-canary-path"],
-            "service": "rdp-waf-canary",
-        }});
+        let router = |host: &str, middleware: &str| {
+            json!({
+                "rule": format!("Host(`{host}`)"),
+                // Above every service's router (theirs are their rule's length
+                // times 4, at most about 40 000).
+                "priority": CANARY_PRIORITY,
+                "entryPoints": [crate::services::deploy_service::HTTP_ENTRYPOINT],
+                "middlewares": ["rdp-waf-buffer", middleware, "rdp-waf-canary-path"],
+                "service": "rdp-waf-canary",
+            })
+        };
+        http["routers"] = json!({
+            "rdp-waf-canary": router(CANARY_HOST, "rdp-waf-canary"),
+            "rdp-waf-canary-detect": router(CANARY_DETECT_HOST, "rdp-waf-canary-detect"),
+        });
         http["services"] =
             json!({"rdp-waf-canary": {"loadBalancer": {"servers": [{"url": backend}]}}});
     }
@@ -228,6 +246,14 @@ static RECONCILING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// Brings CrowdSec, Traefik and the definitions to the saved settings; then
 /// every service's routes are written again (their WAF on or off).
 pub async fn reconcile(app: &AppState) -> AppResult<Status> {
+    reconcile_with(app, false).await
+}
+
+/// [`reconcile`], with a new bouncer key when `rotate`: CrowdSec, then
+/// Traefik given it; once the canary proves it, the previous bouncers and
+/// secrets go. Interrupted, the previous key still works (its bouncer stays
+/// until then), and the next reconcile carries on with the key Traefik has.
+pub async fn reconcile_with(app: &AppState, rotate: bool) -> AppResult<Status> {
     let _one = RECONCILING.lock().await;
     let docker = app
         .service::<Docker>()
@@ -247,12 +273,12 @@ pub async fn reconcile(app: &AppState) -> AppResult<Status> {
         // Traefik loads its plugin when it starts: after a failure to load
         // it, it is started again (the plugin was copied again).
         let restart = before.detail.as_deref() == Some(PLUGIN_NOT_LOADED);
-        match start(app, &docker, &traefik, &settings, restart).await {
+        match start(app, &docker, &traefik, &settings, restart, rotate).await {
             Ok(()) => Status::now("starting", None, false),
             Err(err) => Status::now("unavailable", Some(err.to_string()), false),
         }
     };
-    status.store(app.db()).await?;
+    record(app, &before, &status).await?;
     let options = crate::services::deployment_service::deploy_options(0);
     crate::services::traefik_service::sync_all(app.db(), &traefik, &options).await?;
     if status.state == "starting" {
@@ -263,6 +289,10 @@ pub async fn reconcile(app: &AppState) -> AppResult<Status> {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             let now = probe(app, None).await?;
             if now.state == "on" {
+                // The key in use proved: the others go.
+                if let Err(err) = forget_other_keys(&docker, &traefik).await {
+                    tracing::warn!(%err, "the WAF's previous keys not removed");
+                }
                 return Ok(now);
             }
             // Traefik loaded the plugin before it was copied again: started
@@ -283,6 +313,7 @@ async fn start(
     traefik: &Traefik,
     settings: &Settings,
     restart: bool,
+    rotate: bool,
 ) -> AppResult<()> {
     if traefik.service.is_empty() {
         return Err(AppError::BadRequest(
@@ -299,16 +330,18 @@ async fn start(
         })
         .await
         .map_err(docker_err)?;
-    seed_plugin(app, docker).await?;
-    let key_secret = bouncer_secret(docker).await?;
+    seed(app, docker).await?;
+    let key_secret = bouncer_secret(docker, traefik, rotate).await?;
     run_crowdsec(docker, settings, &network.id, &key_secret).await?;
     give_traefik_the_plugin(docker, traefik, &network.id, &key_secret, restart).await?;
     Ok(())
 }
 
-/// Copies the plugin from the panel's image into its volume (a helper
-/// container of the panel's own image).
-async fn seed_plugin(app: &AppState, docker: &Docker) -> AppResult<()> {
+/// Copies from the panel's image (a helper container of it) the plugin into
+/// its volume, and CrowdSec's rules (the hub bundled at build time, and their
+/// data files) into CrowdSec's volumes: it starts from them, never from the
+/// network.
+async fn seed(app: &AppState, docker: &Docker) -> AppResult<()> {
     let image = crate::services::import_service::helper_image(app, docker)
         .await
         .ok_or_else(|| {
@@ -316,10 +349,12 @@ async fn seed_plugin(app: &AppState, docker: &Docker) -> AppResult<()> {
                 "the panel's own image is unknown (not the installer's service): the WAF's plugin cannot be copied".into(),
             )
         })?;
-    let _ = docker
-        .engine()
-        .create_volume_labelled(PLUGIN_VOLUME, system_labels())
-        .await;
+    for volume in [PLUGIN_VOLUME, CONFIG_VOLUME, DATA_VOLUME] {
+        let _ = docker
+            .engine()
+            .create_volume_labelled(volume, system_labels())
+            .await;
+    }
     // Copied beside, checked, then swapped in: Traefik starting meanwhile
     // reads the old copy or the new one, never half of one.
     let script = format!(
@@ -327,7 +362,11 @@ async fn seed_plugin(app: &AppState, docker: &Docker) -> AppResult<()> {
          cp -r {PLUGIN_SOURCE}/src /plugins/.new; test -f /plugins/.new/{module}/go.mod; \
          if [ -d /plugins/src ]; then mv /plugins/src /plugins/.old; fi; \
          mv /plugins/.new /plugins/src; rm -rf /plugins/.old; \
-         cp {PLUGIN_SOURCE}/VERSION /plugins/VERSION",
+         cp {PLUGIN_SOURCE}/VERSION /plugins/VERSION; \
+         test -f {HUB_SOURCE}/.index.json; rm -rf /crowdsec/.hub-new; \
+         cp -r {HUB_SOURCE} /crowdsec/.hub-new; rm -rf /crowdsec/hub; \
+         mv /crowdsec/.hub-new /crowdsec/hub; \
+         cp -r {HUB_DATA_SOURCE}/. /crowdsec-data/",
         module = waf_service::MODULE
     );
     let code = docker
@@ -340,12 +379,19 @@ async fn seed_plugin(app: &AppState, docker: &Docker) -> AppResult<()> {
             ),
             image,
             cmd: vec!["sh".into(), "-c".into(), script],
-            mounts: vec![HelperMount {
-                source: PLUGIN_VOLUME.to_owned(),
-                target: "/plugins".to_owned(),
+            mounts: [
+                (PLUGIN_VOLUME, "/plugins"),
+                (CONFIG_VOLUME, "/crowdsec"),
+                (DATA_VOLUME, "/crowdsec-data"),
+            ]
+            .into_iter()
+            .map(|(source, target)| HelperMount {
+                source: source.to_owned(),
+                target: target.to_owned(),
                 read_only: false,
                 kind: "volume".to_owned(),
-            }],
+            })
+            .collect(),
             import_id: 0,
             cap_add: vec![],
             timeout_s: 60,
@@ -354,22 +400,37 @@ async fn seed_plugin(app: &AppState, docker: &Docker) -> AppResult<()> {
         .map_err(docker_err)?;
     if code != 0 {
         return Err(AppError::internal(format!(
-            "the WAF's plugin could not be copied (exit {code})"
+            "the WAF's plugin and rules could not be copied (exit {code})"
         )));
     }
     Ok(())
 }
 
-/// The bouncer key's secret in use, else a new one (a random key, never kept
-/// elsewhere): (id, name).
-async fn bouncer_secret(docker: &Docker) -> AppResult<(String, String)> {
-    let secrets = docker
+/// The bouncer key's secret: the one Traefik reads (else any left), or a
+/// new one (a random key, never kept elsewhere) when there is none or when
+/// `rotate`: (id, name).
+async fn bouncer_secret(
+    docker: &Docker,
+    traefik: &Traefik,
+    rotate: bool,
+) -> AppResult<(String, String)> {
+    let secrets: Vec<(String, String)> = docker
         .engine()
         .list_secrets(SYSTEM_LABEL, "true")
         .await
-        .map_err(docker_err)?;
-    if let Some(found) = secrets.iter().find(|(_, n)| n.starts_with(KEY_SECRET)) {
-        return Ok(found.clone());
+        .map_err(docker_err)?
+        .into_iter()
+        .filter(|(_, n)| n.starts_with(KEY_SECRET))
+        .collect();
+    if !rotate {
+        let in_use = traefiks_key(docker, traefik).await;
+        if let Some(found) = secrets
+            .iter()
+            .find(|(_, n)| Some(n) == in_use.as_ref())
+            .or_else(|| secrets.first())
+        {
+            return Ok(found.clone());
+        }
     }
     let key = crate::services::database_service::random_string(40);
     let name = format!("{KEY_SECRET}_{}", short_hash(key.as_bytes()));
@@ -379,6 +440,102 @@ async fn bouncer_secret(docker: &Docker) -> AppResult<(String, String)> {
         .await
         .map_err(docker_err)?;
     Ok((id, name))
+}
+
+/// The bouncer keys' secrets there are: (id, name).
+async fn keys(docker: &Docker) -> Vec<(String, String)> {
+    docker
+        .engine()
+        .list_secrets(SYSTEM_LABEL, "true")
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, n)| n.starts_with(KEY_SECRET))
+        .collect()
+}
+
+/// The bouncer key's secret Traefik mounts (its name).
+async fn traefiks_key(docker: &Docker, traefik: &Traefik) -> Option<String> {
+    let found = docker
+        .engine()
+        .inspect_service(&traefik.service)
+        .await
+        .ok()??;
+    found
+        .spec?
+        .task_template?
+        .container_spec?
+        .secrets?
+        .into_iter()
+        .find(|s| s.file.as_ref().and_then(|f| f.name.as_deref()) == Some(KEY_SECRET))?
+        .secret_name
+}
+
+/// The bouncer's name in CrowdSec for a key's secret.
+fn bouncer_name(secret: &str) -> String {
+    format!(
+        "rdpwaf{}",
+        secret.trim_start_matches(KEY_SECRET).trim_matches('_')
+    )
+}
+
+/// Once the key Traefik reads is proved: CrowdSec's other bouncers of the
+/// panel and their secrets removed (a rotation's previous key, or one an
+/// interrupted rotation left).
+async fn forget_other_keys(docker: &Docker, traefik: &Traefik) -> AppResult<()> {
+    let Some(in_use) = traefiks_key(docker, traefik).await else {
+        return Ok(());
+    };
+    // Every running Traefik task has the key in use (an old one still
+    // serving would still need the previous key): else later.
+    let tasks = docker
+        .engine()
+        .list_tasks(&traefik.service)
+        .await
+        .map_err(docker_err)?;
+    let running: Vec<_> = tasks
+        .iter()
+        .filter(|t| {
+            t.status.as_ref().and_then(|s| s.state)
+                == Some(crate::services::docker_service::TaskState::RUNNING)
+        })
+        .collect();
+    let converged = !running.is_empty()
+        && running.iter().all(|t| {
+            t.spec
+                .as_ref()
+                .and_then(|s| s.container_spec.as_ref())
+                .and_then(|c| c.secrets.as_ref())
+                .is_some_and(|secrets| {
+                    secrets
+                        .iter()
+                        .any(|s| s.secret_name.as_deref() == Some(in_use.as_str()))
+                })
+        });
+    if !converged {
+        return Ok(());
+    }
+    let keep = bouncer_name(&in_use);
+    if let Some(text) = cscli(docker, &["bouncers", "list", "-o", "json"]).await? {
+        let list: Vec<serde_json::Value> = serde_json::from_str(text.trim()).unwrap_or_default();
+        for name in list.iter().filter_map(|b| b["name"].as_str()) {
+            if name.starts_with("rdpwaf") && name != keep {
+                cscli(docker, &["bouncers", "delete", name]).await?;
+            }
+        }
+    }
+    for (id, name) in docker
+        .engine()
+        .list_secrets(SYSTEM_LABEL, "true")
+        .await
+        .map_err(docker_err)?
+    {
+        if name.starts_with(KEY_SECRET) && name != in_use {
+            // Still used by a service: left for the next time.
+            let _ = docker.engine().delete_secret(&id).await;
+        }
+    }
+    Ok(())
 }
 
 /// CrowdSec's Swarm configs (named by their content: a change is a new one).
@@ -432,11 +589,14 @@ async fn run_crowdsec(
     key: &(String, String),
 ) -> AppResult<()> {
     let configs = configs(docker, settings.level).await?;
-    let bouncer = format!(
-        "rdpwaf{}",
-        key.1.trim_start_matches(KEY_SECRET).trim_matches('_')
-    );
-    let mut env = vec![format!("COLLECTIONS={COLLECTIONS}")];
+    let bouncer = bouncer_name(&key.1);
+    let mut env = vec![
+        format!("COLLECTIONS={COLLECTIONS}"),
+        // Installed from the bundled hub, never upgraded from the network.
+        "NO_HUB_UPGRADE=true".to_owned(),
+        // A new panel's bundle: CrowdSec started again to load it.
+        format!("RDP_WAF_BUNDLE={}", env!("CARGO_PKG_VERSION")),
+    ];
     if !settings.sharing {
         // Nothing sent to CrowdSec's online API (the image registers by default).
         env.push("DISABLE_ONLINE_API=true".to_owned());
@@ -450,7 +610,9 @@ async fn run_crowdsec(
                 // The key from its secret into the variable the image registers
                 // the bouncer from; never in the service's spec.
                 "Command": ["/bin/bash", "-c",
-                    format!("export BOUNCER_KEY_{bouncer}=\"$(cat /run/secrets/{KEY_SECRET})\"; exec /bin/bash /docker_start.sh")],
+                    // The hub's index kept fresh: the start script never fetches
+                    // another (the rules are the bundled ones).
+                    format!("export BOUNCER_KEY_{bouncer}=\"$(cat /run/secrets/{KEY_SECRET})\"; touch /etc/crowdsec/hub/.index.json 2>/dev/null; exec /bin/bash /docker_start.sh")],
                 "Env": env,
                 "Labels": { SYSTEM_LABEL: "true" },
                 "Mounts": [
@@ -622,7 +784,18 @@ pub async fn check(app: &AppState) -> AppResult<Status> {
         let Ok(_one) = RECONCILING.try_lock() else {
             return Status::load(app.db()).await;
         };
-        probe(app, None).await?
+        let status = probe(app, None).await?;
+        // A rotation the reconcile's wait did not see finish: its previous
+        // key goes once the new one works.
+        if status.state == "on"
+            && let (Some(docker), Some(traefik)) =
+                (app.service::<Docker>(), app.service::<Traefik>())
+            && keys(&docker).await.len() > 1
+            && let Err(err) = forget_other_keys(&docker, &traefik).await
+        {
+            tracing::warn!(%err, "the WAF's previous keys not removed");
+        }
+        status
     };
     let now = chrono::Utc::now().timestamp();
     if status.detail.as_deref() == Some(PLUGIN_NOT_LOADED)
@@ -699,7 +872,10 @@ pub async fn probe(app: &AppState, base: Option<String>) -> AppResult<Status> {
             write_definitions(&traefik, &docker, &settings, true).await?;
             match get("/.env").await {
                 Ok(attack) if attack.status() == reqwest::StatusCode::FORBIDDEN => {
-                    Status::now("on", None, true)
+                    match mode_and_level_answer(&docker, &settings, &client, &base).await {
+                        None => Status::now("on", None, true),
+                        Some(reason) => Status::now("unavailable", Some(reason), true),
+                    }
                 }
                 Ok(_) => Status::now(
                     "unavailable",
@@ -710,11 +886,150 @@ pub async fn probe(app: &AppState, base: Option<String>) -> AppResult<Status> {
             }
         }
     };
+    record(app, &before, &status).await?;
+    Ok(status)
+}
+
+/// Stores the WAF's state; a change is logged, and its stopping checking
+/// requests or checking them again is said to the notification channels.
+async fn record(app: &AppState, before: &Status, status: &Status) -> AppResult<()> {
     status.store(app.db()).await?;
     if status.state != before.state {
         tracing::warn!(state = status.state, detail = ?status.detail, "the WAF's state changed");
+        // It stopped checking requests, or checks them again (never while
+        // starting: the page says so).
+        let event = match (before.state.as_str(), status.state.as_str()) {
+            ("on", "unavailable") => Some(true),
+            ("unavailable", "on") => Some(false),
+            _ => None,
+        };
+        if let Some(down) = event {
+            crate::services::notify_service::notify(
+                app,
+                crate::services::notify_service::Event::Waf {
+                    down,
+                    detail: status.detail.clone(),
+                },
+            );
+        }
     }
-    Ok(status)
+    Ok(())
+}
+
+/// Beyond Basic's Block (proved already): the Strict rules block an SQL
+/// injection, and in Detect mode the Detect listener checks requests
+/// (CrowdSec's counter of its rules goes up). Why not, else `None`.
+async fn mode_and_level_answer(
+    docker: &Docker,
+    settings: &Settings,
+    client: &reqwest::Client,
+    base: &str,
+) -> Option<String> {
+    let send = |host: &'static str, path: &str| {
+        client
+            .get(format!("{base}{path}"))
+            .header(reqwest::header::HOST, host)
+            .send()
+    };
+    if settings.level == Level::Strict {
+        match send(CANARY_HOST, STRICT_PROBE).await {
+            Ok(r) if r.status() == reqwest::StatusCode::FORBIDDEN => {}
+            _ => return Some(STRICT_NOT_ANSWERING.to_owned()),
+        }
+    }
+    if settings.mode == Mode::Detect {
+        let before = detect_matches(docker).await;
+        let sent = send(CANARY_DETECT_HOST, "/.env").await;
+        // Counted when CrowdSec has answered the plugin; a moment for its
+        // metrics to show it.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let after = detect_matches(docker).await;
+        let checked = matches!(&sent, Ok(r) if r.status().is_success())
+            && matches!((before, after), (Some(b), Some(a)) if a > b);
+        if !checked {
+            return Some(DETECT_NOT_ANSWERING.to_owned());
+        }
+    }
+    None
+}
+
+pub const STRICT_NOT_ANSWERING: &str =
+    "The Strict rules (OWASP Core Rule Set) do not answer: only the Basic ones check requests";
+pub const DETECT_NOT_ANSWERING: &str =
+    "Detect mode does not answer: requests go through unrecorded";
+
+/// How many times the Detect listener's rules matched since CrowdSec started
+/// (its metrics); `None` when they cannot be read.
+async fn detect_matches(docker: &Docker) -> Option<u64> {
+    let text = cscli(docker, &["metrics", "show", "appsec", "-o", "json"])
+        .await
+        .ok()??;
+    let metrics: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let listener = format!(":{APPSEC_DETECT_PORT}/");
+    let rules = metrics["appsec-rule"].as_object()?;
+    Some(
+        rules
+            .iter()
+            .filter(|(engine, _)| engine.ends_with(&listener))
+            .flat_map(|(_, by_rule)| by_rule.as_object().into_iter().flatten())
+            .filter_map(|(_, r)| r["triggered"].as_u64())
+            .sum(),
+    )
+}
+
+/// `cscli <args>` in CrowdSec's running container: its output, `None` when
+/// none runs.
+async fn cscli(docker: &Docker, args: &[&str]) -> AppResult<Option<String>> {
+    use futures_util::StreamExt;
+    let tasks = docker
+        .engine()
+        .list_tasks(CROWDSEC)
+        .await
+        .map_err(docker_err)?;
+    let Some(container) = tasks.iter().find_map(|t| {
+        (t.status.as_ref()?.state? == crate::services::docker_service::TaskState::RUNNING)
+            .then(|| {
+                t.status
+                    .as_ref()?
+                    .container_status
+                    .as_ref()?
+                    .container_id
+                    .clone()
+            })
+            .flatten()
+    }) else {
+        return Ok(None);
+    };
+    let mark = format!(
+        "rdp-waf-{}",
+        crate::services::database_service::random_string(12)
+    );
+    let mut cmd = vec!["cscli".to_owned()];
+    cmd.extend(args.iter().map(|a| (*a).to_owned()));
+    let mut stream = docker
+        .engine()
+        .run_in_container(&container, cmd, &mark, None)
+        .await
+        .map_err(docker_err)?;
+    use crate::services::docker_service::ExecChunk;
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let mut code = 0;
+    while let Some(chunk) = stream.next().await {
+        match chunk.map_err(docker_err)? {
+            ExecChunk::Out(bytes) if out.len() < 4 * 1024 * 1024 => out.extend(bytes),
+            ExecChunk::Err(bytes) if err.len() < 4096 => err.extend(bytes),
+            ExecChunk::Exit(c) => code = c,
+            _ => {}
+        }
+    }
+    if code != 0 {
+        return Err(AppError::internal(format!(
+            "cscli {} failed ({code}): {}",
+            args.first().copied().unwrap_or_default(),
+            String::from_utf8_lossy(&err).trim()
+        )));
+    }
+    Ok(Some(String::from_utf8_lossy(&out).into_owned()))
 }
 
 pub const PLUGIN_NOT_LOADED: &str = "Traefik could not load the WAF's plugin: the sites are served uninspected; Repair starts it again";
@@ -755,9 +1070,14 @@ pub async fn boot(state: &AppState) {
 /// [`reconcile`] apart from the request (it may take a minute: a pull, a
 /// Traefik restart); the Settings page follows the status.
 pub fn reconcile_in_background(state: &AppState) {
+    reconcile_in_background_with(state, false);
+}
+
+/// [`reconcile_with`] apart from the request.
+pub fn reconcile_in_background_with(state: &AppState, rotate: bool) {
     let state = state.clone();
     tokio::spawn(async move {
-        match reconcile(&state).await {
+        match reconcile_with(&state, rotate).await {
             Ok(status) => tracing::info!(state = status.state, "the WAF reconciled"),
             Err(err) => tracing::warn!(%err, "the WAF not reconciled"),
         }
@@ -768,54 +1088,10 @@ pub fn reconcile_in_background(state: &AppState) {
 /// address, what matched, the request's host and path when known. Never
 /// request bodies.
 pub async fn alerts(docker: &Docker, limit: usize) -> AppResult<Vec<serde_json::Value>> {
-    use futures_util::StreamExt;
-    let tasks = docker
-        .engine()
-        .list_tasks(CROWDSEC)
-        .await
-        .map_err(docker_err)?;
-    let Some(container) = tasks.iter().find_map(|t| {
-        (t.status.as_ref()?.state? == crate::services::docker_service::TaskState::RUNNING)
-            .then(|| {
-                t.status
-                    .as_ref()?
-                    .container_status
-                    .as_ref()?
-                    .container_id
-                    .clone()
-            })
-            .flatten()
-    }) else {
+    let limit = limit.to_string();
+    let Some(text) = cscli(docker, &["alerts", "list", "-o", "json", "-l", &limit]).await? else {
         return Ok(vec![]);
     };
-    let mark = format!(
-        "rdp-waf-{}",
-        crate::services::database_service::random_string(12)
-    );
-    let cmd = vec![
-        "cscli".to_owned(),
-        "alerts".to_owned(),
-        "list".to_owned(),
-        "-o".to_owned(),
-        "json".to_owned(),
-        "-l".to_owned(),
-        limit.to_string(),
-    ];
-    let mut stream = docker
-        .engine()
-        .run_in_container(&container, cmd, &mark, None)
-        .await
-        .map_err(docker_err)?;
-    let mut out = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        if let crate::services::docker_service::ExecChunk::Out(bytes) = chunk.map_err(docker_err)? {
-            out.extend(bytes);
-            if out.len() > 4 * 1024 * 1024 {
-                break;
-            }
-        }
-    }
-    let text = String::from_utf8_lossy(&out);
     let text = text.trim();
     if text.is_empty() || text == "null" {
         return Ok(vec![]);
@@ -827,7 +1103,7 @@ pub async fn alerts(docker: &Docker, limit: usize) -> AppResult<Vec<serde_json::
     Ok(raw
         .iter()
         .map(summary)
-        .filter(|a| a["host"].as_str() != Some(CANARY_HOST))
+        .filter(|a| !matches!(a["host"].as_str(), Some(CANARY_HOST | CANARY_DETECT_HOST)))
         .collect())
 }
 
@@ -853,4 +1129,28 @@ fn summary(alert: &serde_json::Value) -> serde_json::Value {
         "message": meta("message"),
         "blocked": alert["scenario"].as_str() != Some("rdp/appsec-detect"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_bundled_rules_come_from_the_crowdsec_that_runs() {
+        // The image's build stage fetches the hub with the image CrowdSec
+        // runs as, and installs the collections it is started with.
+        let dockerfile = include_str!("../../Dockerfile");
+        assert!(
+            dockerfile.contains(&format!("FROM {IMAGE} AS waf-hub")),
+            "Dockerfile's waf-hub stage is not {IMAGE}"
+        );
+        assert!(dockerfile.contains(&format!("cscli collections install {COLLECTIONS}")));
+        assert!(dockerfile.contains(&format!("/out/hub {HUB_SOURCE}")));
+        assert!(dockerfile.contains(&format!("/out/data {HUB_DATA_SOURCE}")));
+    }
+
+    #[test]
+    fn a_bouncer_is_named_by_its_keys_secret() {
+        assert_eq!(bouncer_name("rdp_crowdsec_bouncer_ab12"), "rdpwafab12");
+    }
 }

@@ -109,6 +109,12 @@ pub enum Event {
     Traefik {
         down: bool,
     },
+    /// The WAF stopped checking requests (they go through unchecked), or
+    /// checks them again: a Traefik event.
+    Waf {
+        down: bool,
+        detail: Option<String>,
+    },
     /// A newer release of the panel is out (Settings → Version).
     Update {
         version: String,
@@ -136,7 +142,7 @@ impl Event {
             Self::Disk { .. } => "disk",
             Self::Certificate { .. } => "certificate",
             Self::Service { .. } | Self::Capacity { .. } => "service",
-            Self::Traefik { .. } => "traefik",
+            Self::Traefik { .. } | Self::Waf { .. } => "traefik",
             Self::Update { .. } => "update",
             Self::Prune { .. } => "prune",
             Self::Login { .. } => "login",
@@ -215,6 +221,10 @@ impl Event {
             } => format!("{project}/{service} was deployed without enough memory"),
             Self::Traefik { down: true } => "Traefik is not running: no domain answers".to_owned(),
             Self::Traefik { down: false } => "Traefik runs again".to_owned(),
+            Self::Waf { down: true, .. } => {
+                "the WAF is unavailable: requests go through unchecked".to_owned()
+            }
+            Self::Waf { down: false, .. } => "the WAF checks requests again".to_owned(),
             Self::Update { version } => format!("RDockPanel {version} is out"),
             Self::Prune { kind, removed, .. } => format!("Docker {kind} pruned: {removed} removed"),
             Self::Login { user, ip } => format!("{user} signed in from a new address ({ip})"),
@@ -248,6 +258,7 @@ impl Event {
                 "It needs about {need_mb} MB more; {available_mb} MB of {total_mb} MB was available."
             ),
             Self::Traefik { .. } => String::new(),
+            Self::Waf { detail, .. } => detail.clone().unwrap_or_default(),
             Self::Update { .. } => {
                 "Settings → Version: what changed, and the command that updates the panel"
                     .to_owned()
@@ -265,7 +276,7 @@ impl Event {
     fn ok(&self) -> bool {
         match self {
             Self::Deploy { status, .. } | Self::Backup { status, .. } => status == "succeeded",
-            Self::Service { down, .. } | Self::Traefik { down } => !down,
+            Self::Service { down, .. } | Self::Traefik { down } | Self::Waf { down, .. } => !down,
             Self::Prune { .. } | Self::Test => true,
             Self::Disk { .. }
             | Self::Capacity { .. }
@@ -323,6 +334,7 @@ impl Event {
                 json!({"project": project, "service": service, "need_mb": need_mb, "available_mb": available_mb, "total_mb": total_mb})
             }
             Self::Traefik { down } => json!({"down": down}),
+            Self::Waf { down, detail } => json!({"down": down, "detail": detail}),
             Self::Update { version } => json!({"version": version}),
             Self::Prune {
                 kind,

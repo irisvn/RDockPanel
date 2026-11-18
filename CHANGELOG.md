@@ -3,6 +3,18 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.16.0 — 2026-11-18
+
+- The WAF's rules come with the panel: CrowdSec starts without the internet, every server of a release
+  has the same rules, and alerts are kept 30 days.
+- The WAF checks itself more closely: Strict must block an SQL injection, Detect must record. When it
+  stops checking, and when it is back, notification channels hearing Traefik are told.
+- **New key** (Settings → Security): Traefik gets a new key for CrowdSec; the old one goes once the new
+  one works.
+- A request holds at most about 1 MB of Traefik's memory for the WAF (the first 1 MB of a body is checked).
+- `install.sh --remove-waf` removes everything the WAF made; the installer and the panel no longer change
+  Traefik at the same time.
+
 ## 0.15.0 — 2026-11-18
 
 - **Web application firewall** (Settings → Security): CrowdSec checks every request to your services'

@@ -5,3 +5,10 @@ outofband_rules:
   - crowdsecurity/base-config
   - crowdsecurity/vpatch-*
   - crowdsecurity/generic-*
+# The panel's own canary through this listener (a test attack every minute,
+# to prove Detect checks requests): no alert and no event.
+on_match:
+  - filter: req.Host == "rdp-waf-canary-detect.invalid"
+    apply:
+      - CancelAlert()
+      - CancelEvent()

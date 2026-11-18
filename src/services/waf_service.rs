@@ -39,8 +39,12 @@ pub const APPSEC_BLOCK_PORT: u16 = 7422;
 pub const APPSEC_DETECT_PORT: u16 = 7423;
 /// Where Traefik reads the bouncer's key (a Docker secret).
 pub const KEY_FILE: &str = "/run/secrets/rdp_crowdsec_bouncer";
-/// Bodies buffered before the WAF, in memory (larger ones go to a file).
-const BUFFER_MEMORY: u64 = 10 * 1024 * 1024;
+/// Bodies buffered before the WAF, in memory (the rest in a temporary file):
+/// a request holds at most this much of Traefik's memory.
+const BUFFER_MEMORY: u64 = 1024 * 1024;
+/// How much of a body AppSec checks (the plugin holds it in memory twice);
+/// the rest goes to the app unchecked.
+pub const BODY_CHECKED: u64 = 1024 * 1024;
 /// How long the plugin waits for AppSec before letting a request through.
 const APPSEC_TIMEOUT_SECONDS: u64 = 1;
 
@@ -175,6 +179,7 @@ pub fn definitions(settings: &Settings, healthy: bool, trusted: &[String]) -> Va
             "crowdsecAppsecUnreachableBlock": false,
             "crowdsecAppsecFailureBlock": false,
             "httpTimeoutSeconds": APPSEC_TIMEOUT_SECONDS,
+            "crowdsecAppsecBodyLimit": BODY_CHECKED,
             "forwardedHeadersTrustedIPs": trusted,
             "clientTrustedIPs": allowlist,
         }}})
@@ -200,15 +205,21 @@ pub fn definitions(settings: &Settings, healthy: bool, trusted: &[String]) -> Va
     // router alone answers 404 while the plugin is not loaded (the sites
     // keep their no-ops), and an attack answered 403 there proves the
     // plugin, the key and AppSec all work. It asks the blocking listener,
-    // in Detect mode too.
-    middlewares.insert(
-        "rdp-waf-canary".into(),
-        if settings.mode != Mode::Off {
-            plugin(&[], APPSEC_BLOCK_PORT)
-        } else {
-            noop
-        },
-    );
+    // in Detect mode too; its twin asks the Detect listener (proved by
+    // CrowdSec's counters: it never blocks).
+    for (name, port) in [
+        ("rdp-waf-canary", APPSEC_BLOCK_PORT),
+        ("rdp-waf-canary-detect", APPSEC_DETECT_PORT),
+    ] {
+        middlewares.insert(
+            name.into(),
+            if settings.mode != Mode::Off {
+                plugin(&[], port)
+            } else {
+                noop.clone()
+            },
+        );
+    }
     json!({"http": {"middlewares": middlewares}})
 }
 
@@ -292,10 +303,23 @@ mod tests {
             d["http"]["middlewares"]["rdp-waf-canary"]["plugin"][PLUGIN]["crowdsecAppsecHost"],
             "rdp-crowdsec:7422"
         );
+        assert_eq!(
+            d["http"]["middlewares"]["rdp-waf-canary-detect"]["plugin"][PLUGIN]["crowdsecAppsecHost"],
+            "rdp-crowdsec:7423"
+        );
         let b = definitions(&with(Mode::Block), true, &[]);
         assert_eq!(
             b["http"]["middlewares"]["rdp-waf"]["plugin"][PLUGIN]["crowdsecAppsecHost"],
             "rdp-crowdsec:7422"
+        );
+        // A request holds at most a megabyte of Traefik's memory.
+        assert_eq!(
+            b["http"]["middlewares"]["rdp-waf"]["plugin"][PLUGIN]["crowdsecAppsecBodyLimit"],
+            1024 * 1024
+        );
+        assert_eq!(
+            b["http"]["middlewares"]["rdp-waf-buffer"]["buffering"]["memRequestBodyBytes"],
+            1024 * 1024
         );
     }
 

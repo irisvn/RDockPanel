@@ -240,8 +240,12 @@ it fails:
   router outranks every service's, and only the panel's exact answer counts: a service cannot make the
   panel take the WAF off the sites.
 - **Secrets**: the bouncer's key is a Docker secret mounted in Traefik and CrowdSec, never in the
-  database, the definitions or a job. CrowdSec runs with `DISABLE_ONLINE_API=true` unless community
-  sharing is on, so nothing leaves the server by default.
+  database, the definitions or a job; New key replaces it (audited `waf.rotate_key`), the old bouncer
+  and secret removed once the new key is proved. CrowdSec runs with `DISABLE_ONLINE_API=true` unless
+  community sharing is on, and its rules are bundled in the panel's image (no hub fetch, no version
+  check: the hub's branch is fixed), so it needs no network by default.
+- **Memory**: a request holds at most about 1 MB in Traefik for the WAF (buffer and AppSec's copy);
+  only the first 1 MB of a body is checked.
 - **Names**: `rdp-waf*` middlewares are the panel's; a domain or custom middleware cannot name them.
 - A service's WAF turned off needs `system.manage` (see [permissions.md](permissions.md)). Saving the
   settings and Repair are audited (`waf.settings`, `waf.repair`).

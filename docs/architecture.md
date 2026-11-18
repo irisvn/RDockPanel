@@ -262,9 +262,15 @@ addresses, sharing) and a service may override it (`services.waf`: null follows 
 `off`). `waf_service` holds the rules, `waf_docker_service` the Docker side:
 
 - **CrowdSec** (`rdp-crowdsec`, a pinned `crowdsecurity/crowdsec` image on the panel's node, volumes
-  `rdp_crowdsec_data` and `rdp_crowdsec_config`) gets its AppSec configs and acquisition as Swarm
-  configs from `resources/waf/crowdsec/`: port 7422 answers in band (Block), 7423 out of band (Detect:
-  recorded by the scenario `rdp/appsec-detect`, never a decision). Off scales it to 0.
+  `rdp_crowdsec_data` and `rdp_crowdsec_config`) gets its AppSec configs, acquisition and
+  `config.yaml.local` (the hub's branch fixed, alerts kept 30 days / 5000) as Swarm configs from
+  `resources/waf/crowdsec/`: port 7422 answers in band (Block), 7423 out of band (Detect: recorded by
+  the scenario `rdp/appsec-detect`, never a decision). Off scales it to 0.
+- **Rules, offline**: the image's `waf-hub` build stage (from the same CrowdSec image) fetches the hub
+  index with its content and installs the AppSec collections; the panel's image carries the hub
+  (`/app/waf/hub`) and its data files (`/app/waf/hub-data`), copied into CrowdSec's volumes at each
+  reconcile. CrowdSec starts with `NO_HUB_UPGRADE=true` and its hub index touched (its start script
+  never fetches another), and `RDP_WAF_BUNDLE=<panel version>` restarts it on a panel update.
 - **Traefik** gets the plugin as a local plugin: the panel copies `resources/waf/plugin` (in the
   image at `/app/waf/plugin`) into the volume `rdp_traefik_plugins` with a helper container, mounts it
   read-only at `/plugins-local`, adds `--experimental.localPlugins.rdpwaf.moduleName`, the bouncer's
@@ -285,6 +291,22 @@ addresses, sharing) and a service may override it (`services.waf`: null follows 
   the plugin on the sites, `on`; anything else → `unavailable` with the reason, the sites as they were.
   The canary's router has a priority above every service's, and no domain may take its host.
   CrowdSec cancels the canary's alerts and events (`on_match` in the Block configs).
+- **Probes beyond the plugin**: `/.env` 403 on the canary (Basic, Block listener); at Strict an SQL
+  injection 403 too; in Detect mode a twin canary (`rdp-waf-canary-detect.invalid`, the Detect
+  listener) gets `/.env` and CrowdSec's `cscli metrics show appsec` count of that listener's rule
+  matches must go up (out-of-band matches from private addresses never become alerts: the counter is
+  the proof). Both canaries' matches are cancelled (`on_match`: no alert, no event).
+- **Notifications**: `on → unavailable` and `unavailable → on` send `Event::Waf` on the `traefik` event.
+- **Key rotation** (New key, `reconcile_with(rotate)`): a new secret `rdp_crowdsec_bouncer_<hash>`;
+  CrowdSec registers its bouncer (`BOUNCER_KEY_rdpwaf<hash>`), Traefik mounts it at the same path;
+  once the canary is `on`, CrowdSec's other `rdpwaf*` bouncers and the other secrets are removed. The
+  key in use is always the one Traefik mounts; an interrupted rotation leaves the old bouncer working.
+- **Bodies**: `buffering` keeps 1 MB in memory (the rest in a file), the plugin sends AppSec the first
+  1 MB (`crowdsecAppsecBodyLimit`).
+- **Traefik's lease**: every change of Traefik's service by the panel (`update_service_locked`) waits
+  while the label `rdockpanel.lease=installer:<expiry>` is set and not expired (two minutes at most);
+  the installer sets it before reading Traefik's arguments and removes it in the update that writes
+  them back.
 - **Alerts** are `cscli alerts list -o json` in the container, summarized (time, address, host, path,
   rule, blocked or recorded).
 

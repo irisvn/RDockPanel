@@ -54,12 +54,8 @@ Next:
 
 - Multiple servers (Swarm workers), placement.
 - Two-factor authentication.
-- WAF follow-ups (0.15.0 ships without them): CrowdSec's rules bundled in the image (today downloaded
-  when CrowdSec starts) and a reset of its volumes; rotating the bouncer's key; a lease on Traefik's
-  arguments shared with the installer (today a plugin dropped by another writer is mended by the
-  minute's check); a probe of the Detect listener and of the Strict rules (the canary proves Block,
-  Basic); a notification when the WAF becomes unavailable; a cap on concurrent buffered bodies;
-  `install.sh --remove-waf`.
+- A "Cloudflare only" firewall mode (80/443 open to Cloudflare's ranges only), against reaching the
+  server around Cloudflare.
 
 ## Depends on RustCMS
 

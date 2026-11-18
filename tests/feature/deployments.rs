@@ -2890,9 +2890,45 @@ db_test!(
     }
 );
 
+db_test!(
+    a_new_waf_key_is_asked_only_while_it_is_on_and_audited,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::waf_service::{Mode, Settings};
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let (admin, _) = shop(&app).await;
+        let url = app.admin_api("x/apps/waf/rotate-key");
+        let audited = || async {
+            rustcms::models::audit_log::Entity::find()
+                .filter(rustcms::models::audit_log::Column::Event.eq("waf.rotate_key"))
+                .count(app.state().db())
+                .await
+                .unwrap()
+        };
+        // Off: no key to replace.
+        admin
+            .post_json(&url, &json!({}))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        assert_eq!(audited().await, 0);
+        Settings {
+            mode: Mode::Block,
+            ..Settings::default()
+        }
+        .store(app.state().db())
+        .await
+        .unwrap();
+        admin
+            .post_json(&url, &json!({}))
+            .await
+            .assert_status(StatusCode::OK);
+        assert_eq!(audited().await, 1);
+    }
+);
+
 /// A canary for [`waf_docker_service::probe`]: `/` answers `normal` (a status
 /// and a body), `/.env` 403. Its address.
-async fn fake_canary(normal: (u16, &'static str)) -> String {
+pub(crate) async fn fake_canary(normal: (u16, &'static str)) -> String {
     use rustcms::axum::{Router, http::StatusCode as Code, routing::get};
     let (code, body) = normal;
     let app = Router::new()
@@ -2960,6 +2996,38 @@ db_test!(
             .unwrap();
         assert_eq!(gone.detail.as_deref(), Some(waf::PLUGIN_NOT_LOADED));
         assert!(!plugin());
+        // Strict: Basic's attack blocked is not enough, the SQL injection
+        // must be (this canary lets it through).
+        let strict = Settings {
+            mode: Mode::Block,
+            level: rdockpanel::services::waf_service::Level::Strict,
+            ..Settings::default()
+        };
+        strict.store(state.db()).await.unwrap();
+        let basic_only = waf::probe(state, Some(fake_canary((200, waf::CANARY_ANSWER)).await))
+            .await
+            .unwrap();
+        assert_eq!(basic_only.state, "unavailable", "{basic_only:?}");
+        assert_eq!(
+            basic_only.detail.as_deref(),
+            Some(waf::STRICT_NOT_ANSWERING)
+        );
+        // Detect: CrowdSec's counters must show its listener checked (none
+        // here: no CrowdSec runs).
+        Settings {
+            mode: Mode::Detect,
+            ..Settings::default()
+        }
+        .store(state.db())
+        .await
+        .unwrap();
+        let unrecorded = waf::probe(state, Some(fake_canary((200, waf::CANARY_ANSWER)).await))
+            .await
+            .unwrap();
+        assert_eq!(
+            unrecorded.detail.as_deref(),
+            Some(waf::DETECT_NOT_ANSWERING)
+        );
     }
 );
 
@@ -2996,7 +3064,12 @@ db_test!(
             let text =
                 std::fs::read_to_string(support::traefik_dir(&app).join("rdp-waf.yml")).unwrap();
             let doc: serde_json::Value = serde_yaml_ng::from_str(&text).unwrap();
-            for name in ["rdp-waf", "rdp-waf-buffer", "rdp-waf-canary"] {
+            for name in [
+                "rdp-waf",
+                "rdp-waf-buffer",
+                "rdp-waf-canary",
+                "rdp-waf-canary-detect",
+            ] {
                 let m = &doc["http"]["middlewares"][name];
                 // Never an empty middleware (Traefik would drop the whole file).
                 assert!(

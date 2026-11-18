@@ -277,7 +277,8 @@ pub fn valid_domain_host(host: &str) -> bool {
 /// the panel's own, never a service's, even one saved before this rule (its
 /// routes are not written).
 pub fn reserved_host(host: &str) -> bool {
-    host == crate::services::waf_docker_service::CANARY_HOST || host == "*.invalid"
+    use crate::services::waf_docker_service::{CANARY_DETECT_HOST, CANARY_HOST};
+    host == CANARY_HOST || host == CANARY_DETECT_HOST || host == "*.invalid"
 }
 
 /// A Traefik middleware a domain names (`ratelimit@file`, `auth@docker`):

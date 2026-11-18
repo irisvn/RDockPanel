@@ -49,6 +49,7 @@ from what the install left (`rdp-mysql`, the database URL secret), and stops whe
 | `--image IMAGE` | the panel's image (default `ghcr.io/irisvn/rdockpanel:main`, a development build: use `--version` for a release) |
 | `--version X.Y.Z` | that release of the panel: `ghcr.io/irisvn/rdockpanel:X.Y.Z` |
 | `--upgrade-system` | MySQL and Traefik pulled again at their tags (a newer patch of `mysql:8.4`, `traefik:v3.7`) |
+| `--remove-waf` | removes the WAF (CrowdSec, its volumes, keys and configs, the plugin in Traefik), then stops; turn it off in Settings → Security first (refused while it is on) |
 
 The options are kept in `/etc/rdockpanel/install.conf`: a later run changes only what it is given.
 That file is read as data (`KEY=value` lines of `IMAGE`, `DOMAIN`, `EMAIL`, `APPS_DOMAIN`, `DATABASE`, each
@@ -101,7 +102,9 @@ resolvers' tokens as secrets `rdp-dns-*` (Traefik reads them).
 Run the installer again: it updates the panel to its image (the newest of its tag) and the options
 given, keeping the secrets, the database and the certificates. MySQL and Traefik are left running
 as they are while their configuration is unchanged (no newer patch of their tag behind the
-database's back, no restart of every domain): `--upgrade-system` pulls them again; a changed
+database's back, no restart of every domain): `--upgrade-system` pulls them again; while it reads
+Traefik's arguments and writes them back it labels the service `rdockpanel.lease=installer:<expiry>`,
+and the panel waits (two minutes at most) before changing Traefik itself; a changed
 `--email` restarts Traefik with its new arguments, and MySQL restarts once when its settings
 change (a first rerun after this release, or a server with more or less memory) (the certificate resolvers added in the panel are
 kept).

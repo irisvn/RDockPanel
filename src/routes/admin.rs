@@ -400,6 +400,11 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can(permissions::SYSTEM_MANAGE),
                     waf::repair,
                 )
+                .post(
+                    "/waf/rotate-key",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::rotate_key,
+                )
                 .get(
                     "/waf/alerts",
                     AdminAccess::can(permissions::SYSTEM_MANAGE),

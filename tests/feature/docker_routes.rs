@@ -124,6 +124,9 @@ db_test!(
                 Case::new(Method::POST, "/apps/waf/repair")
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/waf/rotate-key")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
                 Case::new(Method::GET, "/apps/waf/alerts")
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN)

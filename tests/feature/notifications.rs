@@ -392,3 +392,56 @@ db_test!(
         assert_eq!(alerts(&got, "login").len(), 1);
     }
 );
+
+db_test!(
+    the_waf_says_when_it_stops_checking_and_when_it_checks_again,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::waf_docker_service::{self as waf, Status};
+        use rdockpanel::services::waf_service::{Mode, Settings};
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let user = support::user_with(&app, "admin", &[]).await;
+        app.make_super_admin(&user).await;
+        let admin = app.acting_as(&user).await;
+        let (url, got) = receiver().await;
+        create(
+            &app,
+            &admin,
+            "notification_channels",
+            json!({"name": "ops", "kind": "webhook", "secret": {"replace": url}}),
+        )
+        .await;
+        let state = app.state();
+        Settings {
+            mode: Mode::Block,
+            ..Settings::default()
+        }
+        .store(state.db())
+        .await
+        .unwrap();
+        Status::now("on", None, true)
+            .store(state.db())
+            .await
+            .unwrap();
+        // The plugin not loaded: requests go through unchecked, said.
+        waf::probe(
+            state,
+            Some(crate::deployments::fake_canary((404, "")).await),
+        )
+        .await
+        .unwrap();
+        let down = wait_for(&got, "traefik").await;
+        assert_eq!(down["data"]["down"], true, "{down}");
+        assert_eq!(down["data"]["detail"], waf::PLUGIN_NOT_LOADED, "{down}");
+        got.lock().unwrap().clear();
+        // Checking again: said too.
+        waf::probe(
+            state,
+            Some(crate::deployments::fake_canary((200, waf::CANARY_ANSWER)).await),
+        )
+        .await
+        .unwrap();
+        let back = wait_for(&got, "traefik").await;
+        assert_eq!(back["data"]["down"], false, "{back}");
+    }
+);

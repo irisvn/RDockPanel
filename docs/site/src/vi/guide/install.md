@@ -69,6 +69,7 @@ Không đổi được về sau: chạy lại với `--database` khác thì inst
 | `--version X.Y.Z` | bản phát hành đó của panel |
 | `--image IMAGE` | image khác cho panel (mặc định: bản phát triển `main`) |
 | `--upgrade-system` | pull lại MySQL và Traefik theo tag của chúng (bản vá mới hơn) |
+| `--remove-waf` | gỡ [WAF](/vi/server/waf) và mọi thứ nó tạo ra rồi dừng (tắt WAF trước) |
 
 Các tuỳ chọn được lưu trong `/etc/rdockpanel/install.conf`. Lần chạy sau chỉ đổi những gì bạn đưa vào.
 

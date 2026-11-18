@@ -1,0 +1,10 @@
+# Merged into CrowdSec's config.yaml (rdp-crowdsec, and the image's build
+# stage that fetches the hub). The hub's branch is fixed: cscli never asks
+# the network which one, so CrowdSec starts from the bundled rules offline.
+# Alerts are kept 30 days, 5000 at most.
+cscli:
+  hub_branch: master
+db_config:
+  flush:
+    max_items: 5000
+    max_age: 30d

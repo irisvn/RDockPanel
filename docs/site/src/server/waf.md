@@ -17,8 +17,12 @@ own, `rdp-crowdsec`, and gives Traefik a plugin that asks it about each request:
 
 - **Only your services' domains** go through it. The panel's own address and HTTPS certificate
   checks never do, so you can always reach the panel to change a setting.
-- The request's body is read first (up to 10 MB is checked; larger uploads pass whole, the rest
-  unchecked), then the request goes on unchanged.
+- The request's body is read first (its first 1 MB is checked; larger uploads pass whole, the rest
+  unchecked), then the request goes on unchanged. A request holds at most about 1 MB of Traefik's
+  memory: the rest of a large upload waits in a temporary file.
+- CrowdSec's rules come with the panel (fetched when the release was built): CrowdSec starts from
+  them without the internet, and every server of a release has the same rules. A panel update brings
+  newer ones.
 - The visitor's real address is used, also behind Cloudflare and the Cloudflare Tunnel.
 - **If the WAF fails** (CrowdSec stopped, slow, or its plugin not loaded), requests go through
   **unchecked**: a site is never taken down by the WAF. The Settings page says so.
@@ -70,20 +74,38 @@ It applies when saved, without redeploying.
 | **Unavailable** | Requests go through unchecked; the reason is shown. | Press **Repair**. Still unavailable? See the reason. |
 | **Off** | The WAF is off. | — |
 
-Every minute the panel sends a normal request and a test attack through a hidden route of its own.
-If Traefik could not load the plugin, the panel switches the sites to *unchecked* and starts Traefik
-again to load it (at most once every ten minutes). These test requests never appear in the alerts.
+Every minute the panel sends a normal request and test attacks through hidden routes of its own:
+the file probe must be blocked, at the Strict level an SQL injection too, and in Detect mode CrowdSec
+must count the attack it was shown. If Traefik could not load the plugin, the panel switches the sites
+to *unchecked* and starts Traefik again to load it (at most once every ten minutes). These test
+requests never appear in the alerts.
+
+When the WAF becomes **Unavailable**, and when it is **On** again, the notification channels that hear
+Traefik's events are told (Settings → Notifications).
+
+## The key between Traefik and CrowdSec
+
+Traefik asks CrowdSec with a key the panel makes (a Docker secret: never in the database, never shown).
+**New key** (Settings → Security) makes another: CrowdSec, then Traefik get it (Traefik restarts: a
+few seconds' pause), and the old one is removed once the new one works. Interrupted, the old key keeps
+working.
+
+## Removing it
+
+Turn it **Off**: CrowdSec stops, the routes go without it. To remove everything it made (CrowdSec, its
+volumes and keys, the plugin in Traefik), run the installer with `--remove-waf` after turning it off.
 
 ## Who sees what
 
 | User | Sees |
 |---|---|
-| Panel administrator (`system.manage`) | Settings → Security: mode, level, addresses, alerts; turns a service's WAF off. |
+| Panel administrator (`system.manage`) | Settings → Security: mode, level, addresses, alerts, New key, Repair; turns a service's WAF off. |
 | May change a service | Its WAF setting; can set it back on, not off. |
 | Others | Nothing of it. |
 
-Alerts (the latest 100) show the time, the visitor's address, the domain and path, and the rule.
-**Request bodies are never kept** (a body over 10 MB waits in a temporary file while it is checked).
+Alerts (the latest 100; CrowdSec keeps them 30 days, 5000 at most) show the time, the visitor's
+address, the domain and path, and the rule. **Request bodies are never kept** (a body over 1 MB waits
+in a temporary file while the request passes).
 
 ## Trusted addresses
 
@@ -92,7 +114,7 @@ short: a trusted address is a way around the WAF.
 
 ## Sharing with CrowdSec's community
 
-Off by default: nothing is sent to CrowdSec. Turned on, CrowdSec sends the attacker's address, the rule
+Off by default: nothing is sent to CrowdSec, and CrowdSec needs no internet at all. Turned on, CrowdSec sends the attacker's address, the rule
 and the time to its community (never your requests), and receives its shared knowledge.
 
 ## Behind Cloudflare
@@ -107,7 +129,9 @@ and the time to its community (never your requests), and receives its shared kno
 ## Limits
 
 - Ports published by a service (Advanced → Ports) do not go through the WAF: only domains do.
-- The rules are CrowdSec's; a brand-new attack may pass until they are updated.
+- The rules are CrowdSec's, as of the panel's release: a brand-new attack may pass until a panel update
+  brings newer ones.
+- Only the first 1 MB of a body is checked.
 - When Traefik is started again by something else than the panel (an update of the server, the
   installer) and cannot load the plugin, the sites with the WAF answer 404 until the panel's next
   check (a minute at most); the panel then serves them unchecked and starts Traefik again to load it.

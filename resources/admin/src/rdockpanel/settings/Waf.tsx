@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { fieldErrors, type PageProps } from "@rustcms/admin-sdk";
 import { useAdminQuery } from "../lib/query";
 import { Alert, Button, ErrorState, Loading, NativeSelect, Switch, Textarea } from "@rustcms/admin-sdk/ui";
-import { EmptyState, ErrorNote, Facts, Field, Pager, Section, StatusBadge, TableScroll, usePaged, when } from "../lib/ui";
+import { EmptyState, ErrorNote, Facts, Field, Pager, Section, StatusBadge, TableScroll, useAsk, usePaged, when } from "../lib/ui";
 
 type Mode = "off" | "detect" | "block";
 type Level = "basic" | "strict";
@@ -36,6 +36,8 @@ export function Waf(props: PageProps<unknown>) {
   const [sharing, setSharing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [repairing, setRepairing] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const ask = useAsk();
   const [error, setError] = useState<unknown>(null);
   // Changed here and not saved yet: what the server says meanwhile (another
   // administrator's save) does not overwrite it.
@@ -63,6 +65,35 @@ export function Waf(props: PageProps<unknown>) {
       <Section
         title={t("Web application firewall")}
         description={t("Checks every request to the services' domains and stops known attacks before they reach the app (CrowdSec). If it fails, requests go through unchecked: a site is never taken down by it.")}
+        actions={
+          loaded && loaded.mode !== "off" ? (
+            <Button
+              variant="outline"
+              disabled={rotating}
+              onClick={async () => {
+                const ok = await ask({
+                  title: t("Give Traefik a new key for CrowdSec?"),
+                  body: t("Traefik restarts with it: domains stop answering for a few seconds. The previous key is removed once the new one works."),
+                  action: t("New key"),
+                });
+                if (!ok) return;
+                setRotating(true);
+                setError(null);
+                try {
+                  await props.api.post("/apps/waf/rotate-key", {});
+                  props.toast.success(t("New key started: the state shows when it works"));
+                  data.refetch();
+                } catch (err) {
+                  setError(err);
+                } finally {
+                  setRotating(false);
+                }
+              }}
+            >
+              {rotating ? t("Starting…") : t("New key")}
+            </Button>
+          ) : undefined
+        }
       >
         <Facts
           items={[

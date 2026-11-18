@@ -21,6 +21,8 @@
 #   --version X.Y.Z      that release of the panel (its image ghcr.io/irisvn/rdockpanel:X.Y.Z)
 #   --upgrade-system     MySQL and Traefik pulled again at their tags (else they are
 #                        left running as they are while their configuration is unchanged)
+#   --remove-waf         removes the WAF (CrowdSec, its volumes, the plugin in Traefik),
+#                        then stops: turn it off in Settings → Security first
 #
 # Run it again any time (to upgrade, or to change the options): what exists
 # is kept, its secrets first (APP_KEY, the database's passwords).
@@ -103,6 +105,7 @@ if [ -f "$CONF" ]; then
 fi
 ADMIN_EMAIL=""
 UPGRADE_SYSTEM=""
+REMOVE_WAF=""
 # Set by --database.
 WANTED_DATABASE=""
 # Set by --image or --version: then that image, whatever runs.
@@ -120,7 +123,8 @@ while [ $# -gt 0 ]; do
       printf '%s' "${2:-}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || die "--version: not a version like 1.2.3"
       IMAGE="ghcr.io/irisvn/rdockpanel:$2"; CHOSEN=1; shift 2 ;;
     --upgrade-system) UPGRADE_SYSTEM=1; shift ;;
-    -h|--help) sed -n '2,26p' "$0" 2>/dev/null || true; exit 0 ;;
+    --remove-waf) REMOVE_WAF=1; shift ;;
+    -h|--help) sed -n '2,28p' "$0" 2>/dev/null || true; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
 done
@@ -186,6 +190,80 @@ if [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = inactive ]; then
   docker swarm init --advertise-addr "$SWARM_ADDRESS" >/dev/null
 fi
 docker node ls >/dev/null 2>&1 || die "this server is in a Swarm but not one of its managers"
+
+# Traefik's service is changed by the panel too (the WAF's plugin, networks,
+# certificate resolvers): while the installer reads its arguments and writes
+# them back, it holds this label, and the panel waits (two minutes at most,
+# then the label has expired).
+lease_traefik() {
+  docker service update --quiet --detach \
+    --label-add "rdockpanel.lease=installer:$(( $(date +%s) + 120 ))" rdp-traefik >/dev/null
+}
+# One argument for `docker service update --args` (it splits its value like a
+# shell): single-quoted, so spaces and quotes inside stay one argument.
+quote_arg() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+unlease_traefik() {
+  docker service update --quiet --detach --label-rm rdockpanel.lease rdp-traefik >/dev/null 2>&1 || true
+}
+
+# --- --remove-waf: the WAF's objects removed, nothing else changed -----------
+if [ -n "$REMOVE_WAF" ]; then
+  # Running means the panel's WAF is on: the panel would start it again.
+  if docker service inspect rdp-crowdsec >/dev/null 2>&1 \
+    && [ "$(docker service inspect --format '{{.Spec.Mode.Replicated.Replicas}}' rdp-crowdsec)" != 0 ]; then
+    die "the WAF is on: turn it off in Settings → Security first, then run this again"
+  fi
+  if docker service inspect rdp-traefik >/dev/null 2>&1; then
+    lease_traefik
+    trap unlease_traefik EXIT
+    keep=""
+    # One argument a line (an argument may hold spaces).
+    while IFS= read -r arg; do
+      case "$arg" in ''|--experimental.localPlugins.rdpwaf.*) ;; *) keep="$keep $(quote_arg "$arg")" ;; esac
+    done <<EOF_ARGS
+$(docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Args}}{{println .}}{{end}}' rdp-traefik)
+EOF_ARGS
+    set -- --label-rm rdockpanel.lease --args "$keep"
+    if docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{println .Target}}{{end}}' rdp-traefik | grep -qxF /plugins-local; then
+      set -- "$@" --mount-rm /plugins-local
+    fi
+    for secret in $(docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Secrets}}{{println .SecretName}}{{end}}' rdp-traefik | grep '^rdp_crowdsec_bouncer' || true); do
+      set -- "$@" --secret-rm "$secret"
+    done
+    if docker network inspect rdp-crowdsec >/dev/null 2>&1; then
+      set -- "$@" --network-rm rdp-crowdsec
+    fi
+    say "Removing the WAF's plugin from Traefik"
+    # shellcheck disable=SC2086
+    docker service update --quiet "$@" rdp-traefik >/dev/null
+    trap - EXIT
+  fi
+  say "Removing CrowdSec"
+  docker service rm rdp-crowdsec >/dev/null 2>&1 || true
+  # Its containers gone before its volumes and network can go.
+  i=0
+  while docker ps -aq --filter label=com.docker.swarm.service.name=rdp-crowdsec | grep -q . && [ $i -lt 30 ]; do
+    sleep 2; i=$((i + 1))
+  done
+  docker network rm rdp-crowdsec >/dev/null 2>&1 || true
+  # Traefik's stopped tasks of before still hold the plugin's volume.
+  for container in $(docker ps -aq --filter volume=rdp_traefik_plugins --filter status=exited); do
+    docker rm "$container" >/dev/null 2>&1 || true
+  done
+  for volume in rdp_crowdsec_data rdp_crowdsec_config rdp_traefik_plugins; do
+    docker volume rm "$volume" >/dev/null 2>&1 || true
+  done
+  for secret in $(docker secret ls --format '{{.Name}}' | grep '^rdp_crowdsec_bouncer' || true); do
+    docker secret rm "$secret" >/dev/null 2>&1 || true
+  done
+  for config in $(docker config ls --format '{{.Name}}' | grep '^rdp_waf_' || true); do
+    docker config rm "$config" >/dev/null 2>&1 || true
+  done
+  say "The WAF is removed"
+  exit 0
+fi
 # A Traefik of another making (scripts/dev-swarm.sh, for development) would
 # keep its own routes directory and ports: the installer does not take it over.
 if docker service inspect rdp-traefik >/dev/null 2>&1 \
@@ -429,12 +507,18 @@ installer_arg() {
 }
 if exists rdp-traefik; then
   constrained rdp-traefik
+  lease_traefik
+  trap unlease_traefik EXIT
   now=$(docker service inspect --format '{{range .Spec.TaskTemplate.ContainerSpec.Args}}{{println .}}{{end}}' rdp-traefik)
   mine_now=""; theirs=""
-  for arg in $now; do
+  # One argument a line (one the panel added may hold spaces).
+  while IFS= read -r arg; do
+    [ -n "$arg" ] || continue
     if installer_arg "$arg"; then mine_now="$mine_now$arg
-"; else theirs="$theirs $arg"; fi
-  done
+"; else theirs="$theirs $(quote_arg "$arg")"; fi
+  done <<EOF_ARGS
+$now
+EOF_ARGS
   mine_want=$(printf '%s\n' $TRAEFIK_ARGS | sort)
   mine_now=$(printf '%s' "$mine_now" | sort)
   set --
@@ -445,8 +529,11 @@ if exists rdp-traefik; then
   if [ $# -gt 0 ] || [ "$mine_now" != "$mine_want" ]; then
     say "Updating Traefik"
     # shellcheck disable=SC2086
-    docker service update --quiet "$@" --args "$TRAEFIK_ARGS$theirs" rdp-traefik >/dev/null
+    docker service update --quiet "$@" --label-rm rdockpanel.lease --args "$TRAEFIK_ARGS$theirs" rdp-traefik >/dev/null
+  else
+    unlease_traefik
   fi
+  trap - EXIT
 else
   say "Starting Traefik"
   # shellcheck disable=SC2086
