@@ -6,10 +6,7 @@
 use rustcms::audit::{self, AuditActor, AuditContext, AuditEntry, RequestMeta};
 use rustcms::prelude::*;
 use rustcms::{AppError, AppResult, Json, ValidationErrors};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
-    Set,
-};
+use sea_orm::{ActiveModelTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, Set};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -277,86 +274,52 @@ pub struct BlockInput {
     pub cidr: String,
     #[serde(default)]
     pub note: Option<String>,
+    /// 1, 7 or 30; none: until removed.
+    #[serde(default)]
+    pub days: Option<u32>,
 }
 
-/// `POST /firewall/blocked`.
+/// `POST /firewall/blocked`: the firewall's layer of `POST /blocks`
+/// (`ip_block_service`: its rules, applied at once).
 pub async fn create_blocked(
     State(app): State<AppState>,
     auth: Auth,
     request: RequestMeta,
     Json(input): Json<BlockInput>,
 ) -> AppResult<Json<Value>> {
-    let cidr = Cidr::parse(&input.cidr).map_err(|e| ValidationErrors::field("cidr", e))?;
-    if cidr.prefix == 0 {
-        return Err(ValidationErrors::field("cidr", "would block everyone").into());
-    }
-    if input.note.as_ref().is_some_and(|n| n.chars().count() > 200) {
-        return Err(ValidationErrors::field("note", "is at most 200 characters").into());
-    }
-    let text = cidr.to_string();
-    let txn = rustcms::db::begin_write(app.db()).await?;
-    if firewall_blocked::Entity::find()
-        .filter(firewall_blocked::Column::Cidr.eq(&text))
-        .one(&txn)
-        .await?
-        .is_some()
-    {
-        return Err(ValidationErrors::field("cidr", "is blocked already").into());
-    }
-    if firewall_blocked::Entity::find().count(&txn).await? as usize >= rules::BLOCKED_MAX {
-        return Err(ValidationErrors::field(
-            "cidr",
-            format!("at most {} addresses", rules::BLOCKED_MAX),
-        )
-        .into());
-    }
-    let row = firewall_blocked::ActiveModel {
-        cidr: Set(text),
-        note: Set(input.note.filter(|n| !n.trim().is_empty())),
-        created_at: Set(chrono::Utc::now()),
-        ..Default::default()
-    }
-    .insert(&txn)
-    .await?;
-    let value = serde_json::to_value(&row).unwrap_or(Value::Null);
-    audited(
-        &txn,
-        &auth,
-        request,
-        "firewall.blocked.create",
-        row.id.to_string(),
-        value.clone(),
-    )
-    .await?;
-    txn.commit().await?;
-    Ok(Json(value))
+    let by = Initiator::user(auth.principal(), request);
+    let asked = crate::services::ip_block_service::Request {
+        ip: input.cidr,
+        waf: false,
+        firewall: true,
+        days: input.days,
+        reason: input.note.unwrap_or_default(),
+    };
+    Ok(Json(
+        crate::services::ip_block_service::block(&app, &by, &asked, installed()).await?,
+    ))
 }
 
-/// `DELETE /firewall/blocked/{id}`.
+/// `DELETE /firewall/blocked/{id}`: unblocked on the firewall, at once.
 pub async fn delete_blocked(
     State(app): State<AppState>,
     auth: Auth,
     request: RequestMeta,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let txn = rustcms::db::begin_write(app.db()).await?;
-    let gone = firewall_blocked::Entity::delete_by_id(id)
-        .exec(&txn)
-        .await?;
-    if gone.rows_affected == 0 {
-        return Err(AppError::NotFound);
-    }
-    audited(
-        &txn,
-        &auth,
-        request,
-        "firewall.blocked.delete",
-        id.to_string(),
-        json!({}),
-    )
-    .await?;
-    txn.commit().await?;
-    Ok(Json(json!({ "deleted": id })))
+    let row = firewall_blocked::Entity::find_by_id(id)
+        .one(app.db())
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let by = Initiator::user(auth.principal(), request);
+    let removal = crate::services::ip_block_service::Removal {
+        ip: row.cidr,
+        waf: false,
+        firewall: true,
+    };
+    Ok(Json(
+        crate::services::ip_block_service::unblock(&app, &by, &removal, installed()).await?,
+    ))
 }
 
 /// `POST /firewall/apply`: loads the saved policy, to be kept in time.

@@ -4,9 +4,10 @@
 // within its time or reverted by the server itself (docs/firewall.md).
 import { useEffect, useState } from "react";
 import { type PageProps } from "@rustcms/admin-sdk";
+import { BlockedAddresses } from "../lib/blocks";
 import { useAdminQuery } from "../lib/query";
 import { Alert, Button, CodeBlock, Dialog, ErrorState, Input, Loading, NativeSelect, Switch } from "@rustcms/admin-sdk/ui";
-import { EmptyState, ErrorNote, Facts, Field, Page, Pager, RowActions, Section, StatusBadge, TableScroll, type MenuItem, useConfirm, usePaged } from "../lib/ui";
+import { ErrorNote, Facts, Field, Page, RowActions, Section, StatusBadge, TableScroll, type MenuItem, useConfirm } from "../lib/ui";
 import { fieldErrors } from "@rustcms/admin-sdk";
 
 type Port = {
@@ -57,11 +58,8 @@ export function Firewall(props: PageProps<unknown>) {
   const report = useAdminQuery<Report>(props, "/apps/firewall");
   const [error, setError] = useState<unknown>(null);
   const [opening, setOpening] = useState<OpeningRow | "new" | { port: number; protocol: string; published: boolean } | null>(null);
-  const [blocking, setBlocking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [confirm, confirmDialog] = useConfirm(t);
-  // Up to a thousand: 25 a page.
-  const paged = usePaged(report.data?.available ? report.data.blocked : []);
   const header = {
     title: props.title,
     eyebrow: t("Workspace"),
@@ -270,55 +268,12 @@ export function Firewall(props: PageProps<unknown>) {
         </TableScroll>
       </Section>
 
-      <Section
-        title={t("Blocked addresses")}
-        description={t("These addresses reach nothing on this server (every site, the panel included) but SSH, so nobody locks themselves out. Visitors through the Cloudflare tunnel are not affected: the server does not see their address.")}
-        actions={
-          <Button size="sm" variant="outline" onClick={() => setBlocking(true)}>
-            {t("Block an address")}
-          </Button>
-        }
-        flush={r.blocked.length > 0}
-      >
-        {r.blocked.length === 0 ? (
-          <EmptyState title={t("No blocked address")} />
-        ) : (
-          <TableScroll>
-            <table className="rdp2-table">
-              <thead>
-                <tr>
-                  <th>{t("Address or network")}</th>
-                  <th>{t("Note")}</th>
-                  <th className="rdp2-right">
-                    <span className="rdp2-sr">{t("Actions")}</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {paged.page.map((b) => (
-                  <tr key={b.id}>
-                    <td className="rdp2-mono">{b.cidr}</td>
-                    <td className="rdp2-muted">{b.note ?? ""}</td>
-                    <td>
-                      <RowActions label={t("Actions for {cidr}").replace("{cidr}", b.cidr)}>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          aria-label={t("Unblock {cidr}").replace("{cidr}", b.cidr)}
-                          onClick={() => void call(() => props.api.delete(`/apps/firewall/blocked/${b.id}`), "Address unblocked: apply the rules.")}
-                        >
-                          {t("Unblock")}
-                        </Button>
-                      </RowActions>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableScroll>
-        )}
-        {r.blocked.length > 25 && <Pager total={r.blocked.length} at={paged.at} onPage={paged.set} t={t} />}
-      </Section>
+      <BlockedAddresses
+        {...props}
+        layer="firewall"
+        heading={t("Blocked addresses")}
+        blurb={t("On the whole server (Firewall): nothing but SSH, every site and the panel included, applied at once. Visitors through Cloudflare's proxy or the tunnel reach the server from Cloudflare: block them on the websites (WAF). The same list as the WAF page's.")}
+      />
 
       {opening && (
         <OpeningDialog
@@ -328,17 +283,6 @@ export function Firewall(props: PageProps<unknown>) {
           onClose={() => setOpening(null)}
           onSaved={() => {
             setOpening(null);
-            refresh();
-          }}
-        />
-      )}
-      {blocking && (
-        <BlockDialog
-          t={t}
-          api={props.api}
-          onClose={() => setBlocking(false)}
-          onSaved={() => {
-            setBlocking(false);
             refresh();
           }}
         />
@@ -529,51 +473,6 @@ function OpeningDialog(props: {
           </Button>
           <Button type="submit" disabled={busy}>
             {busy ? t("Saving…") : row ? t("Save") : t("Open the port")}
-          </Button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
-
-function BlockDialog(props: { t: (s: string) => string; api: PageProps<unknown>["api"]; onClose: () => void; onSaved: () => void }) {
-  const { t } = props;
-  const [cidr, setCidr] = useState("");
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const fields = fieldErrors(error);
-  return (
-    <Dialog open onClose={props.onClose} title={t("Block an address")}>
-      <form
-        className="rdp2-form"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          setError(null);
-          try {
-            await props.api.post("/apps/firewall/blocked", { cidr, note: note || null });
-            props.onSaved();
-          } catch (err) {
-            setError(err);
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <Field label={t("Address or network")} help={t("198.51.100.7, 203.0.113.0/24 or 2001:db8::/32")} error={fields.cidr}>
-          <Input autoFocus value={cidr} onChange={(e) => setCidr(e.target.value)} className="rdp2-mono" />
-        </Field>
-        <Field label={t("Note")} error={fields.note}>
-          <Input value={note} onChange={(e) => setNote(e.target.value)} />
-        </Field>
-        <ErrorNote error={Object.keys(fields).length ? null : error} />
-        <div className="rdp2-dialog-foot">
-          <Button type="button" variant="ghost" onClick={props.onClose}>
-            {t("Cancel")}
-          </Button>
-          <Button type="submit" disabled={busy}>
-            {busy ? t("Blocking…") : t("Block")}
           </Button>
         </div>
       </form>

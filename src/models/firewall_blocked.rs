@@ -1,5 +1,5 @@
 //! `firewall_blocked` table: an address or network denied every port but
-//! SSH (canonical CIDR).
+//! SSH (canonical CIDR), until `expires_at` when it has one.
 
 use sea_orm::entity::prelude::*;
 
@@ -11,6 +11,7 @@ pub struct Model {
     pub cidr: String,
     pub note: Option<String>,
     pub created_at: DateTimeUtc,
+    pub expires_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

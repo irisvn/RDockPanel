@@ -257,8 +257,9 @@ memory: per router (so per domain), reset when Traefik restarts or reloads.
 
 ### WAF
 
-Settings → Security stores `waf.settings` (mode `off`/`detect`/`block`, level `basic`/`strict`, trusted
-addresses, sharing) and a service may override it (`services.waf`: null follows the panel, `on`,
+The WAF page (`/admin/p/waf`, `waf_page.rs` and `resources/admin/src/rdockpanel/waf/`) stores
+`waf.settings` (mode `off`/`detect`/`block`, level `basic`/`strict`, trusted addresses, sharing, the
+blocklist switch, exceptions, rules `bundled`/`latest`) and a service may override it (`services.waf`: null follows the panel, `on`,
 `off`). `waf_service` holds the rules, `waf_docker_service` the Docker side:
 
 - **CrowdSec** (`rdp-crowdsec`, a pinned `crowdsecurity/crowdsec` image on the panel's node, volumes
@@ -269,22 +270,38 @@ addresses, sharing) and a service may override it (`services.waf`: null follows 
 - **Rules, offline**: the image's `waf-hub` build stage (from the same CrowdSec image) fetches the hub
   index with its content and installs the AppSec collections; the panel's image carries the hub
   (`/app/waf/hub`) and its data files (`/app/waf/hub-data`), copied into CrowdSec's volumes at each
-  reconcile. CrowdSec starts with `NO_HUB_UPGRADE=true` and its hub index touched (its start script
-  never fetches another), and `RDP_WAF_BUNDLE=<panel version>` restarts it on a panel update.
+  reconcile while the rules are `bundled`. CrowdSec starts with `NO_HUB_UPGRADE=true` and its hub
+  index touched (its start script never fetches another), and `RDP_WAF_BUNDLE=<panel version>` restarts
+  it on a panel update; `RDP_WAF_RULES` says which rules it runs.
+- **Rules update** (`waf_rules_service`): Check runs `cscli hub update` and `collections inspect` in
+  the container (stored as `waf.rules_check`; also the daily `waf-rules-check` schedule, which tells
+  `Event::WafRules` when more collections are newer). Update (an Action `waf.rules_update`) runs
+  `hub update`/`hub upgrade`, sets `latest`, restarts CrowdSec and waits for the canary; failing, it
+  sets `bundled` back and reconciles (the bundle copied again).
+- **Exceptions**: each `{rule, host}` becomes a `pre_eval` hook appended to the four AppSec configs
+  (`filter: req.Host == "<host>"`, `RemoveInBandRuleByID`/`ByName` and the out-of-band twins);
+  a change re-creates the configs and restarts CrowdSec.
 - **Traefik** gets the plugin as a local plugin: the panel copies `resources/waf/plugin` (in the
   image at `/app/waf/plugin`) into the volume `rdp_traefik_plugins` with a helper container, mounts it
   read-only at `/plugins-local`, adds `--experimental.localPlugins.rdpwaf.moduleName`, the bouncer's
   secret and the CrowdSec network. That restarts Traefik once (the first start, or after a plugin it
   could not load).
-- **Definitions** (`rdp-waf.yml` in Traefik's dynamic folder): `rdp-waf-buffer` (buffering),
+- **Definitions** (`rdp-waf.yml` in Traefik's dynamic folder): `rdp-waf-blocklist` (the plugin in
+  stream mode, AppSec off, CrowdSec's LAPI every 10 s, `updateMaxFailure: -1` so a silent CrowdSec
+  never blocks everyone, the bans already copied kept until they expire; a no-op headers middleware unless on, healthy and in Block mode), `rdp-waf-buffer` (buffering),
   `rdp-waf` (the plugin, or a no-op headers middleware while it is not proven) and the canary router
   `rdp-waf-canary` → the panel's public `/api/v1/waf-canary`.
 - **Routes**: a deployment snapshot carries `waf: bool` (the effective setting); the route builder puts
-  `rdp-waf-buffer@file, rdp-waf@file` first on every router reaching the app, before rate limits,
+  `rdp-waf-blocklist@file, rdp-waf-buffer@file, rdp-waf@file` first on every router reaching the app, before rate limits,
   redirects and basic authentication, but not on the HTTPS redirects or the maintenance page. A
   change of setting re-syncs the routes (no deploy).
 - **State** (`waf.status`): `reconcile` (on save, Repair and boot, in the background, one at a time)
-  writes the no-op first, starts what is needed, then follows the canary; the `waf-check` schedule
+  writes the no-op first, starts what is needed, then follows the canary. A start is an Action
+  (`waf.reconcile`, its log the steps) and the status carries `step` (1–4: copy, CrowdSec, Traefik,
+  check), `started_at` and the action's id: the controller stores `starting` with the action in the
+  request's transaction, so the page shows progress at once. Three minutes at most
+  (`DEADLINE`), then the canary decides; an action left `running` by a stopped panel is marked
+  interrupted at boot; the `waf-check` schedule
   probes it every minute (skipped while a reconcile runs). The definitions follow each probe, never
   the stored status: 404 → the plugin is not loaded (sites back to the no-op, and a reconcile starts
   Traefik again, at most every ten minutes); the panel's answer (`rdp-waf-canary`) and `/.env` 403 →
@@ -307,8 +324,30 @@ addresses, sharing) and a service may override it (`services.waf`: null follows 
   while the label `rdockpanel.lease=installer:<expiry>` is set and not expired (two minutes at most);
   the installer sets it before reading Traefik's arguments and removes it in the update that writes
   them back.
-- **Alerts** are `cscli alerts list -o json` in the container, summarized (time, address, host, path,
-  rule, blocked or recorded).
+- **Statistics and alerts** (`waf_stats_service`, in the `waf-check` minute): the AppSec counters of
+  `cscli metrics show appsec` (both listeners) minus the canaries' requests (counted in the panel) are
+  added to the hour's `waf_stats` row (`checked`, `blocked`, `samples`), from a baseline in
+  `waf.metrics` that survives a CrowdSec restart (a smaller counter or another container starts
+  again from zero). `cscli alerts list --since` (checkpoint `waf.alerts_since`) is mirrored into
+  `waf_alerts` by uuid (the canaries' and manual bans' left out; a Block alert's Core Rule Set ids
+  gathered from its events' `native_rule:N`). Pruned: alerts 30 days, stats 90 days.
+- **Cloudflare's ranges** (`cloudflare_ranges_service`): the ranges in use live in memory (`ranges()`,
+  loaded at boot from `cloudflare.ranges`, else the built-in list) and feed Traefik's trusted IPs, the
+  rate limit, the WAF plugin and the deploy routes. The daily `cloudflare-ranges` schedule validates
+  Cloudflare's list (see security.md); dropped ranges are applied at once, added ones are offered
+  (`cloudflare.check`, `Event::CloudflareRanges`) until Apply. Applying writes
+  `.cloudflare-ips` in Traefik's dynamic folder (the installer reads it), restarts Traefik with the
+  new trusted IPs and re-syncs routes and WAF definitions.
+- **The blocklist**: CrowdSec's `profiles.yaml` keeps its scenarios to alerts (no decision); while
+  the blocklist is on, the minute also deletes decisions of origin `crowdsec`. Bans are
+  `cscli decisions add --type ban --scope ip` (1, 7 or 30 days), listed with `decisions list`.
+- **Blocked addresses, both layers** (`ip_block_service`, `GET/POST /apps/blocks`): one list joins
+  the WAF's bans (CrowdSec) and the firewall's rows (`firewall_blocked`, with `expires_at`) by
+  address; the WAF page's IP lists and the Firewall page show it (`lib/blocks.tsx`). A firewall block
+  is applied by `firewall_service::apply_blocks`: the last kept summary's openings plus the saved
+  blocked list, applied then kept at once under the firewall's lock; Keep, Revert and the minute's
+  `check` run the same sync, so a block saved while a change waited reaches the server once it is
+  settled; `ip-blocks-expire` (every five minutes) deletes ended rows and applies again.
 
 ### Capacity check
 

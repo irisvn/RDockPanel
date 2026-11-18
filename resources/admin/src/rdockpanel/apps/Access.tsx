@@ -325,7 +325,7 @@ export function SecurityTab(props: Props) {
   );
 }
 
-/** The WAF for this service: the panel's (Settings → Security), on, or
+/** The WAF for this service: the panel's (the WAF page), on, or
  * off. Turning it off needs `system.manage` (the server checks it too). */
 function WafSection(props: Props) {
   const { t, d } = props;
@@ -356,7 +356,7 @@ function WafSection(props: Props) {
           }
         }}
       >
-        {s.waf_mode === "off" && <Alert>{t("The panel's WAF is off (Settings → Security): no service is checked.")}</Alert>}
+        {s.waf_mode === "off" && <Alert>{t("The panel's WAF is off (the WAF page): no service is checked.")}</Alert>}
         <Field
           label={t("WAF")}
           help={t("Turning it off removes this service's protection: only the panel's administrators may.")}

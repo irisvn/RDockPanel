@@ -31,4 +31,6 @@ pub mod service_redirect;
 pub mod service_script;
 pub mod storage_provider;
 pub mod tunnel;
+pub mod waf_alert;
+pub mod waf_stat;
 // rustcms:models

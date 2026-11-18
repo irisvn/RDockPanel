@@ -32,4 +32,5 @@ mod system;
 mod templates;
 mod terminal;
 mod tunnel;
+mod waf;
 // rustcms:tests

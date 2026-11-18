@@ -52,7 +52,12 @@ Normally, a port a service publishes skips the host's firewall rules: Docker ope
 
 ## Block an address
 
-**Block an address** stops an address or a network (`198.51.100.7`, `2001:db8::/32`) from reaching anything but SSH. That includes every site on 80 and 443, the panel's too, since the server cannot tell one domain from another. Visitors through the Cloudflare Tunnel are not affected: the server does not see their address.
+**Block an address** stops an address or a network (`198.51.100.7`, `2001:db8::/32`) from reaching anything but SSH. That includes every site on 80 and 443, the panel's too, since the server cannot tell one domain from another. Visitors through Cloudflare's proxy or the Tunnel are not affected: the server sees Cloudflare, not them. Block those on the websites (the WAF) instead.
+
+- The same dialog and the same list as the WAF page's: tick **On the whole server (Firewall)**, **On the websites (WAF)** or both. See [Blocking an address](/server/waf#blocking-an-address-websites-or-server).
+- A block is applied **at once**, without the "try, then keep" step below: it cannot lock you out (SSH stays open to it, and the address you are using is refused). Openings saved but not applied stay drafts.
+- For a day, a week, thirty days, or until removed; ended blocks are removed within five minutes and the firewall applied again.
+- Cloudflare's ranges are refused: blocking them would cut every visitor coming through Cloudflare.
 
 ## Apply safely: try, then keep
 

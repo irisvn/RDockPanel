@@ -26,6 +26,35 @@ pub async fn get<C: ConnectionTrait>(db: &C, key: &str) -> Result<Option<String>
         .map(|row| row.value))
 }
 
+/// The value of `key`, its row locked until the write transaction `txn`
+/// ends: what is read here and written back cannot overwrite another
+/// writer's change. A key never set is created first with `default` (a
+/// missing row could not be locked).
+pub async fn lock<C: ConnectionTrait>(txn: &C, key: &str, default: &str) -> Result<String, DbErr> {
+    use sea_orm::sea_query::OnConflict;
+    use sea_orm::{QuerySelect, Set};
+    Entity::insert(ActiveModel {
+        key: Set(key.to_owned()),
+        value: Set(default.to_owned()),
+        updated_at: Set(chrono::Utc::now()),
+    })
+    // Already there: left as it is (the key set to itself, as MySQL has no
+    // `DO NOTHING`).
+    .on_conflict(
+        OnConflict::column(Column::Key)
+            .update_column(Column::Key)
+            .to_owned(),
+    )
+    .exec_without_returning(txn)
+    .await?;
+    Ok(Entity::find_by_id(key.to_owned())
+        .lock_exclusive()
+        .one(txn)
+        .await?
+        .map(|row| row.value)
+        .unwrap_or_else(|| default.to_owned()))
+}
+
 /// Sets `key` to `value` (one statement: two first saves never collide).
 pub async fn set<C: ConnectionTrait>(db: &C, key: &str, value: &str) -> Result<(), DbErr> {
     use sea_orm::Set;

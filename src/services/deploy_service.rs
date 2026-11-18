@@ -1527,9 +1527,7 @@ fn rate_limited(
         edge.rule = format!(
             "({}) && ({})",
             serving.rule,
-            any(&mut crate::services::rate_limit_service::CLOUDFLARE
-                .iter()
-                .map(|c| c.to_string()))
+            any(&mut crate::services::cloudflare_ranges_service::ranges().into_iter())
         );
         edge.middlewares.insert(0, proxied.clone());
         edge.priority = Some(priority + 2);
@@ -1576,9 +1574,7 @@ fn bypassed(http: &mut TraefikHttp, base: &str, normal: TraefikHttp, bypass: &[S
             .join(" || ")
     };
     let direct = any(&mut bypass.iter().cloned());
-    let edges = any(&mut crate::services::rate_limit_service::CLOUDFLARE
-        .iter()
-        .map(|c| c.to_string()));
+    let edges = any(&mut crate::services::cloudflare_ranges_service::ranges().into_iter());
     // Each page's router, and the one routing the same requests otherwise
     // (its entry points and rule: an HTTP domain's names differ).
     let pages: Vec<(String, Router)> = http
@@ -2041,7 +2037,7 @@ mod tests {
     #[test]
     fn the_waf_comes_first_on_every_router_reaching_the_app_and_nowhere_else() {
         use crate::services::rate_limit_service::RateLimit;
-        use crate::services::waf_service::{BUFFER, MIDDLEWARE};
+        use crate::services::waf_service::{BLOCKLIST, BUFFER, MIDDLEWARE};
         let mut guarded = snapshot();
         guarded.domains[1].https = false;
         guarded.redirects = vec![Redirect {
@@ -2080,8 +2076,12 @@ mod tests {
                 assert_eq!(router.middlewares, before.middlewares, "{name}");
             } else {
                 // Buffer, WAF, then exactly what it had (rate limit, redirects, auth…).
-                assert_eq!(router.middlewares[..2], [BUFFER, MIDDLEWARE], "{name}");
-                assert_eq!(router.middlewares[2..], before.middlewares[..], "{name}");
+                assert_eq!(
+                    router.middlewares[..3],
+                    [BLOCKLIST, BUFFER, MIDDLEWARE],
+                    "{name}"
+                );
+                assert_eq!(router.middlewares[3..], before.middlewares[..], "{name}");
             }
             assert_ne!(router.service, page);
         }
@@ -2115,7 +2115,11 @@ mod tests {
                     assert_eq!(router.middlewares.len(), 2, "{name}");
                     continue;
                 }
-                assert_eq!(router.middlewares[1..3], [BUFFER, MIDDLEWARE], "{name}");
+                assert_eq!(
+                    router.middlewares[1..4],
+                    [BLOCKLIST, BUFFER, MIDDLEWARE],
+                    "{name}"
+                );
                 assert_eq!(
                     router
                         .middlewares

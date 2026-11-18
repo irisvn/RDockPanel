@@ -46,6 +46,8 @@ mod m20261117_000000_add_healthcheck_settings;
 mod m20261117_000100_create_import_events;
 mod m20261117_000200_add_service_placement;
 mod m20261118_000000_add_service_waf;
+mod m20261118_000100_create_waf_stats_and_alerts;
+mod m20261118_000200_add_firewall_blocked_expiry;
 // rustcms:migration-mods
 
 pub struct Migrator;
@@ -98,6 +100,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261117_000100_create_import_events::Migration),
             Box::new(m20261117_000200_add_service_placement::Migration),
             Box::new(m20261118_000000_add_service_waf::Migration),
+            Box::new(m20261118_000100_create_waf_stats_and_alerts::Migration),
+            Box::new(m20261118_000200_add_firewall_blocked_expiry::Migration),
             // rustcms:migrations
         ];
         migrations.extend(app);

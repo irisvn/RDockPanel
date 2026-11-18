@@ -218,7 +218,7 @@ loads the fallback (SSH and the web only), and Docker does not start unfiltered.
 
 ## The WAF
 
-Settings → Security (`system.manage`) puts CrowdSec's AppSec in front of the services' domains: a
+The WAF page (`system.manage`) puts CrowdSec's AppSec in front of the services' domains: a
 Traefik plugin (crowdsec-bouncer-traefik-plugin, vendored at a fixed commit in `resources/waf/plugin`,
 loaded as a local plugin) asks the `rdp-crowdsec` service about each request. What it guards and how
 it fails:
@@ -242,13 +242,48 @@ it fails:
 - **Secrets**: the bouncer's key is a Docker secret mounted in Traefik and CrowdSec, never in the
   database, the definitions or a job; New key replaces it (audited `waf.rotate_key`), the old bouncer
   and secret removed once the new key is proved. CrowdSec runs with `DISABLE_ONLINE_API=true` unless
-  community sharing is on, and its rules are bundled in the panel's image (no hub fetch, no version
-  check: the hub's branch is fixed), so it needs no network by default.
+  community sharing is on, and its rules are bundled in the panel's image (the hub's branch fixed),
+  so it needs no network by default. Checking and updating the rules (WAF → Rules) ask CrowdSec's hub
+  over HTTPS; nothing is installed without an administrator (audited `waf.rules_update`,
+  `waf.rules_bundled`), and rules
+  CrowdSec cannot start with are replaced by the bundled ones.
+- **Alerts and statistics** are copied into the panel's database (`waf_alerts`, 30 days; `waf_stats`,
+  an hour a row, 90 days): the address, country and network, host, path and rule, never a body nor
+  headers; query values with secret-looking names are masked, paths cut at 512 characters. The
+  canaries' requests are counted apart and never shown.
+- **Exceptions** spare one domain one rule (a `pre_eval` hook in CrowdSec's AppSec configs, the host
+  compared exactly, no wildcard), at most 100; the rule must be a 6-digit Core Rule Set id or a hub
+  rule's name, the host a valid domain. Audited `waf.exception_add`/`waf.exception_remove`.
+- **The blocklist** (off by default, Block mode only) is a second instance of the plugin in stream
+  mode in front of the WAF: it refreshes CrowdSec's decisions every 10 s and answers a banned address
+  403 on every domain; CrowdSec unreachable never blocks anyone new (the plugin keeps serving the
+  bans it already copied until they expire: `updateMaxFailure: -1` keeps the stream from being
+  declared unhealthy, which would answer every request 403). CrowdSec's own scenarios never
+  ban (`profiles.yaml`: alerts only; their decisions removed each minute while it is on), so only an
+  administrator's ban (`cscli decisions add`, audited `waf.block`/`waf.unblock`) or CrowdSec's
+  community list (sharing on) block. A private, loopback or Cloudflare address cannot be banned. The
+  page warns that one address can be many people (CGNAT).
+- **Blocking an address** (`ip_block_service`, one set of rules for the WAF page, the Firewall page
+  and the API) refuses, on both layers, Cloudflare's ranges, `/0` and the caller's own address (the
+  request's client address, after the trusted proxies). The firewall's blocks are applied at once
+  without the try-then-keep step (`firewall_service::apply_blocks`): the table rendered is the last
+  kept change's openings with the blocked list as saved, so opening drafts are never applied
+  unattended, and a blocked address still reaches SSH. Nothing is applied while another change
+  waits to be kept: the blocks are applied right after it is kept or reverted, and the firewall's
+  minute check applies any saved block not on the server yet. IPv4-mapped IPv6 addresses are
+  compared and blocked as IPv4. Blocks with an end are removed by the `ip-blocks-expire` schedule (audited as
+  the system) and the firewall applied again.
+- **Cloudflare's ranges** decide whose `X-Forwarded-For` is believed (Traefik, the rate limit, the
+  WAF). The daily check reads `https://api.cloudflare.com/client/v4/ips` and refuses a list that
+  looks wrong (non-canonical, private, wider than /12 for IPv4 or /29 for IPv6, 10–100 IPv4 and
+  3–100 IPv6 ranges, IPv4 space grown over 25%, over half the ranges changed). Fewer ranges are
+  applied at once (trusting less is safe); added ranges wait for an administrator (audited
+  `cloudflare.ranges`). Trusted addresses may not overlap Cloudflare's ranges nor be `0.0.0.0/0`.
 - **Memory**: a request holds at most about 1 MB in Traefik for the WAF (buffer and AppSec's copy);
   only the first 1 MB of a body is checked.
 - **Names**: `rdp-waf*` middlewares are the panel's; a domain or custom middleware cannot name them.
 - A service's WAF turned off needs `system.manage` (see [permissions.md](permissions.md)). Saving the
-  settings and Repair are audited (`waf.settings`, `waf.repair`).
+  settings, Repair and Restart CrowdSec are audited (`waf.settings`, `waf.repair`, `waf.restart`).
 
 ## Live data limits
 

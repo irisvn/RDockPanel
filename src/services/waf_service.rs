@@ -23,6 +23,9 @@ pub const PREFIX: &str = "rdp-waf";
 /// The WAF a router names, and the buffer before it.
 pub const MIDDLEWARE: &str = "rdp-waf@file";
 pub const BUFFER: &str = "rdp-waf-buffer@file";
+/// The addresses blocked (CrowdSec's community list, and those an
+/// administrator blocks): first, before anything is buffered.
+pub const BLOCKLIST: &str = "rdp-waf-blocklist@file";
 /// The canary's own WAF (no allowlist: it must always be inspected).
 pub const CANARY: &str = "rdp-waf-canary@file";
 /// The definitions' file, beside the routes (not a route file: never pruned).
@@ -78,6 +81,90 @@ pub struct Settings {
     /// Share attack signals with CrowdSec's community (off by default).
     #[serde(default)]
     pub sharing: bool,
+    /// Block the addresses CrowdSec's community reports, and those an
+    /// administrator blocks (off by default; Block mode only).
+    #[serde(default)]
+    pub blocklist: bool,
+    /// Rules a domain is spared (false positives).
+    #[serde(default)]
+    pub exceptions: Vec<Exception>,
+    /// The rules in use: the panel's bundle, or CrowdSec's latest.
+    #[serde(default)]
+    pub rules: RulesSource,
+}
+
+/// The rules CrowdSec runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RulesSource {
+    /// Bundled in the panel's image: the same on every server of a release.
+    #[default]
+    Bundled,
+    /// Updated from CrowdSec's hub by an administrator.
+    Latest,
+}
+
+/// A rule a domain is spared: its id (the Core Rule Set's, `942100`) or its
+/// name (`crowdsecurity/vpatch-env-access`), and the domain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Exception {
+    pub rule: String,
+    pub host: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// At most this many exceptions.
+pub const EXCEPTIONS_MAX: usize = 100;
+
+impl Exception {
+    /// Why it cannot be one: a rule id of six digits or a hub rule's name,
+    /// and a domain's host (no wildcard).
+    /// What is wrong, and with which field (`rule` or `host`).
+    pub fn problem(&self) -> Option<(&'static str, String)> {
+        let id = self.rule.len() == 6 && self.rule.bytes().all(|b| b.is_ascii_digit());
+        let named = self.rule.strip_prefix("crowdsecurity/").is_some_and(|n| {
+            !n.is_empty()
+                && n.len() <= 100
+                && n.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        });
+        if !id && !named {
+            return Some(("rule", format!("{} is not a rule's id or name", self.rule)));
+        }
+        if self.host.starts_with("*.")
+            || !crate::services::deploy_rules_service::valid_domain_host(&self.host)
+        {
+            return Some(("host", format!("{} is not a domain", self.host)));
+        }
+        None
+    }
+}
+
+/// The AppSec hook sparing each domain its rules (both listeners), added
+/// to every appsec config: nothing when there is none.
+pub fn exception_hooks(exceptions: &[Exception]) -> String {
+    let mut hosts: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+    for e in exceptions.iter().filter(|e| e.problem().is_none()) {
+        hosts.entry(&e.host).or_default().push(&e.rule);
+    }
+    if hosts.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("# Rules a domain is spared (the panel's exceptions).\npre_eval:\n");
+    for (host, rules) in hosts {
+        out.push_str(&format!("  - filter: req.Host == \"{host}\"\n    apply:\n"));
+        for rule in rules {
+            if rule.bytes().all(|b| b.is_ascii_digit()) {
+                out.push_str(&format!(
+                    "      - RemoveInBandRuleByID({rule})\n      - RemoveOutBandRuleByID({rule})\n"
+                ));
+            } else {
+                out.push_str(&format!("      - RemoveInBandRuleByName(\"{rule}\")\n      - RemoveOutBandRuleByName(\"{rule}\")\n"));
+            }
+        }
+    }
+    out
 }
 
 impl Settings {
@@ -92,17 +179,50 @@ impl Settings {
         }))
     }
 
+    /// The settings to change, in a write transaction: their row locked
+    /// until it ends, so two changes (a save, an exception, the rules'
+    /// source) never lose one another.
+    pub async fn load_for_change<C: sea_orm::ConnectionTrait>(
+        txn: &C,
+    ) -> Result<Self, sea_orm::DbErr> {
+        let default = serde_json::to_string(&Self::default()).unwrap_or_default();
+        let text = crate::models::panel_setting::lock(txn, SETTINGS_KEY, &default).await?;
+        Ok(serde_json::from_str(&text).unwrap_or_else(|err| {
+            tracing::warn!(%err, "the WAF settings cannot be read: off");
+            Self::default()
+        }))
+    }
+
     pub async fn store<C: sea_orm::ConnectionTrait>(&self, db: &C) -> Result<(), sea_orm::DbErr> {
         let text = serde_json::to_string(self).unwrap_or_default();
         crate::models::panel_setting::set(db, SETTINGS_KEY, &text).await
     }
 
     /// Its allowlist checked: IPs or CIDRs only.
+    /// Why the settings cannot be saved. A trusted address is never
+    /// checked: never every address, and never Cloudflare's (anyone can send
+    /// requests from them, through Workers; the WAF already sees the visitor
+    /// behind Cloudflare).
     pub fn problems(&self) -> Vec<String> {
+        use crate::services::firewall_rules::Cidr;
+        use crate::services::rate_limit_service::{cloudflare, overlaps};
+        let cloudflare = cloudflare();
         self.allowlist
             .iter()
-            .filter(|a| !valid_address(a))
-            .map(|a| format!("{a} is not an IP address or a CIDR range"))
+            .filter_map(|a| {
+                if !valid_address(a) {
+                    return Some(format!("{a} is not an IP address or a CIDR range"));
+                }
+                let cidr = Cidr::parse(a).ok()?;
+                if cidr.prefix == 0 {
+                    return Some(format!("{a}: not every address"));
+                }
+                cloudflare.iter().any(|c| overlaps(c, &cidr)).then(|| {
+                    format!(
+                        "{a} is Cloudflare's: its visitors are checked by their own address, no need to trust it"
+                    )
+                })
+            })
             .collect()
     }
 }
@@ -187,6 +307,29 @@ pub fn definitions(settings: &Settings, healthy: bool, trusted: &[String]) -> Va
     // A real middleware that changes nothing a visitor sees (`headers: {}`
     // alone is invalid: Traefik would drop the whole file).
     let noop = json!({"headers": {"customRequestHeaders": {"X-Rdp-Waf": "noop"}}});
+    // The blocklist: CrowdSec's decisions, pulled every 10 s (a stream);
+    // CrowdSec unreachable, every request goes through (never fail-closed).
+    middlewares.insert(
+        "rdp-waf-blocklist".into(),
+        if healthy && settings.mode == Mode::Block && settings.blocklist {
+            json!({"plugin": {PLUGIN: {
+                "enabled": true,
+                "logLevel": "WARN",
+                "crowdsecMode": "stream",
+                "crowdsecAppsecEnabled": false,
+                "crowdsecLapiScheme": "http",
+                "crowdsecLapiHost": format!("{CROWDSEC}:8080"),
+                "crowdsecLapiKeyFile": KEY_FILE,
+                "updateIntervalSeconds": 10,
+                "updateMaxFailure": -1,
+                "streamStartupBlock": false,
+                "forwardedHeadersTrustedIPs": trusted,
+                "clientTrustedIPs": settings.allowlist,
+            }}})
+        } else {
+            json!({"headers": {"customRequestHeaders": {"X-Rdp-Waf-Blocklist": "noop"}}})
+        },
+    );
     let on = healthy && settings.mode != Mode::Off;
     middlewares.insert(
         "rdp-waf".into(),
@@ -224,8 +367,8 @@ pub fn definitions(settings: &Settings, healthy: bool, trusted: &[String]) -> Va
 }
 
 /// The middlewares a router reaching an app gets first, when its WAF is on.
-pub fn chain() -> [&'static str; 2] {
-    [BUFFER, MIDDLEWARE]
+pub fn chain() -> [&'static str; 3] {
+    [BLOCKLIST, BUFFER, MIDDLEWARE]
 }
 
 #[cfg(test)]
@@ -331,5 +474,18 @@ mod tests {
         assert!(!valid_address("10.0.0.0/33"));
         assert!(!valid_address("example.com"));
         assert!(!valid_address(""));
+    }
+
+    #[test]
+    fn cloudflare_and_everyone_are_never_trusted() {
+        let with = |list: &[&str]| Settings {
+            allowlist: list.iter().map(|a| (*a).to_owned()).collect(),
+            ..Settings::default()
+        };
+        assert!(with(&["203.0.113.7", "10.8.0.0/24"]).problems().is_empty());
+        // Anyone sends requests from Cloudflare's ranges (Workers).
+        assert_eq!(with(&["173.245.48.0/20"]).problems().len(), 1);
+        assert_eq!(with(&["104.16.1.1", "2606:4700::/32"]).problems().len(), 2);
+        assert_eq!(with(&["0.0.0.0/0"]).problems().len(), 1);
     }
 }

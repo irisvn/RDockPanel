@@ -31,6 +31,9 @@ impl Job for PublishRoutes {
             return Ok(());
         };
         let db = ctx.state.db();
+        // Cloudflare's ranges as last applied (by the server, maybe after
+        // this worker started).
+        crate::services::cloudflare_ranges_service::load(db).await;
         // Recorded on the latest deployment (what the service page shows).
         let Some(latest) = deployment::Entity::find()
             .filter(deployment::Column::ServiceId.eq(self.service_id))

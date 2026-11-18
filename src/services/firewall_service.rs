@@ -458,14 +458,119 @@ pub async fn policy<C: sea_orm::ConnectionTrait>(db: &C) -> AppResult<Policy> {
         .into_iter()
         .filter_map(|o| opening_of(&o))
         .collect();
-    let blocked = firewall_blocked::Entity::find()
+    Ok(Policy {
+        openings,
+        blocked: blocked_now(db).await?,
+    })
+}
+
+/// The addresses blocked now (those whose end has passed left out: the
+/// schedule removes them).
+async fn blocked_now<C: sea_orm::ConnectionTrait>(db: &C) -> AppResult<Vec<Cidr>> {
+    let now = Utc::now();
+    Ok(firewall_blocked::Entity::find()
         .order_by_asc(firewall_blocked::Column::Id)
         .all(db)
         .await?
         .into_iter()
+        .filter(|b| b.expires_at.is_none_or(|end| end > now))
         .filter_map(|b| Cidr::parse(&b.cidr).ok())
-        .collect();
-    Ok(Policy { openings, blocked })
+        .collect())
+}
+
+/// How [`apply_blocks`] ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlocksApplied {
+    /// On the server now (or nothing to change).
+    Done,
+    /// The firewall is off or not available here: saved, used once it is on.
+    Off,
+    /// Not now (a change waits to be kept or reverted): the reason.
+    Waiting(String),
+}
+
+/// The blocked addresses put on the server at once, without the Keep step:
+/// the confirmed openings with the blocked addresses as saved now. Blocking
+/// or unblocking an address cannot lock anyone out (SSH stays open to
+/// blocked addresses; the caller refuses the administrator's own), so no
+/// confirmation is waited for; openings saved but not applied stay drafts.
+pub async fn apply_blocks(
+    app: &AppState,
+    docker: &Docker,
+    by: &Initiator,
+    install: Install,
+) -> AppResult<BlocksApplied> {
+    if unavailable(install).is_some() {
+        return Ok(BlocksApplied::Off);
+    }
+    let _guard = LOCK.lock().await;
+    sync_blocks_locked(app, docker, by, install).await
+}
+
+/// [`apply_blocks`], the lock held (the caller's): also run after a Keep, a
+/// Revert and by the minute's check, so that blocks saved while a change
+/// waited reach the server once it is settled.
+async fn sync_blocks_locked(
+    app: &AppState,
+    docker: &Docker,
+    by: &Initiator,
+    install: Install,
+) -> AppResult<BlocksApplied> {
+    let db = app.db();
+    settle(app, docker, install).await?;
+    if open_tx(db).await?.is_some() {
+        return Ok(BlocksApplied::Waiting(
+            "a firewall change is waiting to be kept or reverted".to_owned(),
+        ));
+    }
+    let enabled = panel_setting::get(db, CONFIRMED_HASH)
+        .await?
+        .is_some_and(|h| !h.is_empty());
+    let Some(kept) = last_kept(db).await?.filter(|_| enabled) else {
+        return Ok(BlocksApplied::Off);
+    };
+    let Ok(confirmed) = serde_json::from_str::<Value>(&kept.summary) else {
+        return Ok(BlocksApplied::Waiting(
+            "the confirmed rules could not be read: apply them on the Firewall page".to_owned(),
+        ));
+    };
+    let next = Policy {
+        openings: policy_of_summary(&confirmed).openings,
+        blocked: blocked_now(db).await?,
+    };
+    if summary(&next) == confirmed {
+        return Ok(BlocksApplied::Done);
+    }
+    let tx = apply_locked(app, docker, by, install, next).await?;
+    let txid = tx["txid"].as_str().unwrap_or_default().to_owned();
+    keep_locked(app, docker, by, &txid, install).await?;
+    Ok(BlocksApplied::Done)
+}
+
+/// Whether the firewall is on (a confirmed table, not turned off since).
+pub async fn enabled<C: sea_orm::ConnectionTrait>(db: &C) -> AppResult<bool> {
+    Ok(panel_setting::get(db, CONFIRMED_HASH)
+        .await?
+        .is_some_and(|h| !h.is_empty()))
+}
+
+/// The networks blocked in the rules the server runs (the last kept change).
+pub async fn blocked_on_server<C: sea_orm::ConnectionTrait>(db: &C) -> AppResult<Vec<String>> {
+    if !enabled(db).await? {
+        return Ok(vec![]);
+    }
+    Ok(last_kept(db)
+        .await?
+        .and_then(|k| serde_json::from_str::<Value>(&k.summary).ok())
+        .map(|s| {
+            s["blocked"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| c.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 fn opening_of(o: &firewall_opening::Model) -> Option<Opening> {
@@ -991,6 +1096,19 @@ pub async fn apply(
         )
         .into());
     }
+    let saved = policy(db).await?;
+    apply_locked(app, docker, by, install, saved).await
+}
+
+/// [`apply`] of `saved`, the lock held and no change open (the caller's).
+async fn apply_locked(
+    app: &AppState,
+    docker: &Docker,
+    by: &Initiator,
+    install: Install,
+    saved: Policy,
+) -> AppResult<Value> {
+    let db = app.db();
     let image = image(docker, install).await?;
     let found = discover(docker, &image).await?;
     let mut why = found.unsupported();
@@ -1003,7 +1121,6 @@ pub async fn apply(
     if !why.is_empty() {
         return Err(ValidationErrors::field("firewall", why.join("; ")).into());
     }
-    let saved = policy(db).await?;
     let host_facts = facts(&found);
     let ruleset = rules::render(&saved, &host_facts);
     // The files and units first (again: they follow the panel's version).
@@ -1121,6 +1238,22 @@ pub async fn keep(
     install: Install,
 ) -> AppResult<Value> {
     let _guard = LOCK.lock().await;
+    let kept = keep_locked(app, docker, by, txid, install).await?;
+    // Blocks saved while it waited: on the server now.
+    if let Err(err) = sync_blocks_locked(app, docker, &Initiator::system(), install).await {
+        tracing::warn!(%err, "the blocked addresses not applied after the keep");
+    }
+    Ok(kept)
+}
+
+/// [`keep`], the lock held (the caller's).
+async fn keep_locked(
+    app: &AppState,
+    docker: &Docker,
+    by: &Initiator,
+    txid: &str,
+    install: Install,
+) -> AppResult<Value> {
     let db = app.db();
     let row = firewall_transaction::Entity::find()
         .filter(firewall_transaction::Column::Txid.eq(txid))
@@ -1194,6 +1327,11 @@ pub async fn revert(
     }
     let (state, _, _) = host_tx_state(docker, &image, txid).await?;
     adopt(app, row, &state, "reverted by the user").await?;
+    // Blocks saved while it waited: on the server now (with the openings
+    // confirmed before it).
+    if let Err(err) = sync_blocks_locked(app, docker, &Initiator::system(), install).await {
+        tracing::warn!(%err, "the blocked addresses not applied after the revert");
+    }
     Ok(json!({ "state": state }))
 }
 
@@ -1287,6 +1425,13 @@ pub async fn check(app: &AppState, docker: &Docker, install: Install) -> AppResu
                 out.stderr.trim()
             )
         });
+    }
+    // Blocks saved but not on the server (a change waited, the panel
+    // stopped, an end passed): applied now.
+    match sync_blocks_locked(app, docker, &Initiator::system(), install).await {
+        Ok(BlocksApplied::Done) | Ok(BlocksApplied::Off) => {}
+        Ok(BlocksApplied::Waiting(why)) => notes.push(format!("blocked addresses waiting: {why}")),
+        Err(err) => notes.push(format!("blocked addresses not applied: {err}")),
     }
     Ok(Some(if notes.is_empty() {
         "as confirmed".to_owned()

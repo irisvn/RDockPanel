@@ -20,6 +20,14 @@ pub struct Initiator {
 }
 
 impl Initiator {
+    /// The panel itself (a schedule): audited as the system.
+    pub fn system() -> Self {
+        Self {
+            user_id: None,
+            audit: AuditContext::new(AuditActor::system(None), RequestMeta::default()),
+        }
+    }
+
     pub fn user(principal: &Principal, request: RequestMeta) -> Self {
         Self {
             user_id: principal.id.parse().ok(),
@@ -113,6 +121,47 @@ pub async fn start<C: ConnectionTrait>(
         ..Default::default()
     };
     Ok(row.insert(db).await?)
+}
+
+/// A running row of the panel's own work (no user asked: the boot's, a
+/// schedule's).
+pub async fn begin<C: ConnectionTrait>(
+    db: &C,
+    kind: &str,
+    target: &str,
+) -> AppResult<action::Model> {
+    let now = Utc::now();
+    let row = action::ActiveModel {
+        kind: Set(kind.to_owned()),
+        target: Set(target.chars().take(255).collect()),
+        status: Set(action::RUNNING.to_owned()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    };
+    Ok(row.insert(db).await?)
+}
+
+/// Rows of `kinds` still running when the panel starts (it stopped while
+/// they ran): failed, interrupted.
+pub async fn interrupted<C: ConnectionTrait>(db: &C, kinds: &[&str]) -> AppResult<usize> {
+    use sea_orm::{ColumnTrait, QueryFilter};
+    let rows = action::Entity::find()
+        .filter(action::Column::Kind.is_in(kinds.iter().copied()))
+        .filter(action::Column::Status.eq(action::RUNNING))
+        .all(db)
+        .await?;
+    let n = rows.len();
+    for row in rows {
+        finish(
+            db,
+            row,
+            Some("interrupted: the panel stopped".to_owned()),
+            None,
+        )
+        .await?;
+    }
+    Ok(n)
 }
 
 /// A row of something done, not by a user (the panel's own): ok and finished.

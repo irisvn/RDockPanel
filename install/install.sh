@@ -480,7 +480,17 @@ RESOLVER=""
 # read them as the real ones. Cloudflare's edges (a proxied DNS record) are
 # trusted to name the visitor (`X-Forwarded-For`: rate limits count them);
 # anyone else's is dropped. The panel keeps the same list.
-CLOUDFLARE_IPS="173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32"
+CLOUDFLARE_IPS_BUILTIN="173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32"
+# Cloudflare's ranges as the panel last applied them (WAF → Cloudflare keeps
+# them up to date), when that file is sound; else the ones above.
+CLOUDFLARE_IPS="$CLOUDFLARE_IPS_BUILTIN"
+if [ -f "$ETC/traefik/dynamic/.cloudflare-ips" ]; then
+  ranges=$(grep -E '^[0-9a-fA-F:.]+/[0-9]{1,3}$' "$ETC/traefik/dynamic/.cloudflare-ips" | paste -sd, -)
+  if [ "$(printf '%s' "$ranges" | tr ',' '\n' | grep -c .)" -ge 13 ] \
+    && [ "$(wc -l < "$ETC/traefik/dynamic/.cloudflare-ips")" -eq "$(printf '%s' "$ranges" | tr ',' '\n' | grep -c .)" ]; then
+    CLOUDFLARE_IPS=$ranges
+  fi
+fi
 TRAEFIK_ARGS="--entrypoints.web.address=:80 --entrypoints.websecure.address=:443 \
 --entrypoints.tunnel.address=:8081 \
 --entrypoints.web.http.aliasHeadersStrategy=delete \

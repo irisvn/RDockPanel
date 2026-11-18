@@ -115,6 +115,16 @@ pub enum Event {
         down: bool,
         detail: Option<String>,
     },
+    /// Cloudflare added ranges: an administrator applies them (WAF →
+    /// Cloudflare). A Traefik event.
+    CloudflareRanges {
+        added: usize,
+    },
+    /// CrowdSec has newer rules than the WAF uses (WAF → Rules, checked
+    /// daily). A Traefik event.
+    WafRules {
+        newer: usize,
+    },
     /// A newer release of the panel is out (Settings → Version).
     Update {
         version: String,
@@ -142,7 +152,10 @@ impl Event {
             Self::Disk { .. } => "disk",
             Self::Certificate { .. } => "certificate",
             Self::Service { .. } | Self::Capacity { .. } => "service",
-            Self::Traefik { .. } | Self::Waf { .. } => "traefik",
+            Self::Traefik { .. }
+            | Self::Waf { .. }
+            | Self::CloudflareRanges { .. }
+            | Self::WafRules { .. } => "traefik",
             Self::Update { .. } => "update",
             Self::Prune { .. } => "prune",
             Self::Login { .. } => "login",
@@ -225,6 +238,12 @@ impl Event {
                 "the WAF is unavailable: requests go through unchecked".to_owned()
             }
             Self::Waf { down: false, .. } => "the WAF checks requests again".to_owned(),
+            Self::CloudflareRanges { added } => {
+                format!("Cloudflare added {added} address ranges")
+            }
+            Self::WafRules { newer } => {
+                format!("CrowdSec has newer WAF rules ({newer} collections)")
+            }
             Self::Update { version } => format!("RDockPanel {version} is out"),
             Self::Prune { kind, removed, .. } => format!("Docker {kind} pruned: {removed} removed"),
             Self::Login { user, ip } => format!("{user} signed in from a new address ({ip})"),
@@ -259,6 +278,13 @@ impl Event {
             ),
             Self::Traefik { .. } => String::new(),
             Self::Waf { detail, .. } => detail.clone().unwrap_or_default(),
+            Self::CloudflareRanges { .. } => {
+                "WAF → Cloudflare: apply them so their visitors are seen by their own address"
+                    .to_owned()
+            }
+            Self::WafRules { .. } => {
+                "WAF → Rules: update them, or keep the bundled ones".to_owned()
+            }
             Self::Update { .. } => {
                 "Settings → Version: what changed, and the command that updates the panel"
                     .to_owned()
@@ -282,7 +308,9 @@ impl Event {
             | Self::Capacity { .. }
             | Self::Certificate { .. }
             | Self::Update { .. }
-            | Self::Login { .. } => false,
+            | Self::Login { .. }
+            | Self::CloudflareRanges { .. }
+            | Self::WafRules { .. } => false,
         }
     }
 
@@ -335,6 +363,8 @@ impl Event {
             }
             Self::Traefik { down } => json!({"down": down}),
             Self::Waf { down, detail } => json!({"down": down, "detail": detail}),
+            Self::CloudflareRanges { added } => json!({"added": added}),
+            Self::WafRules { newer } => json!({"newer": newer}),
             Self::Update { version } => json!({"version": version}),
             Self::Prune {
                 kind,

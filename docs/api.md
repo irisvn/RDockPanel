@@ -152,12 +152,49 @@ All `system.manage`; every change audited (`firewall.*`) and the host's changes 
 | POST | `/firewall/openings` | `{"ports":"5432" or "8000-8100","protocol":"tcp"/"udp","target":"published"/"host","anywhere":bool,"sources_v4":"10.8.0.0/24, …","sources_v6":"…","note":…}`: sources canonical, each in its family; SSH, 80 and 443 (TCP) refused (always open) |
 | PATCH | `/firewall/openings/{id}` | the same body, plus `enabled` |
 | DELETE | `/firewall/openings/{id}` | |
-| POST | `/firewall/blocked` | `{"cidr":"198.51.100.7" or "203.0.113.0/24","note":…}` |
-| DELETE | `/firewall/blocked/{id}` | |
+| POST | `/firewall/blocked` | `{"cidr":"198.51.100.7" or "203.0.113.0/24","note":…,"days":1/7/30 or null}`: the firewall's layer of `POST /blocks` (same rules, applied at once); the same network again changes its end and note |
+| DELETE | `/firewall/blocked/{id}` | unblocked on the server, at once |
 | POST | `/firewall/apply` | applies the saved policy: `{"txid","deadline"}`; refused while a change waits or when unsupported |
 | POST | `/firewall/keep` | `{"txid"}`: keeps it (before its deadline, the host's table still the one it loaded) |
 | POST | `/firewall/revert` | `{"txid"}`: back to the previous rules now |
 | POST | `/firewall/disable` | turns it off (the table, the host's units and files removed) |
+
+## WAF (`/apps`)
+
+All `system.manage`; changes audited (`waf.*`, `cloudflare.ranges`), starts and rules updates logged as
+actions. See [the WAF guide](site/src/server/waf.md).
+
+| Method | Path | |
+|---|---|---|
+| GET | `/waf` | `settings` (`mode`, `level`, `allowlist`, `sharing`, `blocklist`, `exceptions`, `rules`), `status` (`state`, `detail`, `step`, `started_at`, `action`, `checked_at`), `services_off` |
+| PUT | `/waf` | `{"mode","level","allowlist":[…],"sharing":bool,"blocklist":bool}`: `settings` and `status` (`starting`, its `action`: the start runs in the background); the exceptions and rules source are kept |
+| POST | `/waf/repair` | starts it again in the background: `status` (`starting`, its `action`) |
+| POST | `/waf/rotate-key` | a new key between Traefik and CrowdSec (an action) |
+| POST | `/waf/restart` | restarts CrowdSec |
+| GET | `/waf/actions/{id}` | one of the WAF's actions (`waf.*`, `cloudflare.*`) with its log; any other is 404 |
+| GET | `/waf/overview?hours=24` | totals, hourly `series`, `top_rules`, `top_ips`, `top_hosts` (24 or 168 hours) |
+| GET | `/waf/alerts?page&host&ip&rule&result&hours` | 25 a page: `alerts`, `total`; `result` `blocked`/`recorded` |
+| GET | `/waf/rules` | `source`, the last `check`, `outdated`, `bundled` versions, `exceptions` |
+| POST | `/waf/rules/check` | asks CrowdSec's hub |
+| POST | `/waf/rules/update` | `{"action"}`: updates to the latest (the bundle back if it fails) |
+| POST | `/waf/rules/bundled` | back to the bundled rules |
+| POST | `/waf/exceptions` | `{"rule":"942100" or "crowdsecurity/…","host":"shop.example.com"}` |
+| POST | `/waf/exceptions/remove` | the same body |
+| GET | `/waf/logs/{tail}` | CrowdSec's logs (server-sent events) |
+| GET | `/waf/cloudflare` | the ranges `applied` and the last `check` (`offered`, `added`, `removed`, `error`) |
+| POST | `/waf/cloudflare/check` | asks Cloudflare now |
+| POST | `/waf/cloudflare/apply` | applies the offered ranges (Traefik restarts) |
+
+## Blocked addresses (`/apps`)
+
+The WAF's and the firewall's together (`ip_block_service`). All `system.manage`; audited
+(`waf.block`, `waf.unblock`, `firewall.blocked.create`/`update`/`delete`/`expire`).
+
+| Method | Path | |
+|---|---|---|
+| GET | `/blocks` | `blocked` (each `ip` with `waf`: `until`, `reason`, and `firewall`: `id`, `until`, `reason`, `on_server`), `you` (the caller's address), `waf` (`on`, `active`, `community`, `connected`, …), `firewall` (`available`, `reason`, `enabled`) |
+| POST | `/blocks` | `{"ip","waf":bool,"firewall":bool,"days":1/7/30 or null,"reason"}`: a network for the firewall only; `days` null (until removed) for the firewall only; never Cloudflare's ranges, `/0` or the caller's own address. Answers `waf`: `"blocked"` (or `"saved"` while the blocklist is not on in Block mode) and `firewall`: `"applied"`, `"off"` or `{"waiting": why}` (applied once the waiting change is kept or reverted) |
+| POST | `/blocks/remove` | `{"ip","waf":bool,"firewall":bool}` |
 
 ## Project members (`/apps`)
 

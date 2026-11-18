@@ -41,6 +41,7 @@ pub fn provider() -> AdminProvider {
         .page::<crate::admin::pages::dashboard_page::DashboardPage>()
         .page::<crate::admin::pages::domains_page::DomainsPage>()
         .page::<crate::admin::pages::firewall_page::FirewallPage>()
+        .page::<crate::admin::pages::waf_page::WafPage>()
         .page::<crate::admin::pages::actions_page::ActionsPage>()
         .page::<crate::admin::pages::settings_page::SettingsPage>()
         .page::<crate::admin::pages::containers_page::ContainersPage>()

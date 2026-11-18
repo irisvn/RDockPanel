@@ -39,6 +39,8 @@ impl Job for RunDeployment {
     }
 
     async fn handle(self, ctx: JobCtx) -> anyhow::Result<()> {
+        // Cloudflare's ranges as last applied (its routes trust them).
+        crate::services::cloudflare_ranges_service::load(ctx.state.db()).await;
         deployment_service::run(&ctx.state, self.deployment_id, Timings::default()).await?;
         Ok(())
     }

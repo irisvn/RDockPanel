@@ -105,9 +105,9 @@ impl RateLimit {
 
 /// Cloudflare's ranges, parsed.
 pub fn cloudflare() -> Vec<Cidr> {
-    CLOUDFLARE
+    crate::services::cloudflare_ranges_service::ranges()
         .iter()
-        .map(|c| Cidr::parse(c).expect("Cloudflare's ranges parse"))
+        .filter_map(|c| Cidr::parse(c).ok())
         .collect()
 }
 
@@ -167,7 +167,7 @@ pub fn exempt(text: Option<&str>) -> Result<Vec<String>, String> {
 /// Traefik's arguments trusting Cloudflare's edges on the public
 /// entrypoints (the installer's too).
 pub fn traefik_args() -> Vec<String> {
-    let ranges = CLOUDFLARE.join(",");
+    let ranges = crate::services::cloudflare_ranges_service::ranges().join(",");
     ["web", "websecure"]
         .iter()
         .map(|e| format!("--entrypoints.{e}.forwardedHeaders.trustedIPs={ranges}"))
@@ -203,6 +203,14 @@ pub fn reconcile(app: &rustcms::AppState) {
             return;
         }
     });
+}
+
+/// [`trust`], now (Cloudflare's ranges changed): whether Traefik changed.
+pub async fn trust_now(
+    docker: &crate::services::docker_service::Docker,
+    traefik: &crate::services::traefik_service::Traefik,
+) -> crate::services::docker_service::DockerResult<bool> {
+    trust(docker, traefik).await
 }
 
 /// Traefik's public entrypoints trusting Cloudflare's edges, and nothing
@@ -296,7 +304,7 @@ mod tests {
     #[test]
     fn installer_trusts_cloudflare() {
         let installer = include_str!("../../install/install.sh");
-        let line = format!("CLOUDFLARE_IPS=\"{}\"", CLOUDFLARE.join(","));
+        let line = format!("CLOUDFLARE_IPS_BUILTIN=\"{}\"", CLOUDFLARE.join(","));
         assert!(installer.contains(&line), "install.sh's ranges differ");
         for entrypoint in ["web", "websecure"] {
             let arg =

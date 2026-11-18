@@ -1,6 +1,6 @@
 [package]
 name = "rdockpanel"
-version = "0.16.0"
+version = "0.17.0"
 edition = "2024"
 description = "Free, self-hosted server panel: server monitoring and Docker management (Swarm deployment in progress)."
 license = "MIT OR Apache-2.0"

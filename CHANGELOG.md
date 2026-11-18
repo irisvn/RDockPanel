@@ -3,6 +3,25 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.17.0 — 2026-11-18
+
+- **A WAF page** (in the menu, next to Firewall): state, statistics, alerts, rules, IP lists, Cloudflare
+  and settings, in one place. Settings → Panel → System lists the WAF too, with its logs.
+- Turning the WAF on shows each step and a timer, with its log, instead of a minute of "Repair".
+- Requests checked and blocked, hour by hour (24 hours or 7 days), and the top rules, addresses and
+  domains.
+- Alerts kept 30 days, filtered by domain, address, rule, result and period. From an alert: spare its
+  domain that rule (a false positive), block or trust its address.
+- **Rules update**: check CrowdSec's latest rules (also daily, with a notification when newer ones are
+  out) and update in one click; if CrowdSec cannot start with them, the bundled rules come back.
+- **Blocklist** (off by default, Block mode): block an address for a day, a week or thirty days, and
+  optionally the addresses CrowdSec's community reports (with sharing on).
+- Cloudflare's address ranges are checked daily: removed ones are applied at once, new ones are
+  offered to apply. Trusted addresses can no longer include Cloudflare's ranges.
+- **WAF and Firewall block addresses together**: one dialog blocks an address on the websites, on the
+  whole server, or both, and both pages show the same list. Firewall blocks apply at once, can end
+  after a day, a week or thirty days, and never include Cloudflare's ranges or your own address.
+
 ## 0.16.0 — 2026-11-18
 
 - The WAF's rules come with the panel: CrowdSec starts without the internet, every server of a release

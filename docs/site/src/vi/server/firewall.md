@@ -52,7 +52,12 @@ Bình thường, port mà một service publish sẽ đi vòng qua các quy tắ
 
 ## Chặn một địa chỉ
 
-**Chặn địa chỉ** (Block an address) khiến một địa chỉ hoặc một dải mạng (`198.51.100.7`, `2001:db8::/32`) không tới được gì ngoài SSH. Kể cả mọi website ở port 80 và 443, panel cũng vậy, vì server không phân biệt được domain này với domain khác. Người truy cập qua Cloudflare Tunnel không bị ảnh hưởng: server không thấy địa chỉ của họ.
+**Chặn địa chỉ** (Block an address) khiến một địa chỉ hoặc một dải mạng (`198.51.100.7`, `2001:db8::/32`) không tới được gì ngoài SSH. Kể cả mọi website ở port 80 và 443, panel cũng vậy, vì server không phân biệt được domain này với domain khác. Người truy cập qua proxy Cloudflare hoặc Tunnel không bị ảnh hưởng: server chỉ thấy Cloudflare. Hãy chặn họ trên website (WAF).
+
+- Cùng hộp thoại và cùng danh sách với trang WAF: chọn **Trên toàn máy chủ (Firewall)**, **Trên các website (WAF)** hoặc cả hai. Xem [Chặn một địa chỉ](/vi/server/waf#chan-mot-dia-chi-tren-website-hay-tren-may-chu).
+- Lệnh chặn được áp dụng **ngay**, không qua bước "thử rồi giữ" bên dưới: nó không thể khoá anh ở ngoài (địa chỉ bị chặn vẫn vào được SSH, và địa chỉ anh đang dùng bị từ chối). Các port đã lưu nhưng chưa áp dụng vẫn là bản nháp.
+- Trong một ngày, một tuần, ba mươi ngày, hoặc tới khi gỡ; lệnh chặn hết hạn được gỡ trong vòng năm phút rồi Firewall được áp dụng lại.
+- Dải IP của Cloudflare bị từ chối: chặn chúng sẽ cắt mọi khách đi qua Cloudflare.
 
 ## Áp dụng an toàn: thử trước, giữ sau
 

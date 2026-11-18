@@ -58,8 +58,9 @@ The resources use the panel's standard permissions, one set per resource
 - uploaded certificates (Settings → Certificates, Uploaded certificates: upload, replace, delete): `system.manage`
   only; choosing one on a domain too;
 - Traefik (Settings → Traefik: its state, restart, live logs, custom middlewares): `system.manage` only;
-- the WAF (Settings → Security: mode, level, trusted addresses, sharing, Repair, New key, alerts): `system.manage`
-  only. A service's own WAF setting is the service's (`services.update`), but setting it to **off** from
+- the WAF (the WAF page and its row in Settings → Panel → System: state, statistics, alerts, rules and their
+  update, exceptions, the blocklist and its bans, Cloudflare's ranges, mode, level, trusted addresses,
+  sharing, Repair, New key, Restart CrowdSec, CrowdSec's logs): `system.manage` only. A service's own WAF setting is the service's (`services.update`), but setting it to **off** from
   anything else needs `system.manage`: whoever edits a service may turn its WAF back on, not off;
 - the panel's domain, Let's Encrypt email and apps' domain (Settings → Panel: shown, checked, the
   installer command given): `system.manage` only;

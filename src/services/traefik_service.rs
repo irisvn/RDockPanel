@@ -457,6 +457,8 @@ pub async fn sync_all(
     traefik: &Traefik,
     options: &DeployOptions,
 ) -> AppResult<usize> {
+    // Cloudflare's ranges as last applied (a worker's may be older).
+    crate::services::cloudflare_ranges_service::load(db).await;
     // Nothing is published meanwhile (the list below stays the truth).
     let _writing = traefik.writing.lock().await;
     let options = &traefik.written(options);

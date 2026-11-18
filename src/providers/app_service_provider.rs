@@ -81,6 +81,46 @@ impl ServiceProvider for AppServiceProvider {
         app.job::<crate::jobs::import_step::ImportStep>();
         // Imports whose step lost its lease, and originals that run again.
         // The WAF's canary: is it still checking requests?
+        // Cloudflare's ranges: asked for daily (fewer applied at once, more
+        // offered to an administrator).
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "cloudflare-ranges",
+                std::time::Duration::from_secs(24 * 60 * 60),
+            )
+            .task(|ctx| async move {
+                let check = crate::services::cloudflare_ranges_service::check(&ctx.state).await?;
+                Ok(check
+                    .error
+                    .map(|e| format!("Cloudflare's ranges not checked: {e}")))
+            }),
+        );
+        // Blocked addresses whose end has passed: removed, and the
+        // firewall applied without them.
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "ip-blocks-expire",
+                std::time::Duration::from_secs(5 * 60),
+            )
+            .task(|ctx| async move {
+                Ok(crate::services::ip_block_service::expire(
+                    &ctx.state,
+                    crate::services::deploy_rules_service::Install::current(),
+                )
+                .await?)
+            }),
+        );
+        // CrowdSec's rules: newer ones looked for daily (never installed
+        // without an administrator).
+        app.schedule(
+            rustcms::schedule::Schedule::every(
+                "waf-rules-check",
+                std::time::Duration::from_secs(24 * 60 * 60),
+            )
+            .task(|ctx| async move {
+                Ok(crate::services::waf_rules_service::scheduled_check(&ctx.state).await?)
+            }),
+        );
         app.schedule(
             rustcms::schedule::Schedule::every("waf-check", std::time::Duration::from_secs(60))
                 .task(|ctx| async move {
@@ -310,6 +350,9 @@ impl ServiceProvider for AppServiceProvider {
         if let Err(err) = crate::services::tunnel_service::load(state).await {
             tracing::warn!(%err, "the tunnel's setting not read");
         }
+        // Cloudflare's ranges in use, before anything trusts them (a queue
+        // worker writes routes too).
+        crate::services::cloudflare_ranges_service::load(state.db()).await;
         // The rest is the server's: a console command beside a running panel
         // (`schedule:list`, `migrate`) ends none of its terminals, deployments
         // or backups, and writes no route.
@@ -360,6 +403,14 @@ impl ServiceProvider for AppServiceProvider {
         crate::services::rate_limit_service::reconcile(state);
         // The WAF's definitions before the routes name them (no-ops first).
         crate::services::waf_docker_service::boot(state).await;
+        // A list of Cloudflare's stored but not spread (the panel stopped
+        // midway): spread now.
+        {
+            let state = state.clone();
+            tokio::spawn(async move {
+                crate::services::cloudflare_ranges_service::resume(&state).await;
+            });
+        }
         firewall_watch(state);
         // Traefik's routes, written again from the database.
         if let Some(traefik) = state.service::<crate::services::traefik_service::Traefik>() {

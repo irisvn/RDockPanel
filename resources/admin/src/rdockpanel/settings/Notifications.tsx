@@ -34,7 +34,7 @@ const EVENTS: Array<{ name: string; label: string; short: string; on: boolean }>
   { name: "backup", label: "Database backup and restore", short: "backups", on: true },
   { name: "disk", label: "Disk usage at or over", short: "disk", on: true },
   { name: "service", label: "A running service fails, and when it is back; deployed without enough memory", short: "services", on: true },
-  { name: "traefik", label: "Traefik or its WAF stops, and when it is back", short: "Traefik", on: true },
+  { name: "traefik", label: "Traefik or its WAF stops and is back; new Cloudflare ranges or WAF rules", short: "Traefik", on: true },
   { name: "certificate", label: "An uploaded certificate expires soon", short: "certificates", on: true },
   { name: "update", label: "A newer RDockPanel is out", short: "updates", on: true },
   { name: "prune", label: "Docker pruned", short: "prunes", on: false },

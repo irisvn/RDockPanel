@@ -10,4 +10,5 @@ pub mod networks_page;
 pub mod nodes_page;
 pub mod settings_page;
 pub mod volumes_page;
+pub mod waf_page;
 // rustcms:page-mods

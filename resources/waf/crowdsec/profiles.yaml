@@ -1,0 +1,7 @@
+# RDockPanel: CrowdSec's own scenarios record alerts but never ban an
+# address. The addresses blocked (when the blocklist is on) are only
+# CrowdSec's community list and those an administrator blocks.
+name: rdp_alerts_only
+filters:
+  - Alert.Remediation == true && Alert.GetScope() == "Ip"
+on_success: break

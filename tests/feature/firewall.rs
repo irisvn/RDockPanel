@@ -130,7 +130,7 @@ db_test!(
                 Some(&json!({"cidr": "0.0.0.0/0"})),
             )
             .await
-            .assert_validation_error("cidr");
+            .assert_validation_error("ip");
         admin
             .send(
                 Method::POST,
@@ -143,10 +143,18 @@ db_test!(
             .send(
                 Method::POST,
                 &url("/blocked"),
-                Some(&json!({"cidr": "198.51.100.7/32"})),
+                Some(&json!({"cidr": "198.51.100.7/32", "note": "again", "days": 7})),
             )
             .await
-            .assert_validation_error("cidr");
+            .assert_status(StatusCode::OK);
+        // The same network again: its note and end changed, still one row.
+        let rows = rdockpanel::models::firewall_blocked::Entity::find()
+            .all(state.db())
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].note.as_deref(), Some("again"));
+        assert!(rows[0].expires_at.is_some());
         // Each change recorded with it: changed again, made and removed.
         let id = opened.json()["id"].as_i64().unwrap();
         admin
@@ -434,5 +442,181 @@ db_test!(
         );
         let calls = calls.lock().unwrap();
         assert!(!calls.iter().any(|c| c.starts_with("host")), "{calls:?}");
+    }
+);
+
+db_test!(
+    a_blocked_address_is_on_the_server_at_once_without_the_drafts,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::services::ip_block_service::{self, Request};
+        let docker = FakeDocker::default();
+        installed(&docker);
+        let outputs = docker.host_outputs.clone();
+        let app = support::app_with_docker(db, docker).await;
+        let state = app.state();
+        let engine = state.service::<Docker>().unwrap();
+        state.service::<Traefik>().unwrap().set_tunnel(true);
+        let by = system();
+        // The administrator, from 203.0.113.50.
+        let admin = Initiator {
+            user_id: None,
+            audit: AuditContext::new(
+                rustcms::audit::AuditActor::system(None),
+                rustcms::audit::RequestMeta {
+                    ip: Some("203.0.113.50".to_owned()),
+                    ..Default::default()
+                },
+            ),
+        };
+        let kept = |state: &rustcms::prelude::AppState| {
+            let db = state.db().clone();
+            async move {
+                firewall_transaction::Entity::find()
+                    .order_by_desc(firewall_transaction::Column::Id)
+                    .one(&db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+            }
+        };
+        let host_keeps = |outputs: &std::sync::Arc<
+            std::sync::Mutex<std::collections::VecDeque<(i64, String)>>,
+        >| {
+            let mut q = outputs.lock().unwrap();
+            q.push_back((0, discovered("installed=yes\nconfirmed=yes\n")));
+            q.push_back((0, "installed\n".to_owned()));
+            q.push_back((0, applied()));
+            q.push_back((0, String::new()));
+            q.push_back((0, format!("installed=yes\nconfirmed=no\nlast=x applied\nboot_failed=none\n== table\n{TABLE}\n")));
+            q.push_back((0, String::new()));
+        };
+
+        // Turned on (applied and kept), no opening.
+        {
+            let mut q = outputs.lock().unwrap();
+            q.push_back((0, discovered("installed=no\n")));
+            q.push_back((0, "installed\n".to_owned()));
+            q.push_back((0, applied()));
+        }
+        let tx = firewall_service::apply(state, &engine, &by, Install::Linux)
+            .await
+            .unwrap();
+        let txid = tx["txid"].as_str().unwrap().to_owned();
+        {
+            let mut q = outputs.lock().unwrap();
+            q.push_back((0, format!("installed=yes\nconfirmed=no\nlast={txid} applied\nboot_failed=none\n== table\n{TABLE}\n")));
+            q.push_back((0, String::new()));
+        }
+        firewall_service::keep(state, &engine, &by, &txid, Install::Linux)
+            .await
+            .unwrap();
+        // An opening saved, not applied: a draft.
+        let root = support::user_with(&app, "root", &[]).await;
+        app.make_super_admin(&root).await;
+        app.acting_as(&root)
+            .await
+            .send(
+                Method::POST,
+                &app.admin_api("x/apps/firewall/openings"),
+                Some(&json!({"ports": "5432", "protocol": "tcp", "target": "host", "sources_v4": "10.8.0.0/24"})),
+            )
+            .await
+            .assert_status(StatusCode::OK);
+
+        // Blocked: on the server at once (applied and kept), the draft not.
+        host_keeps(&outputs);
+        let ask = |ip: &str| Request {
+            ip: ip.to_owned(),
+            waf: false,
+            firewall: true,
+            days: Some(7),
+            reason: "spam".to_owned(),
+        };
+        let out = ip_block_service::block(state, &admin, &ask("198.51.100.9"), Install::Linux)
+            .await
+            .unwrap();
+        assert_eq!(out["firewall"], "applied", "{out}");
+        let row = kept(state).await;
+        assert_eq!(row.state, "kept");
+        let summary: serde_json::Value = serde_json::from_str(&row.summary).unwrap();
+        assert_eq!(summary["blocked"], json!(["198.51.100.9/32"]));
+        assert_eq!(summary["openings"], json!([]), "the draft stays a draft");
+        let page = ip_block_service::list(state, Some("203.0.113.50"), Install::Linux)
+            .await
+            .unwrap();
+        assert_eq!(page["blocked"][0]["ip"], "198.51.100.9");
+        assert_eq!(page["blocked"][0]["firewall"]["on_server"], true);
+        assert_eq!(page["you"], "203.0.113.50");
+
+        // Never the administrator's own address, nor Cloudflare's.
+        for ip in ["203.0.113.50", "203.0.113.0/24", "104.16.0.1"] {
+            let refused = ip_block_service::block(state, &admin, &ask(ip), Install::Linux)
+                .await
+                .unwrap_err();
+            assert!(format!("{refused:?}").contains("ip"), "{ip}: {refused:?}");
+        }
+
+        // Its end passed: removed and the server without it.
+        let rows = rdockpanel::models::firewall_blocked::Entity::find()
+            .all(state.db())
+            .await
+            .unwrap();
+        let mut ended: rdockpanel::models::firewall_blocked::ActiveModel = rows[0].clone().into();
+        ended.expires_at = sea_orm::Set(Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
+        sea_orm::ActiveModelTrait::update(ended, state.db())
+            .await
+            .unwrap();
+        host_keeps(&outputs);
+        let line = ip_block_service::expire(state, Install::Linux)
+            .await
+            .unwrap();
+        assert!(line.unwrap().contains("1 blocked"));
+        let summary: serde_json::Value = serde_json::from_str(&kept(state).await.summary).unwrap();
+        assert_eq!(summary["blocked"], json!([]));
+        assert!(
+            rdockpanel::models::firewall_blocked::Entity::find()
+                .all(state.db())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        // A change waiting to be kept (the draft applied by hand): a block
+        // meanwhile waits, then reaches the server once the change is kept.
+        {
+            let mut q = outputs.lock().unwrap();
+            q.push_back((0, discovered("installed=yes\nconfirmed=yes\n")));
+            q.push_back((0, "installed\n".to_owned()));
+            q.push_back((0, applied()));
+        }
+        let tx = firewall_service::apply(state, &engine, &by, Install::Linux)
+            .await
+            .unwrap();
+        let txid = tx["txid"].as_str().unwrap().to_owned();
+        outputs
+            .lock()
+            .unwrap()
+            .push_back((0, "state=applied\nboot=b\nnow=b\ntimer=active\n".to_owned()));
+        let out = ip_block_service::block(state, &admin, &ask("198.51.100.10"), Install::Linux)
+            .await
+            .unwrap();
+        assert!(out["firewall"]["waiting"].is_string(), "{out}");
+        {
+            let mut q = outputs.lock().unwrap();
+            q.push_back((0, format!("installed=yes\nconfirmed=no\nlast={txid} applied\nboot_failed=none\n== table\n{TABLE}\n")));
+            q.push_back((0, String::new()));
+        }
+        host_keeps(&outputs);
+        firewall_service::keep(state, &engine, &by, &txid, Install::Linux)
+            .await
+            .unwrap();
+        let summary: serde_json::Value = serde_json::from_str(&kept(state).await.summary).unwrap();
+        assert_eq!(summary["blocked"], json!(["198.51.100.10/32"]), "{summary}");
+        assert_eq!(
+            summary["openings"].as_array().unwrap().len(),
+            1,
+            "the kept change's opening"
+        );
     }
 );

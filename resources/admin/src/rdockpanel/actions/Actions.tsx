@@ -20,14 +20,17 @@ type Item = {
   finished_at: string | null;
 };
 
-function DockerLog(props: PageProps<unknown> & { id: number; onClose: () => void }) {
+/** An action's log. `url`: where it is read (the WAF page reads its own
+ * actions without `docker.view`). */
+export function DockerLog(props: PageProps<unknown> & { id: number; onClose: () => void; url?: string }) {
   const t = props.t;
-  const action = useAdminQuery<{ action: { log: string | null; error: string | null; status: string } }>(props, `/docker/actions/${props.id}`, {
+  const action = useAdminQuery<{ action: { log: string | null; error: string | null; status: string } }>(props, props.url ?? `/docker/actions/${props.id}`, {
     refetchInterval: (q) => (q.state.data && ["queued", "running"].includes(q.state.data.action.status) ? 1500 : false),
   });
   return (
     <Dialog open onClose={props.onClose} title={`${t("Action")} #${props.id}`} className="rdp2-wide">
       {action.isLoading && <Loading />}
+      {action.error && <ErrorState error={action.error} />}
       {action.data?.action.error && <Alert variant="destructive">{action.data.action.error}</Alert>}
       {action.data && <pre className="rdp2-log">{action.data.action.log || ""}</pre>}
     </Dialog>

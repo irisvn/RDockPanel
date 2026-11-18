@@ -12,7 +12,6 @@ import { Notifications } from "./Notifications";
 import { Certificates } from "./Certificates";
 import { UploadedCertificates } from "./Uploaded";
 import { Traefik } from "./Traefik";
-import { Waf } from "./Waf";
 import { Panel } from "./Panel";
 import { Version } from "./Version";
 import { Git } from "./Git";
@@ -298,7 +297,13 @@ export function Settings(props: PageProps<unknown>) {
         {tab === "panel" && <Panel {...props} />}
         {tab === "version" && <Version {...props} />}
         {tab === "traefik" && <Traefik {...props} />}
-        {tab === "security" && <Waf {...props} />}
+        {tab === "security" && (
+          <Section title={t("Web application firewall")} description={t("The WAF has a page of its own: its state, statistics, alerts, rules, IP lists and settings.")}>
+            <div>
+              <Button onClick={() => props.navigate("/p/waf")}>{t("Open the WAF page")}</Button>
+            </div>
+          </Section>
+        )}
         {tab === "certificates" && (
           <>
             <Certificates {...props} />

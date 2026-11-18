@@ -75,7 +75,10 @@ panel is reached over HTTPS only.
     under 2 GB of memory it runs small (no `performance_schema`, no binary log, smaller buffers
     and caches: the panel's database is some 50 tables), and it gets 120 seconds to shut down;
   - `rdp-traefik`: Traefik v3.7 on ports 80 and 443, and an entrypoint `tunnel` (`:8081`, never
-    published) that Cloudflare Tunnel's routes use while the tunnel is on;
+    published) that Cloudflare Tunnel's routes use while the tunnel is on. It believes
+    `X-Forwarded-For` only from Cloudflare's ranges: the list the panel last applied
+    (`.cloudflare-ips` in Traefik's dynamic folder, WAF → Cloudflare) when it holds only CIDRs and at
+    least 13 of them, else the list built into the installer;
   - `rdockpanel`: the panel (port 3000 without a domain), with the Docker socket, the host's `/proc` (server
     metrics), the routes directory, `/var/lib/rdockpanel/backups` (the same path inside: what a
     "Local directory" storage provider under it writes lands on the host) and

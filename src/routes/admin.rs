@@ -7,14 +7,14 @@ use rustcms::prelude::*;
 
 use crate::http::controllers::{
     actions_controller as actions, apps_controller as apps, backups_controller as backups,
-    branding_controller as branding, capacity_controller as capacity, deploy_controller as deploy,
-    docker_controller as docker, domains_controller as domains, firewall_controller as firewall,
-    git_controller as git, home_controller as home, imports_controller as imports,
-    maintenance_controller as maintenance, members_controller as members,
-    nodes_controller as nodes, notifications_controller as notifications,
-    server_controller as server, system_controller as system, templates_controller as templates,
-    tokens_controller as tokens, traefik_controller as traefik, tunnel_controller as tunnel,
-    waf_controller as waf,
+    blocks_controller as blocks, branding_controller as branding, capacity_controller as capacity,
+    deploy_controller as deploy, docker_controller as docker, domains_controller as domains,
+    firewall_controller as firewall, git_controller as git, home_controller as home,
+    imports_controller as imports, maintenance_controller as maintenance,
+    members_controller as members, nodes_controller as nodes,
+    notifications_controller as notifications, server_controller as server,
+    system_controller as system, templates_controller as templates, tokens_controller as tokens,
+    traefik_controller as traefik, tunnel_controller as tunnel, waf_controller as waf,
 };
 use crate::policies::permissions;
 
@@ -384,7 +384,7 @@ pub fn routes() -> AdminRoutes {
                     AdminAccess::can(permissions::SYSTEM_MANAGE),
                     system::dismiss_version,
                 )
-                // Settings → Security (the WAF): the panel's administrators.
+                // The WAF page: the panel's administrators.
                 .get(
                     "/waf",
                     AdminAccess::can(permissions::SYSTEM_MANAGE),
@@ -409,6 +409,87 @@ pub fn routes() -> AdminRoutes {
                     "/waf/alerts",
                     AdminAccess::can(permissions::SYSTEM_MANAGE),
                     waf::alerts,
+                )
+                .get(
+                    "/waf/overview",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::overview,
+                )
+                .get(
+                    "/waf/rules",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::rules,
+                )
+                .post(
+                    "/waf/rules/check",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::rules_check,
+                )
+                .post(
+                    "/waf/rules/update",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::rules_update,
+                )
+                .post(
+                    "/waf/rules/bundled",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::rules_bundled,
+                )
+                .post(
+                    "/waf/exceptions",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::exception_add,
+                )
+                .post(
+                    "/waf/exceptions/remove",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::exception_remove,
+                )
+                // Blocked addresses, the WAF's and the firewall's together.
+                .get(
+                    "/blocks",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    blocks::index,
+                )
+                .post(
+                    "/blocks",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    blocks::store,
+                )
+                .post(
+                    "/blocks/remove",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    blocks::remove,
+                )
+                .events(
+                    "/waf/logs/{tail}",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::logs,
+                )
+                .get(
+                    "/waf/actions/{id}",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::action,
+                )
+                .post(
+                    "/waf/restart",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::restart,
+                )
+                .get(
+                    "/waf/cloudflare",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::cloudflare,
+                )
+                .post(
+                    "/waf/cloudflare/check",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::cloudflare_check,
+                )
+                .post(
+                    "/waf/cloudflare/apply",
+                    AdminAccess::can(permissions::SYSTEM_MANAGE),
+                    waf::cloudflare_apply,
                 )
                 .post(
                     "/system/version/update",

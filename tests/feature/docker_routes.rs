@@ -127,6 +127,59 @@ db_test!(
                 Case::new(Method::POST, "/apps/waf/rotate-key")
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/waf/rules")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
+                Case::new(Method::POST, "/apps/waf/rules/check")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/waf/rules/update")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/waf/rules/bundled")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/waf/exceptions")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/waf/exceptions/remove")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/blocks")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
+                Case::new(Method::POST, "/apps/blocks")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/blocks/remove")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/waf/logs/10")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/waf/actions/999999")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::NOT_FOUND),
+                Case::new(Method::POST, "/apps/waf/restart")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/waf/cloudflare")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
+                Case::new(Method::POST, "/apps/waf/cloudflare/check")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::POST, "/apps/waf/cloudflare/apply")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN),
+                Case::new(Method::GET, "/apps/waf/overview")
+                    .expect("viewer", &viewer, StatusCode::FORBIDDEN)
+                    .expect("operator", &operator, StatusCode::FORBIDDEN)
+                    .expect("manager", &manager, StatusCode::OK),
                 Case::new(Method::GET, "/apps/waf/alerts")
                     .expect("viewer", &viewer, StatusCode::FORBIDDEN)
                     .expect("operator", &operator, StatusCode::FORBIDDEN)

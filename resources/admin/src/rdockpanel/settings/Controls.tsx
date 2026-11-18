@@ -8,6 +8,7 @@ import { useAdminQuery } from "../lib/query";
 import { Alert, Button, CodeBlock, Dialog, DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, Input } from "@rustcms/admin-sdk/ui";
 import { bytes, ErrorNote, Facts, RowActions, Section, Status, TableScroll, useAsk } from "../lib/ui";
 import { Logs } from "./Traefik";
+import { StateBadge, type WafData } from "../waf/common";
 
 type Status = {
   version: string;
@@ -87,7 +88,9 @@ export function Controls(props: PageProps<unknown>) {
         ? "running"
         : "failed";
   const dockerState = status.error || proxy.error ? "unknown" : status.data ? "running" : "starting";
-  const [logs, setLogs] = useState<"panel" | "traefik" | null>(null);
+  // The WAF (CrowdSec): its state and settings (WAF page).
+  const waf = useAdminQuery<WafData>(props, "/apps/waf", { refetchInterval: 10000 });
+  const [logs, setLogs] = useState<"panel" | "traefik" | "waf" | null>(null);
   const [rebooting, setRebooting] = useState(false);
   const [waiting, setWaiting] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -114,6 +117,20 @@ export function Controls(props: PageProps<unknown>) {
     if (await call(() => props.api.post("/apps/system/restart", {}))) {
       setWaiting(t("The panel restarts…"));
       void reloadWhenBack(window.location.href).then((back) => back || setWaiting(late));
+    }
+  };
+  const repairWaf = async () => {
+    if (await call(() => props.api.post("/apps/waf/repair", {}))) {
+      props.toast.success(t("Repair started: the WAF page shows its progress"));
+      waf.refetch();
+    }
+  };
+  const restartCrowdsec = async () => {
+    const ok = await ask({ title: t("Restart CrowdSec?"), body: t("Requests go through unchecked for about half a minute while it loads its rules."), action: t("Restart CrowdSec") });
+    if (!ok) return;
+    if (await call(() => props.api.post("/apps/waf/restart", {}))) {
+      props.toast.success(t("CrowdSec restarts."));
+      waf.refetch();
     }
   };
   const restartTraefik = async () => {
@@ -214,6 +231,41 @@ export function Controls(props: PageProps<unknown>) {
             </tr>
             <tr>
               <td>
+                <div className="rdp2-strong-cell">{t("WAF (CrowdSec)")}</div>
+                <div className="rdp2-muted rdp2-small">
+                  {waf.data
+                    ? waf.data.settings.mode === "off"
+                      ? t("Off: no request is checked")
+                      : `${waf.data.settings.mode === "block" ? t("Block") : t("Detect only")} · ${waf.data.settings.level === "strict" ? t("Strict") : t("Basic")}`
+                    : "–"}
+                </div>
+              </td>
+              <td>{waf.data ? <StateBadge status={waf.data.status} t={t} /> : <Status kind="health" status={waf.error ? "unknown" : "starting"} t={t} />}</td>
+              <td>
+                <RowActions
+                  label={more(t("WAF (CrowdSec)"))}
+                  menu={
+                    waf.data && waf.data.settings.mode !== "off"
+                      ? [
+                          { label: t("Repair"), onSelect: () => void repairWaf() },
+                          { label: t("Restart CrowdSec…"), onSelect: () => void restartCrowdsec() },
+                        ]
+                      : []
+                  }
+                >
+                  {waf.data && waf.data.settings.mode !== "off" && (
+                    <Button size="sm" variant="ghost" onClick={() => setLogs("waf")}>
+                      {t("Logs")}
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => props.navigate("/p/waf")}>
+                    {t("Open")}
+                  </Button>
+                </RowActions>
+              </td>
+            </tr>
+            <tr>
+              <td>
                 <div className="rdp2-strong-cell">Docker</div>
                 <div className="rdp2-muted rdp2-small">{t("Clean up what nothing uses (never the panel's)")}</div>
               </td>
@@ -231,9 +283,9 @@ export function Controls(props: PageProps<unknown>) {
         </table>
       </TableScroll>
       {logs && (
-        <Dialog open onClose={() => setLogs(null)} title={logs === "panel" ? t("RDockPanel logs") : t("Traefik logs")} className="rdp2-wide">
+        <Dialog open onClose={() => setLogs(null)} title={logs === "panel" ? t("RDockPanel logs") : logs === "waf" ? t("CrowdSec logs") : t("Traefik logs")} className="rdp2-wide">
           {logs === "panel" && !s?.service && <p className="rdp2-small rdp2-muted">{t("From source: the last lines this process wrote.")}</p>}
-          <Logs {...props} url={logs === "panel" ? "/apps/system/logs/300" : "/apps/traefik/logs/200"} />
+          <Logs {...props} url={logs === "panel" ? "/apps/system/logs/300" : logs === "waf" ? "/apps/waf/logs/200" : "/apps/traefik/logs/200"} />
         </Dialog>
       )}
       {rebooting && s && <RebootDialog {...props} hostname={s.hostname} onClose={() => setRebooting(false)} onDone={() => {

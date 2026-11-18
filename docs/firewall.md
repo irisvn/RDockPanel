@@ -10,7 +10,7 @@ touches the host: on a Mac the host Docker shows is its Linux VM; see [install](
   - the web: TCP 80 and 443 (Traefik: the panel and every domain);
   - the **openings**: a port or range, TCP or UDP, for its sources only. Its IPv4 and IPv6 sources are listed apart, and an empty family lets none of it in. "Anywhere" is an explicit choice, shown in red.
 - **Openings target** either *this server* (a program outside Docker) or *a port a service publishes*. A published port is opened on both paths Docker uses: its DNAT, matched on the port the client asked for, and its proxy.
-- **Blocked addresses** reach nothing but SSH. That includes every site on 80/443, since the server cannot tell the panel's domain from an app's. Visitors through the Cloudflare tunnel are not affected: the server does not see their address.
+- **Blocked addresses** reach nothing but SSH. That includes every site on 80/443, since the server cannot tell the panel's domain from an app's. Visitors through Cloudflare's proxy or the tunnel are not affected: the server does not see their address (the WAF's blocklist does). The list is shared with the WAF page (`ip_block_service`, `/apps/blocks`); a block is applied at once without the keep step (`apply_blocks`: the confirmed openings plus the saved blocked list), may end after 1, 7 or 30 days, and is never Cloudflare's ranges, `/0` or the caller's own address.
 - **Existing connections** continue until they close; the rules apply to new ones.
 - **Off by default.** It is turned on by the first **Apply**. **Turn off** removes it entirely.
 
