@@ -383,6 +383,27 @@ pub async fn blocklist(docker: &Docker, settings: &Settings) -> AppResult<Value>
                 })
         })
         .collect();
+    let (community, connected) = community(docker, settings.sharing).await?;
+    Ok(json!({
+        "running": true,
+        "blocked": blocked,
+        "community": community,
+        "connected": connected,
+    }))
+}
+
+/// The community's addresses CrowdSec holds and whether it reaches
+/// CrowdSec's API: asked at most every five minutes (`capi status` goes over
+/// the internet; the page reads them each time it opens).
+async fn community(docker: &Docker, sharing: bool) -> AppResult<(u64, bool)> {
+    static LAST: std::sync::Mutex<Option<(std::time::Instant, bool, u64, bool)>> =
+        std::sync::Mutex::new(None);
+    if let Some((at, asked, count, connected)) = *LAST.lock().expect("not poisoned")
+        && asked == sharing
+        && at.elapsed() < std::time::Duration::from_secs(300)
+    {
+        return Ok((count, connected));
+    }
     let metrics: Value = cscli(docker, &["metrics", "show", "decisions", "-o", "json"])
         .await?
         .and_then(|t| serde_json::from_str(t.trim()).ok())
@@ -396,17 +417,14 @@ pub async fn blocklist(docker: &Docker, settings: &Settings) -> AppResult<Value>
         .flat_map(|(_, by_type)| by_type.as_object().into_iter().flatten())
         .filter_map(|(_, n)| n.as_u64())
         .sum();
-    let connected = settings.sharing
+    let connected = sharing
         && cscli(docker, &["capi", "status"])
             .await
             .map(|o| o.is_some())
             .unwrap_or(false);
-    Ok(json!({
-        "running": true,
-        "blocked": blocked,
-        "community": community,
-        "connected": connected,
-    }))
+    *LAST.lock().expect("not poisoned") =
+        Some((std::time::Instant::now(), sharing, community, connected));
+    Ok((community, connected))
 }
 
 #[cfg(test)]

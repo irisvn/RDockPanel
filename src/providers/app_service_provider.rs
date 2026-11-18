@@ -404,11 +404,32 @@ impl ServiceProvider for AppServiceProvider {
         // The WAF's definitions before the routes name them (no-ops first).
         crate::services::waf_docker_service::boot(state).await;
         // A list of Cloudflare's stored but not spread (the panel stopped
-        // midway): spread now.
+        // midway): spread now. Then the daily checks (Cloudflare's ranges,
+        // CrowdSec's rules) when the last one is older than a day: the
+        // schedules' first run is a day after a start.
         {
             let state = state.clone();
             tokio::spawn(async move {
                 crate::services::cloudflare_ranges_service::resume(&state).await;
+                tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+                let stale = |at: Option<chrono::DateTime<chrono::Utc>>| {
+                    at.is_none_or(|at| chrono::Utc::now() - at > chrono::Duration::hours(24))
+                };
+                if let Ok(last) =
+                    crate::services::cloudflare_ranges_service::last_check(state.db()).await
+                    && stale(last.checked_at)
+                    && let Err(err) =
+                        crate::services::cloudflare_ranges_service::check(&state).await
+                {
+                    tracing::warn!(%err, "Cloudflare's ranges not checked");
+                }
+                if let Ok(last) = crate::services::waf_rules_service::last_check(state.db()).await
+                    && stale(last.checked_at)
+                    && let Err(err) =
+                        crate::services::waf_rules_service::scheduled_check(&state).await
+                {
+                    tracing::warn!(%err, "the WAF's rules not checked");
+                }
             });
         }
         firewall_watch(state);

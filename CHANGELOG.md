@@ -3,6 +3,14 @@
 Images: `ghcr.io/irisvn/rdockpanel:X.Y.Z` (also `X.Y` and `latest`); every push to `main` is
 `main` and `main-<commit>`. Install or upgrade a release with `install.sh --version X.Y.Z`.
 
+## 0.17.1 — 2026-11-18
+
+- WAF alerts in Detect mode name the rule that caught the request (`OWASP CRS: sql_injection (942100)`),
+  not the rule every request matches; the Rule filter finds part of a name.
+- The blocked addresses open faster (the community's numbers are read every five minutes).
+- Cloudflare's ranges and CrowdSec's rules are checked shortly after the panel starts when the last
+  check is older than a day.
+
 ## 0.17.0 — 2026-11-18
 
 - **A WAF page** (in the menu, next to Firewall): state, statistics, alerts, rules, IP lists, Cloudflare

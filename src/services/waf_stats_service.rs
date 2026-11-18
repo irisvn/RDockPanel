@@ -211,6 +211,21 @@ pub async fn mirror(db: &sea_orm::DatabaseConnection, alerts: &[Value]) -> AppRe
     if let Some(at) = newest {
         panel_setting::set(&txn, CHECKPOINT_KEY, &at.to_rfc3339()).await?;
     }
+    // Rows copied before Detect rules were named (`native_rule:901340`):
+    // named now, so that filters find them by the name shown.
+    let old = waf_alert::Entity::find()
+        .filter(waf_alert::Column::Rule.starts_with("native_rule:"))
+        .limit(500)
+        .all(&txn)
+        .await?;
+    for row in old {
+        let rule = cut(&shown_rule(&row), 191);
+        if rule != row.rule {
+            let mut active: waf_alert::ActiveModel = row.into();
+            active.rule = Set(rule);
+            sea_orm::ActiveModelTrait::update(active, &txn).await?;
+        }
+    }
     txn.commit().await?;
     Ok(added)
 }
@@ -245,8 +260,9 @@ pub fn row_of(alert: &Value) -> Option<waf_alert::ActiveModel> {
     }
     let scenario = alert["scenario"].as_str().unwrap_or_default();
     let detect = scenario == "rdp/appsec-detect";
+    let rule_ids = meta("rule_ids").or_else(|| native_ids(&metas("rule_name")));
     let rule = if detect {
-        meta("rule_name").unwrap_or_else(|| scenario.to_owned())
+        detect_rule(&metas("rule_name"), rule_ids.as_deref()).unwrap_or_else(|| scenario.to_owned())
     } else {
         rule_name(scenario)
     };
@@ -273,9 +289,7 @@ pub fn row_of(alert: &Value) -> Option<waf_alert::ActiveModel> {
         host: Set(host.map(|h| cut(&h, 255))),
         path: Set(meta("uri").or_else(|| meta("target_uri")).map(|p| mask(&p))),
         rule: Set(cut(&rule, 191)),
-        rule_ids: Set(meta("rule_ids")
-            .or_else(|| native_ids(&metas("rule_name")))
-            .map(|r| cut(&r, 255))),
+        rule_ids: Set(rule_ids.map(|r| cut(&r, 255))),
         blocked: Set(!detect),
         ..Default::default()
     })
@@ -293,6 +307,64 @@ fn native_ids(names: &[String]) -> Option<String> {
     let mut seen = std::collections::HashSet::new();
     ids.retain(|id| seen.insert(*id));
     (!ids.is_empty()).then(|| format!("[{}]", ids.join(" ")))
+}
+
+/// A Detect alert's rule as people read it: the hub rule that matched
+/// (`crowdsecurity/vpatch-env-access`), else the Core Rule Set's rule that
+/// caught the request, with what it is about (`OWASP CRS: sql_injection
+/// (942100)`); never its set-up or scoring rules (901…, 949…, 959…, 980…),
+/// which every request matches.
+pub fn detect_rule(names: &[String], ids: Option<&str>) -> Option<String> {
+    if let Some(named) = names
+        .iter()
+        .find(|n| n.starts_with("crowdsecurity/") && *n != "crowdsecurity/appsec-vpatch")
+    {
+        return Some(named.clone());
+    }
+    let caught = ids
+        .into_iter()
+        .flat_map(|text| text.split(|c: char| !c.is_ascii_digit()))
+        .chain(names.iter().filter_map(|n| n.strip_prefix("native_rule:")))
+        .find(|id| {
+            id.len() == 6
+                && !["901", "949", "959", "980"]
+                    .iter()
+                    .any(|p| id.starts_with(p))
+        });
+    if let Some(id) = caught {
+        return Some(format!("OWASP CRS: {} ({id})", crs_kind(id)));
+    }
+    names.first().cloned()
+}
+
+/// What a Core Rule Set rule is about, from its id's family.
+fn crs_kind(id: &str) -> &'static str {
+    match &id[..3] {
+        "911" => "method",
+        "913" => "scanner",
+        "920" | "921" | "922" => "protocol",
+        "930" => "lfi",
+        "931" => "rfi",
+        "932" => "rce",
+        "933" => "php",
+        "934" => "generic",
+        "941" => "xss",
+        "942" => "sql_injection",
+        "943" => "session_fixation",
+        "944" => "java",
+        _ => "rule",
+    }
+}
+
+/// An alert's rule as shown: rows copied before the panel named Detect
+/// rules (`native_rule:901340`) named again from their rule ids.
+pub fn shown_rule(row: &waf_alert::Model) -> String {
+    if row.rule.starts_with("native_rule:") {
+        detect_rule(std::slice::from_ref(&row.rule), row.rule_ids.as_deref())
+            .unwrap_or_else(|| row.rule.clone())
+    } else {
+        row.rule.clone()
+    }
 }
 
 /// A Block alert's rule as people read it: the Core Rule Set's anomaly
@@ -318,8 +390,6 @@ fn cut(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
-/// A request's path with its query's secrets masked (`token`, `password`,
-/// `key`, `secret`, `code`, `auth`, `session`, `sig`), 512 characters at most.
 /// A query's name as the app reads it (`%74oken` is `token`, decoded
 /// again while it changes: `%2574oken` too), lowercase.
 fn plain(name: &str) -> String {
@@ -336,6 +406,8 @@ fn plain(name: &str) -> String {
     name.to_lowercase()
 }
 
+/// A request's path with its query's secrets masked (`token`, `password`,
+/// `key`, `secret`, `code`, `auth`, `session`, `sig`), 512 characters at most.
 pub fn mask(path: &str) -> String {
     const SECRET: [&str; 9] = [
         "token", "password", "passwd", "key", "secret", "code", "auth", "session", "sig",
@@ -412,7 +484,7 @@ pub async fn overview<C: ConnectionTrait>(db: &C, hours: i64) -> AppResult<Value
         "series": stats.iter().map(|s| json!({
             "hour": s.hour, "checked": s.checked, "blocked": s.blocked, "samples": s.samples,
         })).collect::<Vec<_>>(),
-        "top_rules": top(|a| Some(a.rule.clone())),
+        "top_rules": top(|a| Some(shown_rule(a))),
         "top_ips": top(|a| Some(a.ip.clone())),
         "top_hosts": top(|a| a.host.clone()),
     }))
@@ -443,7 +515,12 @@ pub async fn alerts<C: ConnectionTrait>(db: &C, query: &AlertQuery) -> AppResult
         select = select.filter(waf_alert::Column::Ip.eq(ip));
     }
     if let Some(rule) = query.rule.as_deref().filter(|h| !h.is_empty()) {
-        select = select.filter(waf_alert::Column::Rule.eq(rule));
+        // A rule's name or one of its ids (942100).
+        select = select.filter(
+            sea_orm::Condition::any()
+                .add(waf_alert::Column::Rule.contains(rule))
+                .add(waf_alert::Column::RuleIds.contains(rule)),
+        );
     }
     match query.result.as_deref() {
         Some("blocked") => select = select.filter(waf_alert::Column::Blocked.eq(true)),
@@ -456,7 +533,17 @@ pub async fn alerts<C: ConnectionTrait>(db: &C, query: &AlertQuery) -> AppResult
         .paginate(db, 25);
     let total = pages.num_items().await?;
     let page = query.page.unwrap_or(1).max(1);
-    let rows = pages.fetch_page(page - 1).await?;
+    let rows: Vec<Value> = pages
+        .fetch_page(page - 1)
+        .await?
+        .into_iter()
+        .map(|row| {
+            let rule = shown_rule(&row);
+            let mut value = serde_json::to_value(&row).unwrap_or(Value::Null);
+            value["rule"] = json!(rule);
+            value
+        })
+        .collect();
     Ok(json!({ "alerts": rows, "total": total, "page": page, "per_page": 25 }))
 }
 
@@ -571,7 +658,10 @@ mod tests {
             })
         };
         let row = row_of(&alert("shop.example.com", "rdp/appsec-detect")).unwrap();
-        assert_eq!(row.rule, Set("native_rule:942100".to_owned()));
+        assert_eq!(
+            row.rule,
+            Set("OWASP CRS: sql_injection (942100)".to_owned())
+        );
         assert_eq!(row.path, Set(Some("/?id=1&password=***".to_owned())));
         assert_eq!(row.blocked, Set(false));
         assert_eq!(row.country, Set(Some("VN".to_owned())));
@@ -581,6 +671,50 @@ mod tests {
         ban["kind"] = json!("cscli");
         ban["events"] = json!(null);
         assert!(row_of(&ban).is_none());
+    }
+
+    #[test]
+    fn a_detect_alert_is_named_by_the_rule_that_caught_it() {
+        // As a real server recorded them: the first event names the set-up
+        // rule every request matches.
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            detect_rule(
+                &names(&["native_rule:901340"]),
+                Some("[901340 942100 949110 980170]")
+            ),
+            Some("OWASP CRS: sql_injection (942100)".to_owned())
+        );
+        assert_eq!(
+            detect_rule(
+                &names(&["native_rule:901340"]),
+                Some("[901340 930130 373950650 980170]")
+            ),
+            Some("OWASP CRS: lfi (930130)".to_owned())
+        );
+        // A hub rule's name wins.
+        assert_eq!(
+            detect_rule(
+                &names(&["native_rule:901340", "crowdsecurity/vpatch-env-access"]),
+                Some("[901340 930130 373950650]")
+            ),
+            Some("crowdsecurity/vpatch-env-access".to_owned())
+        );
+        // Rows copied before: named again when shown.
+        let old = waf_alert::Model {
+            id: 1,
+            uuid: "u".to_owned(),
+            at: Utc::now(),
+            ip: "116.108.17.218".to_owned(),
+            country: None,
+            asn: None,
+            host: None,
+            path: None,
+            rule: "native_rule:901340".to_owned(),
+            rule_ids: Some("[901340 942100 949110 980170]".to_owned()),
+            blocked: false,
+        };
+        assert_eq!(shown_rule(&old), "OWASP CRS: sql_injection (942100)");
     }
 
     #[test]

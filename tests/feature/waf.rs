@@ -82,3 +82,46 @@ db_test!(
         );
     }
 );
+
+db_test!(
+    alerts_copied_before_are_named_and_found_by_their_rule,
+    migrate = Migrator,
+    |db: TestDb| async move {
+        use rdockpanel::models::waf_alert;
+        use rdockpanel::services::waf_stats_service::{self, AlertQuery};
+        use sea_orm::{ActiveModelTrait, Set};
+        let app = support::app_with_docker(db, FakeDocker::default()).await;
+        let db = app.state().db();
+        // As 0.17.0 stored a Detect alert.
+        waf_alert::ActiveModel {
+            uuid: Set("old-1".to_owned()),
+            at: Set(chrono::Utc::now()),
+            ip: Set("116.108.17.218".to_owned()),
+            rule: Set("native_rule:901340".to_owned()),
+            rule_ids: Set(Some("[901340 942100 949110 980170]".to_owned())),
+            blocked: Set(false),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap();
+        // The minute's copy names it.
+        waf_stats_service::mirror(db, &[]).await.unwrap();
+        let find = |rule: &str| AlertQuery {
+            rule: Some(rule.to_owned()),
+            ..Default::default()
+        };
+        for rule in [
+            "sql_injection",
+            "942100",
+            "OWASP CRS: sql_injection (942100)",
+        ] {
+            let page = waf_stats_service::alerts(db, &find(rule)).await.unwrap();
+            assert_eq!(page["total"], 1, "{rule}: {page}");
+            assert_eq!(
+                page["alerts"][0]["rule"],
+                "OWASP CRS: sql_injection (942100)"
+            );
+        }
+    }
+);
